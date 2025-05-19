@@ -360,6 +360,23 @@ export class KanbanView extends TextFileView implements HoverParent {
       this.setTargetHighlightLocation(highlightForYellowBorder);
       this.pendingHighlightScroll = highlightForYellowBorder;
       state.targetHighlightLocation = highlightForYellowBorder; // For persistence
+
+      // Consume the eState properties related to border highlighting to prevent re-triggering
+      // if this state object is re-used by Obsidian for subsequent setState calls.
+      if (state.eState) {
+        console.log(
+          '[KanbanView] setState: Consuming eState properties (blockId, cardTitle, listName) after processing for border highlight.',
+          'Original eState was:',
+          state.eState
+        );
+        state.eState.blockId = undefined;
+        state.eState.cardTitle = undefined;
+        state.eState.listName = undefined;
+        console.log(
+          '[KanbanView] setState: eState after consumption of border highlight fields is now:',
+          state.eState
+        );
+      }
     } else {
       if (this.targetHighlightLocation) {
         this.setTargetHighlightLocation(null);
@@ -714,11 +731,30 @@ export class KanbanView extends TextFileView implements HoverParent {
       this.currentSearchMatch,
       'targetHighlightLocation (border):',
       this.targetHighlightLocation,
-      'pendingHighlightScroll:',
-      this.pendingHighlightScroll
-    ); // Enhanced Entry log
+      'pendingHighlightScroll (at entry):',
+      this.pendingHighlightScroll ? { ...this.pendingHighlightScroll } : null // Log value at entry
+    );
 
-    const oldReactTargetHighlight = this._reactState?.targetHighlight; // Store old value
+    let shouldProcessPendingScroll = false;
+    let capturedTargetForScroll: TargetHighlightLocation | null = null;
+
+    // Detect if this call is primarily to handle a pending scroll initiated by Kanban.useEffect
+    if (this.pendingHighlightScroll && newState && Object.keys(newState).length === 0) {
+      console.log(
+        '[KanbanView] setReactState: Call is likely for pending scroll. Capturing target and preparing to clear pendingHighlightScroll early.'
+      );
+      shouldProcessPendingScroll = true;
+      capturedTargetForScroll = this.targetHighlightLocation
+        ? { ...this.targetHighlightLocation }
+        : null;
+      // Clear the flag immediately to prevent useEffect loop. The captured value will be used for scroll logic.
+      this.pendingHighlightScroll = null;
+      console.log(
+        '[KanbanView] setReactState: this.pendingHighlightScroll immediately set to null.'
+      );
+    }
+
+    const oldReactTargetHighlight = this._reactState?.targetHighlight;
     let newReactTargetHighlightVal: any = null;
 
     if (newState && Object.prototype.hasOwnProperty.call(newState, 'targetHighlight')) {
@@ -761,7 +797,8 @@ export class KanbanView extends TextFileView implements HoverParent {
       newReactTargetHighlightVal === oldReactTargetHighlight &&
       newState &&
       Object.keys(newState).length === 0 &&
-      !this.pendingHighlightScroll // Allow re-render if a scroll is pending, even if highlight value is same (e.g. re-nav to same search)
+      !shouldProcessPendingScroll && // If we are processing a scroll, don't bail, even if highlight value is same initially
+      !this.pendingHighlightScroll // This check might now be redundant if cleared above, but keep for safety
     ) {
       console.log(
         '[KanbanView] setReactState: targetHighlight unchanged, no other new state, and no pending scroll. Bailing out.'
@@ -856,45 +893,70 @@ export class KanbanView extends TextFileView implements HoverParent {
       );
       console.log(this.getViewType(), 'setReactState: React component rendered/updated.');
 
-      if (this.pendingHighlightScroll && this.targetHighlightLocation) {
-        const intendedLocation = { ...this.targetHighlightLocation }; // Capture current value
-        const pendingScrollFlagOriginalValue = this.pendingHighlightScroll; // For logging
-        this.pendingHighlightScroll = null; // Clear flag
+      // Use the captured values if this call was intended to process a pending scroll
+      const actualPendingScrollTarget = shouldProcessPendingScroll
+        ? capturedTargetForScroll
+        : this.targetHighlightLocation; // Fallback to current if not an early-cleared scroll
+
+      const scrollIsStillPendingThisExecution =
+        shouldProcessPendingScroll || (this.pendingHighlightScroll && this.targetHighlightLocation);
+
+      console.log(
+        '[KanbanView] setReactState: About to check scroll processing. shouldProcessPendingScroll:',
+        shouldProcessPendingScroll,
+        'this.pendingHighlightScroll (after potential early clear):',
+        this.pendingHighlightScroll ? { ...this.pendingHighlightScroll } : null,
+        'actualPendingScrollTarget:',
+        actualPendingScrollTarget
+      );
+
+      if (scrollIsStillPendingThisExecution && actualPendingScrollTarget) {
+        const intendedLocation = { ...actualPendingScrollTarget }; // Capture current value
+        // const pendingScrollFlagOriginalValue = this.pendingHighlightScroll; // This log might be misleading if flag was cleared early
+
+        // If pendingHighlightScroll was not cleared early (e.g. direct call to setReactState with highlight)
+        // ensure it's cleared now.
+        if (this.pendingHighlightScroll) {
+          console.log(
+            '[KanbanView] setReactState: Clearing this.pendingHighlightScroll inside the if block (should be rare now).'
+          );
+          this.pendingHighlightScroll = null;
+        }
+
         console.log(
           '[KanbanView] setReactState: Queued BORDER/SCROLL for:',
-          JSON.stringify(intendedLocation),
-          'pendingScrollFlag was:',
-          pendingScrollFlagOriginalValue
+          JSON.stringify(intendedLocation)
+          // 'pendingScrollFlag was:',
+          // pendingScrollFlagOriginalValue // This log might be misleading if flag was cleared early
         );
 
         setTimeout(() => {
           console.log(
             '[KanbanView] setReactState (setTimeout ENTRY): current this.targetHighlightLocation:',
-            JSON.stringify(this.targetHighlightLocation),
-            'intendedLocation was:',
-            JSON.stringify(intendedLocation)
+            JSON.stringify(this.targetHighlightLocation), // This is the view's current live T.H.L.
+            'intendedLocation for this scroll op was:',
+            JSON.stringify(intendedLocation) // This was captured when scroll was initiated
           );
-          // Check this.targetHighlightLocation again, as it could have changed during the timeout
+          // Check this.targetHighlightLocation against the *intendedLocation* for this specific scroll operation
           if (
-            this.targetHighlightLocation && // Ensure it's not null now
-            intendedLocation && // Ensure original intendedLocation was not null/empty
-            // Compare all relevant fields for border highlight
+            this.targetHighlightLocation && // Ensure current T.H.L. is not null (e.g. user clicked elsewhere)
+            intendedLocation &&
             (this.targetHighlightLocation.blockId === intendedLocation.blockId ||
-              (!this.targetHighlightLocation.blockId && !intendedLocation.blockId)) && // Both undefined is OK
+              (!this.targetHighlightLocation.blockId && !intendedLocation.blockId)) &&
             this.targetHighlightLocation.cardTitle === intendedLocation.cardTitle &&
             this.targetHighlightLocation.listName === intendedLocation.listName
           ) {
             console.log(
               '[KanbanView] setReactState (setTimeout): Applying BORDER highlight and SCROLL for target:',
-              JSON.stringify(this.targetHighlightLocation)
+              JSON.stringify(this.targetHighlightLocation) // Apply to current T.H.L.
             );
             this.applyHighlight();
             this.scrollToCard(this.targetHighlightLocation);
           } else {
             console.log(
-              '[KanbanView] setReactState (setTimeout): BORDER target changed, cleared, or was invalid. Current:',
+              '[KanbanView] setReactState (setTimeout): BORDER target changed, cleared, or was invalid. Current T.H.L:',
               JSON.stringify(this.targetHighlightLocation),
-              'Intended was:',
+              'Intended for this scroll op was:',
               JSON.stringify(intendedLocation)
             );
           }
