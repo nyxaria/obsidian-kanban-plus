@@ -13,7 +13,16 @@ import {
 } from 'src/parsers/helpers/inlineMetadata';
 
 import { SearchContextProps } from './context';
-import { Board, DataKey, DateColor, Item, Lane, PageData, TagColor } from './types';
+import {
+  Board,
+  DataKey,
+  DateColor,
+  Item,
+  Lane,
+  PageData,
+  TagColor,
+  TagSymbolSetting,
+} from './types';
 
 export const baseClassName = 'kanban-plugin';
 
@@ -242,6 +251,25 @@ export function useGetTagColorFn(stateManager: StateManager): (tag: string) => T
   return useMemo(() => getTagColorFn(tagColors), [tagColors]);
 }
 
+export function getTagSymbolFn(tagSymbols: TagSymbolSetting[]): (tag: string) => string | null {
+  const tagMap = (tagSymbols || []).reduce<Record<string, string>>((total, current) => {
+    if (current && current.data && current.data.tagKey) {
+      total[current.data.tagKey] = current.data.symbol;
+    }
+    return total;
+  }, {});
+
+  return (tag: string) => {
+    if (tagMap[tag]) return tagMap[tag];
+    return null;
+  };
+}
+
+export function useGetTagSymbolFn(stateManager: StateManager): (tag: string) => string | null {
+  const tagSymbols = stateManager.useSetting('tag-symbols');
+  return useMemo(() => getTagSymbolFn(tagSymbols), [tagSymbols]);
+}
+
 export function getDateColorFn(dateColors: DateColor[]) {
   const orders = (dateColors || []).map<[moment.Moment | 'today' | 'before' | 'after', DateColor]>(
     (c) => {
@@ -385,6 +413,12 @@ export function useSearchValue(
       items,
       query,
       search: (query, immediate) => {
+        console.log(
+          '[useSearchValue] search function called with query:',
+          query,
+          'immediate:',
+          immediate
+        );
         if (!query) {
           setIsSearching(false);
           setSearchQuery('');

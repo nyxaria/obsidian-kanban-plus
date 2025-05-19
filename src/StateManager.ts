@@ -249,14 +249,18 @@ export class StateManager {
       'archive-date-format': archiveDateFormat,
       'show-add-list': this.getSettingRaw('show-add-list', suppliedSettings) ?? true,
       'show-archive-all': this.getSettingRaw('show-archive-all', suppliedSettings) ?? true,
-      'show-view-as-markdown':
-        this.getSettingRaw('show-view-as-markdown', suppliedSettings) ?? true,
       'show-board-settings': this.getSettingRaw('show-board-settings', suppliedSettings) ?? true,
+      'show-checkboxes': this.getSettingRaw('show-checkboxes', suppliedSettings) ?? true,
+      'show-relative-date': this.getSettingRaw('show-relative-date', suppliedSettings) ?? true,
       'show-search': this.getSettingRaw('show-search', suppliedSettings) ?? true,
       'show-set-view': this.getSettingRaw('show-set-view', suppliedSettings) ?? true,
+      'show-view-as-markdown':
+        this.getSettingRaw('show-view-as-markdown', suppliedSettings) ?? true,
+      'date-picker-week-start': this.getSettingRaw('date-picker-week-start', suppliedSettings) ?? 0,
+      'date-colors': this.getSettingRaw('date-colors', suppliedSettings) ?? [],
       'tag-colors': this.getSettingRaw('tag-colors', suppliedSettings) ?? [],
       'tag-sort': this.getSettingRaw('tag-sort', suppliedSettings) ?? [],
-      'date-colors': this.getSettingRaw('date-colors', suppliedSettings) ?? [],
+      'tag-symbols': this.getSettingRaw('tag-symbols', suppliedSettings) ?? [],
       'tag-action': this.getSettingRaw('tag-action', suppliedSettings) ?? 'obsidian',
     };
   }
@@ -420,8 +424,8 @@ export class StateManager {
     }
   }
 
-  getNewItem(content: string, checkChar: string, forceEdit?: boolean) {
-    return this.parser.newItem(content, checkChar, forceEdit);
+  getNewItem(content: string, checkChar: string, forceEdit?: boolean, laneName?: string) {
+    return this.parser.newItem(content, checkChar, forceEdit, laneName);
   }
 
   updateItemContent(item: Item, content: string) {

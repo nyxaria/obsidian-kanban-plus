@@ -53,7 +53,7 @@ export function DragDropApp({ win, plugin }: { win: Window; plugin: KanbanPlugin
 
         try {
           const items: Item[] = data.content.map((title: string) => {
-            let item = stateManager.getNewItem(title, ' ');
+            let item = stateManager.getNewItem(title, ' ', false, destinationParent?.data?.title);
             const isComplete = !!destinationParent?.data?.shouldMarkItemsComplete;
 
             if (isComplete) {

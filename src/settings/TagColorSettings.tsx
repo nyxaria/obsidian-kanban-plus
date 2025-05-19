@@ -94,6 +94,11 @@ export function ColorPickerInput({ color, setColor, defaultColor }: ColorPickerI
 }
 
 function Item({ tagColorKey, deleteKey, updateKey, defaultColors }: ItemProps) {
+  // Ensure tagColorKey (data) and its properties are gracefully handled if null/undefined
+  const currentTagKey = tagColorKey?.tagKey || '';
+  const currentColor = tagColorKey?.color || defaultColors.color;
+  const currentBackgroundColor = tagColorKey?.backgroundColor || defaultColors.backgroundColor;
+
   return (
     <div className={c('setting-item-wrapper')}>
       <div className={c('setting-item')}>
@@ -104,13 +109,13 @@ function Item({ tagColorKey, deleteKey, updateKey, defaultColors }: ItemProps) {
               <input
                 type="text"
                 placeholder="#tag"
-                value={tagColorKey.tagKey}
+                value={currentTagKey} // Use guarded value
                 onChange={(e) => {
                   const val = e.currentTarget.value;
                   updateKey(
                     val[0] === '#' ? val : '#' + val,
-                    tagColorKey.color,
-                    tagColorKey.backgroundColor
+                    currentColor, // Use guarded value
+                    currentBackgroundColor // Use guarded value
                   );
                 }}
               />
@@ -118,9 +123,9 @@ function Item({ tagColorKey, deleteKey, updateKey, defaultColors }: ItemProps) {
             <div>
               <div className={c('setting-item-label')}>{t('Background color')}</div>
               <ColorPickerInput
-                color={tagColorKey.backgroundColor}
+                color={currentBackgroundColor} // Use guarded value
                 setColor={(color) => {
-                  updateKey(tagColorKey.tagKey, tagColorKey.color, color);
+                  updateKey(currentTagKey, currentColor, color); // Use guarded values
                 }}
                 defaultColor={defaultColors.backgroundColor}
               />
@@ -128,9 +133,9 @@ function Item({ tagColorKey, deleteKey, updateKey, defaultColors }: ItemProps) {
             <div>
               <div className={c('setting-item-label')}>{t('Text color')}</div>
               <ColorPickerInput
-                color={tagColorKey.color}
+                color={currentColor} // Use guarded value
                 setColor={(color) => {
-                  updateKey(tagColorKey.tagKey, color, tagColorKey.backgroundColor);
+                  updateKey(currentTagKey, color, currentBackgroundColor); // Use guarded values
                 }}
                 defaultColor={defaultColors.color}
               />
@@ -143,11 +148,11 @@ function Item({ tagColorKey, deleteKey, updateKey, defaultColors }: ItemProps) {
                 <a
                   className={`tag ${c('item-tag')}`}
                   style={{
-                    '--tag-color': tagColorKey.color,
-                    '--tag-background': tagColorKey.backgroundColor,
+                    '--tag-color': currentColor, // Use guarded value
+                    '--tag-background': currentBackgroundColor, // Use guarded value
                   }}
                 >
-                  {tagColorKey.tagKey || '#tag'}
+                  {currentTagKey || '#tag'} {/* Use guarded value */}
                 </a>
                 <a className={`tag ${c('item-tag')}`}>#tag2</a>
               </div>
@@ -276,7 +281,7 @@ function TagSettings({ dataKeys, onChange }: TagSettingsProps) {
   );
 }
 
-export function renderTagSettings(
+export function renderTagColorSettings(
   containerEl: HTMLElement,
   keys: TagColorSetting[],
   onChange: (key: TagColorSetting[]) => void
@@ -291,6 +296,6 @@ export function renderTagSettings(
   );
 }
 
-export function cleanUpTagSettings(containerEl: HTMLElement) {
+export function unmountTagColorSettings(containerEl: HTMLElement) {
   unmountComponentAtNode(containerEl);
 }

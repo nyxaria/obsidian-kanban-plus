@@ -75,7 +75,8 @@
     "react-dom": "npm:@preact/compat",
     "react-fast-compare": "^3.2.2",
     "rrule": "^2.8.1",
-    "unist-util-visit": "^4.1.0"
+    "unist-util-visit": "^4.1.0",
+    "use-debounce": "^10.0.4"
   },
   "importSort": {
     ".js, .ts, .tsx": {

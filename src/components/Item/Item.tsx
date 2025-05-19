@@ -29,6 +29,7 @@ export interface DraggableItemProps {
   itemIndex: number;
   isStatic?: boolean;
   shouldMarkItemsComplete?: boolean;
+  targetHighlight?: any;
 }
 
 export interface ItemInnerProps {
@@ -37,6 +38,7 @@ export interface ItemInnerProps {
   shouldMarkItemsComplete?: boolean;
   isMatch?: boolean;
   searchQuery?: string;
+  targetHighlight?: any;
 }
 
 const ItemInner = memo(function ItemInner({
@@ -45,9 +47,11 @@ const ItemInner = memo(function ItemInner({
   isMatch,
   searchQuery,
   isStatic,
+  targetHighlight,
 }: ItemInnerProps) {
   const { stateManager, boardModifiers } = useContext(KanbanContext);
   const [editState, setEditState] = useState<EditState>(EditingState.cancel);
+  const itemInnerRef = useRef<HTMLDivElement>(null);
 
   const dndManager = useContext(DndManagerContext);
 
@@ -67,6 +71,69 @@ const ItemInner = memo(function ItemInner({
       setEditState({ x: 0, y: 0 });
     }
   }, [item.data.forceEditMode]);
+
+  useEffect(() => {
+    console.log(
+      `[ItemInner] ID: ${item.id}, targetHighlight received:`,
+      JSON.stringify(targetHighlight, null, 2)
+    );
+    let shouldHighlight = false;
+    if (targetHighlight && itemInnerRef.current) {
+      // Try to highlight based on blockId first
+      if (targetHighlight.blockId && item.data.blockId) {
+        const itemBlockId = item.data.blockId.startsWith('#^')
+          ? item.data.blockId.substring(2)
+          : item.data.blockId.startsWith('^')
+            ? item.data.blockId.substring(1)
+            : item.data.blockId;
+        if (itemBlockId === targetHighlight.blockId) {
+          console.log(
+            `[ItemInner] Highlighting item ${item.id} by blockId: ${targetHighlight.blockId}`
+          );
+          shouldHighlight = true;
+        }
+      }
+      // RESTORED: Fallback to highlighting based on text match
+      else if (
+        targetHighlight.match &&
+        targetHighlight.match.matches &&
+        targetHighlight.match.matches.length > 0 &&
+        item.data.titleRaw
+      ) {
+        const matchedText = targetHighlight.match.content.substring(
+          targetHighlight.match.matches[0][0],
+          targetHighlight.match.matches[0][1]
+        );
+        if (item.data.titleRaw.includes(matchedText)) {
+          console.log(`[ItemInner] Highlighting item ${item.id} by text content match.`);
+          shouldHighlight = true; // Set true if text matches
+        }
+      }
+
+      if (shouldHighlight) {
+        itemInnerRef.current.classList.add('search-result-highlight');
+        itemInnerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        itemInnerRef.current.classList.remove('search-result-highlight');
+      }
+    } else if (itemInnerRef.current) {
+      itemInnerRef.current.classList.remove('search-result-highlight');
+      // Optional: Log if targetHighlight was present but no highlight occurred
+      if (targetHighlight) {
+        let reason = 'unknown';
+        if (!targetHighlight.blockId && !targetHighlight.match) {
+          reason = 'targetHighlight missing blockId and match structure';
+        } else if (targetHighlight.blockId && !item.data.blockId) {
+          reason = 'targetHighlight has blockId but item does not';
+        }
+        console.log(
+          `[ItemInner] Item ID: ${item.id}, No highlight occurred. Reason: ${reason}. Target: `,
+          JSON.stringify(targetHighlight, null, 2),
+          `Item blockId: ${item.data.blockId}, Item titleRaw: ${item.data.titleRaw}`
+        );
+      }
+    }
+  }, [targetHighlight, item.id, item.data.blockId, item.data.titleRaw]);
 
   const path = useNestedEntityPath();
 
@@ -109,6 +176,7 @@ const ItemInner = memo(function ItemInner({
 
   return (
     <div
+      ref={itemInnerRef}
       // eslint-disable-next-line react/no-unknown-property
       onDblClick={onDoubleClick}
       onContextMenu={onContextMenu}
@@ -142,7 +210,7 @@ export const DraggableItem = memo(function DraggableItem(props: DraggableItemPro
   const measureRef = useRef<HTMLDivElement>(null);
   const search = useContext(SearchContext);
 
-  const { itemIndex, ...innerProps } = props;
+  const { itemIndex, targetHighlight, ...innerProps } = props;
 
   const bindHandle = useDragHandle(measureRef, measureRef);
 
@@ -164,6 +232,7 @@ export const DraggableItem = memo(function DraggableItem(props: DraggableItemPro
             isMatch={isMatch}
             searchQuery={search?.query}
             isStatic={true}
+            targetHighlight={targetHighlight}
           />
         ) : (
           <Droppable
@@ -173,7 +242,12 @@ export const DraggableItem = memo(function DraggableItem(props: DraggableItemPro
             index={itemIndex}
             data={props.item}
           >
-            <ItemInner {...innerProps} isMatch={isMatch} searchQuery={search?.query} />
+            <ItemInner
+              {...innerProps}
+              isMatch={isMatch}
+              searchQuery={search?.query}
+              targetHighlight={targetHighlight}
+            />
           </Droppable>
         )}
       </div>
@@ -185,9 +259,15 @@ interface ItemsProps {
   isStatic?: boolean;
   items: Item[];
   shouldMarkItemsComplete: boolean;
+  targetHighlight?: any;
 }
 
-export const Items = memo(function Items({ isStatic, items, shouldMarkItemsComplete }: ItemsProps) {
+export const Items = memo(function Items({
+  isStatic,
+  items,
+  shouldMarkItemsComplete,
+  targetHighlight,
+}: ItemsProps) {
   const search = useContext(SearchContext);
   const { view } = useContext(KanbanContext);
   const boardView = view.useViewState(frontmatterKey);
@@ -202,6 +282,7 @@ export const Items = memo(function Items({ isStatic, items, shouldMarkItemsCompl
             itemIndex={i}
             shouldMarkItemsComplete={shouldMarkItemsComplete}
             isStatic={isStatic}
+            targetHighlight={targetHighlight}
           />
         );
       })}

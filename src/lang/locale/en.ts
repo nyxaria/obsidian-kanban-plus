@@ -137,7 +137,9 @@ const en = {
   'This setting controls whether clicking the tags displayed below the card title opens the Obsidian search or the Kanban board search.':
     'This setting controls whether clicking the tags displayed below the card title opens the Obsidian search or the Kanban board search.',
   'Tag colors': 'Tag colors',
+  'Tag symbols': 'Tag symbols',
   'Set colors for tags displayed in cards.': 'Set colors for tags displayed in cards.',
+  'Set symbols for tags displayed in cards.': 'Set symbols for tags displayed in cards.',
   'Linked Page Metadata': 'Linked Page Metadata',
   'Inline Metadata': 'Inline Metadata',
   'Display metadata for the first note linked within a card. Specify which metadata keys to display below. An optional label can be provided, and labels can be hidden altogether.':
@@ -155,6 +157,8 @@ const en = {
   Saturday: 'Saturday',
   'Background color': 'Background color',
   Tag: 'Tag',
+  Symbol: 'Symbol',
+  'Tag Symbols': 'Tag Symbols',
   'Text color': 'Text color',
   'Date is': 'Date is',
   Today: 'Today',
@@ -181,6 +185,7 @@ const en = {
 
   // TagColorSettings.tsx
   'Add tag color': 'Add tag color',
+  'Add tag symbol': 'Add tag symbol',
 
   // components/Table.tsx
   List: 'List',

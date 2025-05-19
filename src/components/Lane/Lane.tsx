@@ -30,6 +30,7 @@ export interface DraggableLaneProps {
   isStatic?: boolean;
   collapseDir: 'horizontal' | 'vertical';
   isCollapsed?: boolean;
+  targetHighlight?: any;
 }
 
 function DraggableLaneRaw({
@@ -38,6 +39,7 @@ function DraggableLaneRaw({
   laneIndex,
   collapseDir,
   isCollapsed = false,
+  targetHighlight,
 }: DraggableLaneProps) {
   const [editState, setEditState] = useState<EditState>(EditingState.cancel);
   const [isSorting, setIsSorting] = useState(false);
@@ -172,6 +174,7 @@ function DraggableLaneRaw({
                 hideButton={isCompactPrepend}
                 editState={editState}
                 setEditState={setEditState}
+                laneName={lane.data.title}
               />
             )}
 
@@ -195,6 +198,7 @@ function DraggableLaneRaw({
                       items={lane.children}
                       isStatic={isStatic}
                       shouldMarkItemsComplete={shouldMarkItemsComplete}
+                      targetHighlight={targetHighlight}
                     />
                     <SortPlaceholder
                       accepts={laneAccepts}
@@ -207,7 +211,12 @@ function DraggableLaneRaw({
             )}
 
             {!search?.query && !isCollapsed && !shouldPrepend && (
-              <ItemForm addItems={addItems} editState={editState} setEditState={setEditState} />
+              <ItemForm
+                addItems={addItems}
+                editState={editState}
+                setEditState={setEditState}
+                laneName={lane.data.title}
+              />
             )}
           </CollapsedDropArea>
         </div>
@@ -221,9 +230,10 @@ export const DraggableLane = memo(DraggableLaneRaw);
 export interface LanesProps {
   lanes: Lane[];
   collapseDir: 'horizontal' | 'vertical';
+  targetHighlight?: any;
 }
 
-function LanesRaw({ lanes, collapseDir }: LanesProps) {
+function LanesRaw({ lanes, collapseDir, targetHighlight }: LanesProps) {
   const search = useContext(SearchContext);
   const { view } = useContext(KanbanContext);
   const boardView = view.useViewState(frontmatterKey) || 'board';
@@ -239,6 +249,7 @@ function LanesRaw({ lanes, collapseDir }: LanesProps) {
             key={boardView + lane.id}
             lane={lane}
             laneIndex={i}
+            targetHighlight={targetHighlight}
           />
         );
       })}

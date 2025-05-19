@@ -28,6 +28,9 @@ import {
   TagSort,
   TagSortSetting,
   TagSortSettingTemplate,
+  TagSymbol,
+  TagSymbolSetting,
+  TagSymbolSettingTemplate,
 } from './components/types';
 import { getParentWindow } from './dnd/util/getWindow';
 import { t } from './lang/helpers';
@@ -42,8 +45,9 @@ import {
 } from './settingHelpers';
 import { cleanUpDateSettings, renderDateSettings } from './settings/DateColorSettings';
 import { cleanupMetadataSettings, renderMetadataSettings } from './settings/MetadataSettings';
-import { cleanUpTagSettings, renderTagSettings } from './settings/TagColorSettings';
+import { renderTagColorSettings, unmountTagColorSettings } from './settings/TagColorSettings';
 import { cleanUpTagSortSettings, renderTagSortSettings } from './settings/TagSortSettings';
+import { renderTagSymbolSettings, unmountTagSymbolSettings } from './settings/TagSymbolSettings';
 
 const numberRegEx = /^\d+(?:\.\d+)?$/;
 
@@ -90,6 +94,7 @@ export interface KanbanSettings {
   'tag-sort'?: TagSort[];
   'time-format'?: string;
   'time-trigger'?: string;
+  'tag-symbols'?: TagSymbolSetting[];
 }
 
 export interface KanbanViewSettings {
@@ -138,6 +143,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'tag-sort',
   'time-format',
   'time-trigger',
+  'tag-symbols',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -163,6 +169,9 @@ export class SettingsManager {
   settings: KanbanSettings;
   cleanupFns: Array<() => void> = [];
   applyDebounceTimer: number = 0;
+  tagColorSettingsEl: HTMLElement;
+  tagSymbolSettingsEl: HTMLElement;
+  settingElements: Setting[] = [];
 
   constructor(plugin: KanbanPlugin, config: SettingsManagerConfig, settings: KanbanSettings) {
     this.app = plugin.app;
@@ -190,6 +199,11 @@ export class SettingsManager {
 
   constructUI(contentEl: HTMLElement, heading: string, local: boolean) {
     this.win = contentEl.win;
+
+    if (!this.cleanupFns) {
+      this.cleanupFns = [];
+    }
+    (this.win as any).tempKanbanCleanupFns = this.cleanupFns;
 
     const { templateFiles, vaultFolders, templateWarning } = getListOptions(this.app);
 
@@ -556,7 +570,7 @@ export class SettingsManager {
         })
       );
 
-      this.cleanupFns.push(() => {
+      ((this.win as any).tempKanbanCleanupFns as Array<() => void>).push(() => {
         if (setting.settingEl) {
           cleanUpTagSortSettings(setting.settingEl);
         }
@@ -565,27 +579,40 @@ export class SettingsManager {
 
     new Setting(contentEl).then((setting) => {
       const [value] = this.getSetting('tag-colors', local);
+      const tagColorData = value as TagColor[] | undefined;
 
-      const keys: TagColorSetting[] = ((value || []) as TagColor[]).map((k) => {
-        return {
-          ...TagColorSettingTemplate,
-          id: generateInstanceId(),
-          data: k,
-        };
-      });
-
-      renderTagSettings(setting.settingEl, keys, (keys: TagColorSetting[]) =>
+      const keys: TagColorSetting[] = (tagColorData || []).map((k) => ({
+        ...TagColorSettingTemplate,
+        id: generateInstanceId(),
+        data: k,
+      }));
+      this.tagColorSettingsEl = setting.settingEl;
+      renderTagColorSettings(setting.settingEl, keys, (newKeys: TagColorSetting[]) =>
         this.applySettingsUpdate({
-          'tag-colors': {
-            $set: keys.map((k) => k.data),
-          },
+          'tag-colors': { $set: newKeys.map((k) => k.data) },
         })
       );
+      const cleanupFunctionsArray = (this.win as any).tempKanbanCleanupFns || this.cleanupFns;
+      cleanupFunctionsArray.push(() => {
+        if (setting.settingEl) unmountTagColorSettings(setting.settingEl);
+      });
+    });
 
-      this.cleanupFns.push(() => {
-        if (setting.settingEl) {
-          cleanUpTagSettings(setting.settingEl);
-        }
+    new Setting(contentEl).then((setting) => {
+      const [value] = this.getSetting('tag-symbols', local);
+      const tagSymbolData = value as TagSymbolSetting[] | undefined;
+
+      const keys: TagSymbolSetting[] = tagSymbolData || [];
+
+      this.tagSymbolSettingsEl = setting.settingEl;
+      renderTagSymbolSettings(setting.settingEl, keys, (newKeys: TagSymbolSetting[]) =>
+        this.applySettingsUpdate({
+          'tag-symbols': { $set: newKeys },
+        })
+      );
+      const cleanupFunctionsArray = (this.win as any).tempKanbanCleanupFns || this.cleanupFns;
+      cleanupFunctionsArray.push(() => {
+        if (setting.settingEl) unmountTagSymbolSettings(setting.settingEl);
       });
     });
 
@@ -951,7 +978,7 @@ export class SettingsManager {
         }
       );
 
-      this.cleanupFns.push(() => {
+      ((this.win as any).tempKanbanCleanupFns as Array<() => void>).push(() => {
         if (setting.settingEl) {
           cleanUpDateSettings(setting.settingEl);
         }
@@ -1282,7 +1309,7 @@ export class SettingsManager {
         })
       );
 
-      this.cleanupFns.push(() => {
+      ((this.win as any).tempKanbanCleanupFns as Array<() => void>).push(() => {
         if (setting.settingEl) {
           cleanupMetadataSettings(setting.settingEl);
         }
@@ -1530,12 +1557,62 @@ export class SettingsManager {
             });
         });
     });
+
+    this.tagColorSettingsEl = contentEl.createDiv({ cls: c('tag-color-setting-wrapper') });
+    this.tagSymbolSettingsEl = contentEl.createDiv({ cls: c('tag-symbol-setting-wrapper') });
+
+    this.settingElements.push(
+      new Setting(this.tagColorSettingsEl)
+        .setName(t('Tag colors'))
+        .setDesc(t('Set colors for tags displayed in cards.'))
+    );
+
+    this.settingElements.push(
+      new Setting(this.tagSymbolSettingsEl)
+        .setName(t('Tag Symbols'))
+        .setDesc(t('Set symbols for tags displayed in cards.'))
+    );
   }
 
   cleanUp() {
+    if ((this.win as any)?.tempKanbanCleanupFns) {
+      delete (this.win as any).tempKanbanCleanupFns;
+    }
     this.win = null;
-    this.cleanupFns.forEach((fn) => fn());
+    (this.cleanupFns || []).forEach((fn) => fn());
     this.cleanupFns = [];
+  }
+
+  rerenderSettings() {
+    if (this.tagColorSettingsEl) {
+      unmountTagColorSettings(this.tagColorSettingsEl);
+      const [tagColorsValue] = this.getSetting('tag-colors', false);
+      const tagColorData = tagColorsValue as TagColor[] | undefined;
+
+      const tagColorSettings: TagColorSetting[] = (tagColorData || []).map((k) => ({
+        ...TagColorSettingTemplate,
+        id: generateInstanceId(),
+        data: k,
+      }));
+      renderTagColorSettings(this.tagColorSettingsEl, tagColorSettings, (newKeys) => {
+        this.applySettingsUpdate({ 'tag-colors': { $set: newKeys.map((k) => k.data) } });
+      });
+    }
+    if (this.tagSymbolSettingsEl) {
+      unmountTagSymbolSettings(this.tagSymbolSettingsEl);
+      const [tagSymbolsValue] = this.getSetting('tag-symbols', false);
+      const tagSymbolData = tagSymbolsValue as TagSymbolSetting[] | undefined;
+
+      const tagSymbolSettings: TagSymbolSetting[] = tagSymbolData || [];
+
+      renderTagSymbolSettings(
+        this.tagSymbolSettingsEl,
+        tagSymbolSettings,
+        (newKeys: TagSymbolSetting[]) => {
+          this.applySettingsUpdate({ 'tag-symbols': { $set: newKeys } });
+        }
+      );
+    }
   }
 }
 
@@ -1585,3 +1662,47 @@ export class KanbanSettingsTab extends PluginSettingTab {
     this.settingsManager.constructUI(containerEl, t('Kanban Plugin'), false);
   }
 }
+
+export const DEFAULT_SETTINGS: KanbanSettings = {
+  [frontmatterKey]: 'board',
+  'append-archive-date': false,
+  'archive-date-format': 'MMM D, YYYY h:mm a',
+  'archive-date-separator': ' - ',
+  'archive-with-date': false,
+  'date-colors': [],
+  'date-display-format': 'MMM D, YYYY h:mm a',
+  'date-format': 'YYYY-MM-DD',
+  'date-picker-week-start': 0,
+  'date-time-display-format': 'MMM D, YYYY h:mm a',
+  'date-trigger': '',
+  'full-list-lane-width': false,
+  'hide-card-count': false,
+  'inline-metadata-position': 'body',
+  'lane-width': 272,
+  'link-date-to-daily-note': false,
+  'list-collapse': [],
+  'max-archive-size': -1,
+  'metadata-keys': [],
+  'move-dates': false,
+  'move-tags': false,
+  'move-task-metadata': false,
+  'new-card-insertion-method': 'append',
+  'new-line-trigger': 'shift-enter',
+  'new-note-folder': '',
+  'new-note-template': '',
+  'show-add-list': true,
+  'show-archive-all': true,
+  'show-board-settings': true,
+  'show-checkboxes': true,
+  'show-relative-date': true,
+  'show-search': true,
+  'show-set-view': true,
+  'show-view-as-markdown': true,
+  'table-sizing': {},
+  'tag-action': 'obsidian',
+  'tag-colors': [],
+  'tag-sort': [],
+  'time-format': 'HH:mm',
+  'time-trigger': '',
+  'tag-symbols': [],
+};

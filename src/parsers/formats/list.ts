@@ -356,9 +356,29 @@ export function newItem(
   stateManager: StateManager,
   newContent: string,
   checkChar: string,
-  forceEdit?: boolean
+  forceEdit?: boolean,
+  laneName?: string
 ) {
-  const md = `- [${checkChar}] ${indentNewLines(newContent)}`;
+  const trimmedContent = newContent.trim();
+  const tagsArray = [];
+
+  if (laneName) {
+    const listNameTag = `#${laneName.toLowerCase().replace(/\s+/g, '-')}`;
+    tagsArray.push(listNameTag);
+  }
+
+  const fileNameBase = stateManager.file.basename;
+  const fileNameTag = `#${fileNameBase.toLowerCase().replace(/\s+/g, '-')}`;
+  tagsArray.push(fileNameTag);
+
+  let tagsString = '';
+  if (tagsArray.length > 0) {
+    tagsString = `\n\n${tagsArray.join(' ')}`;
+  }
+
+  const contentWithTags = `${trimmedContent}${tagsString}`;
+
+  const md = `- [${checkChar}] ${indentNewLines(contentWithTags)}`;
   const ast = parseFragment(stateManager, md);
   const itemData = listItemToItemData(stateManager, md, (ast.children[0] as List).children[0]);
 
