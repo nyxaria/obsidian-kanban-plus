@@ -39,6 +39,11 @@ export interface TagSort {
   tag: string;
 }
 
+export interface TagSymbol {
+  tagKey: string;
+  symbol: string;
+}
+
 export interface DateColor {
   isToday?: boolean;
   isBefore?: boolean;
@@ -95,11 +100,12 @@ export interface ErrorReport {
 }
 
 export interface BoardData {
-  isSearching: boolean;
+  frontmatter: Record<string, any>;
   settings: KanbanSettings;
-  frontmatter: Record<string, number | string | Array<number | string>>;
   archive: Item[];
+  isSearching: boolean;
   errors: ErrorReport[];
+  targetHighlight?: any;
 }
 
 export type Item = Nestable<ItemData>;
@@ -108,6 +114,7 @@ export type Board = Nestable<BoardData, Lane>;
 export type MetadataSetting = Nestable<DataKey>;
 export type TagColorSetting = Nestable<TagColor>;
 export type TagSortSetting = Nestable<TagSort>;
+export type TagSymbolSetting = Nestable<TagSymbol>;
 export type DateColorSetting = Nestable<DateColor>;
 
 export const DataTypes = {
@@ -118,6 +125,7 @@ export const DataTypes = {
   TagColorSetting: 'tag-color',
   TagSortSetting: 'tag-sort',
   DateColorSetting: 'date-color',
+  TagSymbolSetting: 'tag-symbol',
 };
 
 export const ItemTemplate = {
@@ -146,16 +154,23 @@ export const TagSortSettingTemplate = {
   accepts: [DataTypes.TagSortSetting],
   type: DataTypes.TagSortSetting,
   children: [] as any[],
+  data: { tag: '' },
 };
 
-// TODO: all this is unecessary because these aren't sortable
+export const TagSymbolSettingTemplate = {
+  accepts: [] as string[],
+  type: DataTypes.TagSymbolSetting,
+  children: [] as any[],
+  data: { tagKey: '', symbol: '' },
+};
+
 export const TagColorSettingTemplate = {
   accepts: [] as string[],
   type: DataTypes.TagColorSetting,
   children: [] as any[],
+  data: { tagKey: '', color: '#000000', backgroundColor: '#ffffff' },
 };
 
-// TODO: all this is unecessary because these aren't sortable
 export const DateColorSettingTemplate = {
   accepts: [] as string[],
   type: DataTypes.DateColorSetting,

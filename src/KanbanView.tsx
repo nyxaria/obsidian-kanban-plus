@@ -18,7 +18,12 @@ import { BasicMarkdownRenderer } from './components/MarkdownRenderer/MarkdownRen
 import { c } from './components/helpers';
 import { Board } from './components/types';
 import { getParentWindow } from './dnd/util/getWindow';
-import { gotoNextDailyNote, gotoPrevDailyNote, hasFrontmatterKeyRaw } from './helpers';
+import {
+  gotoNextDailyNote,
+  gotoPrevDailyNote,
+  hasFrontmatterKey,
+  hasFrontmatterKeyRaw,
+} from './helpers';
 import { bindMarkdownEvents } from './helpers/renderMarkdown';
 import { PromiseQueue } from './helpers/util';
 import { t } from './lang/helpers';
@@ -39,6 +44,8 @@ export class KanbanView extends TextFileView implements HoverParent {
 
   activeEditor: any;
   viewSettings: KanbanViewSettings = {};
+  public initialSearchQuery?: string;
+  public targetHighlightLocation: any = null;
 
   get isPrimary(): boolean {
     return this.plugin.getStateManager(this.file)?.getAView() === this;
@@ -173,12 +180,58 @@ export class KanbanView extends TextFileView implements HoverParent {
       });
     }
 
+    console.log(
+      '[KanbanView] onload: Entered. targetHighlightLocation will be set by setState if eState is provided directly.'
+    );
+
+    // Check for pending highlight state stored on the leaf by the monkeypatch
+    const pendingHighlightState = (this.leaf as any)._kanbanPendingHighlightState;
+    if (pendingHighlightState) {
+      console.log(
+        '[KanbanView] onload: Found _kanbanPendingHighlightState on leaf:',
+        JSON.stringify(pendingHighlightState, null, 2)
+      );
+      if (pendingHighlightState.blockId) {
+        this.targetHighlightLocation = { blockId: pendingHighlightState.blockId };
+        console.log(
+          '[KanbanView] onload: Applied blockId from _kanbanPendingHighlightState to targetHighlightLocation.'
+        );
+      } else if (pendingHighlightState.match) {
+        // If no blockId, but there's a 'match' object (e.g., from search navState)
+        // Store the whole thing, ItemInner will need to know how to use it.
+        this.targetHighlightLocation = pendingHighlightState; // Store the whole match object
+        console.log(
+          '[KanbanView] onload: Applied full match object from _kanbanPendingHighlightState to targetHighlightLocation.'
+        );
+      }
+      // Clear the pending state from the leaf after consuming it
+      delete (this.leaf as any)._kanbanPendingHighlightState;
+      console.log('[KanbanView] onload: Cleared _kanbanPendingHighlightState from leaf.');
+
+      // If we found a pending highlight, ensure React state is updated after a short delay
+      // to allow board data to potentially load via setState/addView.
+      setTimeout(() => {
+        if (this.targetHighlightLocation) {
+          console.log(
+            '[KanbanView] onload (from pending): Delayed call to setReactState with targetHighlight:',
+            this.targetHighlightLocation
+          );
+          this.setReactState({ targetHighlight: this.targetHighlightLocation });
+        }
+      }, 150); // Slightly longer delay to be safe
+    }
+
     this.register(
       this.containerEl.onWindowMigrated(() => {
         this.plugin.removeView(this);
         this.plugin.addView(this, this.data, this.isPrimary);
       })
     );
+
+    // Ensure this is added after super.onload() and other initial setup
+    this.registerDomEvent(this.contentEl, 'click', this.handleBoardClickToClearHighlight, {
+      capture: true,
+    });
   }
 
   onunload(): void {
@@ -240,8 +293,144 @@ export class KanbanView extends TextFileView implements HoverParent {
   }
 
   async setState(state: any, result: ViewStateResult): Promise<void> {
-    this.viewSettings = { ...state.kanbanViewState };
+    console.log(
+      `[KanbanView] setState ENTRY: File: ${this.file?.path}, State Type: ${state?.type}, Data available: ${!!this.data}`
+    );
+    console.log('[KanbanView] setState: Full incoming state object (raw):', state);
+    console.log(
+      '[KanbanView] setState: Full incoming state object (JSON):',
+      JSON.stringify(state, null, 2)
+    );
+
+    const eStateFromPatch = state.eState;
+    console.log(
+      '[KanbanView] setState: eState (from the state.eState property received by KanbanView.setState):',
+      JSON.stringify(eStateFromPatch, null, 2)
+    );
+
+    if (eStateFromPatch && eStateFromPatch.blockId) {
+      this.targetHighlightLocation = { blockId: eStateFromPatch.blockId };
+      console.log(
+        '[KanbanView] setState: Updated targetHighlightLocation with blockId from eStateFromPatch:',
+        this.targetHighlightLocation
+      );
+    } else if (eStateFromPatch && eStateFromPatch.match) {
+      this.targetHighlightLocation = eStateFromPatch;
+      console.log(
+        '[KanbanView] setState: Updated targetHighlightLocation with match object from eStateFromPatch:',
+        this.targetHighlightLocation
+      );
+    } else if (!eStateFromPatch) {
+      console.log(
+        '[KanbanView] setState: eStateFromPatch is null or undefined. No direct update to targetHighlightLocation based on it. ' +
+          'Existing targetHighlightLocation (possibly from onload): ',
+        JSON.stringify(this.targetHighlightLocation, null, 2)
+      );
+    } else {
+      console.log(
+        '[KanbanView] setState: eStateFromPatch is present but not a recognized highlight structure. ' +
+          'No direct update to targetHighlightLocation based on it. Existing targetHighlightLocation: ',
+        JSON.stringify(this.targetHighlightLocation, null, 2)
+      );
+    }
+
+    let typeWasForcedToKanban = false;
+
+    if (this.file && state) {
+      let isKanbanFile = false;
+      const dataIsAvailable = this.data && this.data.trim() !== '';
+
+      if (dataIsAvailable) {
+        isKanbanFile = hasFrontmatterKeyRaw(this.data);
+        console.log(
+          `[KanbanView] setState: Checked this.data for ${this.file.path}. IsKanban via data: ${isKanbanFile}`
+        );
+      } else {
+        console.log(
+          `[KanbanView] setState: this.data is not available for ${this.file.path}. Attempting metadataCache fallback.`
+        );
+      }
+
+      if (!isKanbanFile) {
+        if (this.file) {
+          const fileCache = this.app.metadataCache.getFileCache(this.file);
+          if (fileCache?.frontmatter?.[frontmatterKey]) {
+            isKanbanFile = true;
+          }
+        }
+        console.log(
+          `[KanbanView] setState: Checked metadataCache directly for ${this.file?.path}. IsKanban via cache: ${isKanbanFile}`
+        );
+      }
+
+      if (isKanbanFile) {
+        if (state.type !== kanbanViewType) {
+          console.log(
+            `[KanbanView] setState: File ${this.file.path} IS a Kanban board. Current type: '${state.type}'. Forcing type to '${kanbanViewType}'.`
+          );
+          state.type = kanbanViewType;
+          typeWasForcedToKanban = true;
+          if (this.plugin && this.leaf && (this.leaf as any).id) {
+            this.plugin.kanbanFileModes[(this.leaf as any).id] = kanbanViewType;
+          }
+        } else {
+          console.log(
+            `[KanbanView] setState: File ${this.file.path} IS a Kanban board and type is already '${kanbanViewType}'. No change needed.`
+          );
+        }
+      } else {
+        console.log(
+          `[KanbanView] setState: File ${this.file.path} is NOT a Kanban board (checked data and/or cache). Current type: '${state.type}'.`
+        );
+      }
+    }
+
+    let highlightToPassToReact = null;
+    if (this.targetHighlightLocation) {
+      highlightToPassToReact = this.targetHighlightLocation;
+      console.log(
+        '[KanbanView] setState: Will pass targetHighlightLocation to setReactState:',
+        JSON.stringify(highlightToPassToReact, null, 2)
+      );
+    }
+
     await super.setState(state, result);
+
+    if (typeWasForcedToKanban) {
+      console.log(
+        `[KanbanView] setState: Type was forced to 'kanban'. Re-triggering addView for ${this.file?.path}.`
+      );
+      this.plugin.addView(this, this.data, this.isPrimary);
+      if (highlightToPassToReact) {
+        setTimeout(() => {
+          console.log(
+            '[KanbanView] setState (type forced): Delayed call to setReactState with targetHighlight:',
+            highlightToPassToReact
+          );
+          this.setReactState({ targetHighlight: highlightToPassToReact });
+        }, 100);
+      }
+    } else if (highlightToPassToReact) {
+      console.log(
+        '[KanbanView] setState (no type force): Calling setReactState directly with targetHighlight:',
+        highlightToPassToReact
+      );
+      this.setReactState({ targetHighlight: highlightToPassToReact });
+    }
+
+    this.initialSearchQuery = state.initialSearchQuery || state.state?.initialSearchQuery;
+
+    if (
+      state &&
+      state.type === kanbanViewType &&
+      this.plugin &&
+      this.leaf &&
+      (this.leaf as any).id
+    ) {
+      this.plugin.kanbanFileModes[(this.leaf as any).id] = kanbanViewType;
+    }
+
+    this.viewSettings = { ...(state.kanbanViewState || {}) };
   }
 
   getState() {
@@ -279,13 +468,19 @@ export class KanbanView extends TextFileView implements HoverParent {
   }
 
   useViewState<K extends keyof KanbanViewSettings>(key: K) {
-    const stateManager = this.plugin.stateManagers.get(this.file);
+    const stateManager = this.plugin.getStateManager(this.file);
     const settingVal = stateManager.useSetting(key);
     return this.viewSettings[key] ?? settingVal;
   }
 
   getPortal() {
-    const stateManager = this.plugin.stateManagers.get(this.file);
+    const stateManager = this.plugin.getStateManager(this.file);
+    if (!stateManager) {
+      console.error(
+        `KanbanView.getPortal(): StateManager for file ${this.file?.path} is not yet available.`
+      );
+      return <div style={{ padding: '20px', textAlign: 'center' }}>Loading Kanban board...</div>;
+    }
     return <Kanban stateManager={stateManager} view={this} />;
   }
 
@@ -479,23 +674,106 @@ export class KanbanView extends TextFileView implements HoverParent {
   };
 
   clear() {
-    /*
-      Obsidian *only* calls this after unloading a file, before loading the next.
-      Specifically, from onUnloadFile, which calls save(true), and then optionally
-      calls clear, if and only if this.file is still non-empty.  That means that
-      in this function, this.file is still the *old* file, so we should not do
-      anything here that might try to use the file (including its path), so we
-      should avoid doing anything that refreshes the display.  (Since that could
-      use the file, and would also flash an empty pane during navigation, depending
-      on how long the next file load takes.)
-
-      Given all that, it makes more sense to clean up our state from onLoadFile, as
-      following a clear there are only two possible states: a successful onLoadFile
-      updates our full state via setViewData(), or else it aborts with an error
-      first.  So as long as setViewData() and the error handler for onLoadFile()
-      fully reset the state (to a valid load state or a valid error state),
-      there's nothing to do in this method.  (We can't omit it, since it's
-      abstract.)
-    */
+    // this.contentEl.empty(); // Original line, keep if necessary
   }
+
+  setReactState(newState: { targetHighlight?: any }) {
+    const stateManager = this.plugin.stateManagers.get(this.file);
+    if (stateManager) {
+      console.log(
+        '[KanbanView] setReactState: Requesting StateManager to update board data with targetHighlight:',
+        newState.targetHighlight
+      );
+      stateManager.setState((currentBoard) => {
+        return update(currentBoard, {
+          data: {
+            // Ensure 'targetHighlight' is a valid field in Board.data (added in types.ts)
+            targetHighlight: { $set: newState.targetHighlight },
+          },
+        });
+      }, false); // 'false' to not save to disk just for a highlight change
+    } else {
+      console.warn('[KanbanView] setReactState: StateManager not found for file:', this.file?.path);
+    }
+  }
+
+  public clearActiveSearchHighlight() {
+    console.log(
+      '[KanbanView] clearActiveSearchHighlight called. Current this.targetHighlightLocation:',
+      JSON.stringify(this.targetHighlightLocation)
+    );
+    if (this.targetHighlightLocation !== null) {
+      console.log(
+        '[KanbanView] Condition (this.targetHighlightLocation !== null) is true. Proceeding to clear.'
+      );
+      this.targetHighlightLocation = null;
+      this.setReactState({ targetHighlight: null });
+    } else {
+      console.log(
+        '[KanbanView] Condition (this.targetHighlightLocation !== null) is false. Highlight already considered null at KanbanView level.'
+      );
+    }
+  }
+
+  public processHighlightFromExternal(eState: any) {
+    if (eState && eState.blockId) {
+      // Check for eState.blockId specifically
+      console.log(
+        '[KanbanView] processHighlightFromExternal: Received eState with blockId:',
+        JSON.stringify(eState, null, 2)
+      );
+      this.targetHighlightLocation = { blockId: eState.blockId }; // Store only what's needed
+
+      setTimeout(() => {
+        if (this.targetHighlightLocation) {
+          console.log(
+            '[KanbanView] processHighlightFromExternal: setTimeout triggering setReactState with targetHighlightLocation:',
+            JSON.stringify(this.targetHighlightLocation, null, 2)
+          );
+          this.setReactState({ targetHighlight: this.targetHighlightLocation });
+        }
+      }, 100);
+    } else {
+      console.log(
+        '[KanbanView] processHighlightFromExternal: Received eState without blockId or null/undefined eState.'
+      );
+      // Optionally, if eState is null/undefined, we might want to clear existing highlight
+      if (!eState && this.targetHighlightLocation) {
+        this.targetHighlightLocation = null;
+        this.setReactState({ targetHighlight: null });
+      }
+    }
+  }
+
+  private handleBoardClickToClearHighlight = (event: MouseEvent) => {
+    console.log('[KanbanView] handleBoardClickToClearHighlight triggered. Target:', event.target);
+    const targetElement = event.target as HTMLElement;
+
+    // Check if the click originated from within an item or an item's interactive parts
+    if (targetElement.closest('.kanban-plugin__item')) {
+      // More specific checks can be added here if clicking an item should sometimes clear highlight
+      // For now, if the click is anywhere on/in an item, don't clear.
+      // This also implicitly handles clicks on item menus, buttons within items, etc.
+      return;
+    }
+
+    // Check for other known interactive elements that shouldn't clear the highlight
+    if (
+      targetElement.tagName === 'A' ||
+      targetElement.tagName === 'BUTTON' ||
+      targetElement.tagName === 'INPUT' ||
+      targetElement.tagName === 'TEXTAREA' ||
+      targetElement.tagName === 'SELECT' ||
+      targetElement.closest('.menu') || // Any generic menu
+      (targetElement.hasAttribute('contenteditable') &&
+        targetElement.getAttribute('contenteditable') === 'true')
+    ) {
+      return;
+    }
+
+    console.log(
+      '[KanbanView] Board area clicked (not on an item or specific control). Clearing active search highlight.'
+    );
+    this.clearActiveSearchHighlight();
+  };
 }

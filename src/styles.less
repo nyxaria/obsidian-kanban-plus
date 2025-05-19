@@ -1782,3 +1782,14 @@ body:not(.native-scrollbars) .kanban-plugin__scroll-container::-webkit-scrollbar
     background-color: var(--date-background-color, rgba(var(--mono-rgb-100), 0.05));
   }
 }
+
+/* NEW: Apply yellow border to the parent item when its content wrapper is highlighted */
+.kanban-plugin__item:has(> div.kanban-plugin__item-content-wrapper.search-result-highlight) {
+  border: 2px solid yellow !important;
+  border-radius: var(
+    --input-radius
+  ); /* Match item's default radius if applicable, or use var(--radius-m) */
+  /* Ensure no other background/box-shadow changes unless intended */
+  background-color: transparent; /* Or revert to its normal background if necessary */
+  box-shadow: none; /* Or revert to its normal box-shadow */
+}

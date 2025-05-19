@@ -14,9 +14,10 @@ interface ItemFormProps {
   editState: EditState;
   setEditState: Dispatch<StateUpdater<EditState>>;
   hideButton?: boolean;
+  laneName?: string;
 }
 
-export function ItemForm({ addItems, editState, setEditState, hideButton }: ItemFormProps) {
+export function ItemForm({ addItems, editState, setEditState, hideButton, laneName }: ItemFormProps) {
   const { stateManager } = useContext(KanbanContext);
   const editorRef = useRef<EditorView>();
 
@@ -26,7 +27,7 @@ export function ItemForm({ addItems, editState, setEditState, hideButton }: Item
   });
 
   const createItem = (title: string) => {
-    addItems([stateManager.getNewItem(title, ' ')]);
+    addItems([stateManager.getNewItem(title, ' ', false, laneName)]);
     const cm = editorRef.current;
     if (cm) {
       cm.dispatch({

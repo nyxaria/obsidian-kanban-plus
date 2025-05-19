@@ -10,6 +10,7 @@ import { SortPlaceholder } from 'src/dnd/components/SortPlaceholder';
 import { Sortable } from 'src/dnd/components/Sortable';
 import { createHTMLDndHandlers } from 'src/dnd/managers/DragManager';
 import { t } from 'src/lang/helpers';
+import { useDebounce } from 'use-debounce';
 
 import { DndScope } from '../dnd/components/Scope';
 import { getBoardModifiers } from '../helpers/boardModifiers';
@@ -47,125 +48,91 @@ function getCSSClass(frontmatter: Record<string, any>): string[] {
 }
 
 export const Kanban = ({ view, stateManager }: KanbanProps) => {
-  const boardData = stateManager.useState();
-  const isAnythingDragging = useIsAnythingDragging();
+  const dateColorsFromHook = stateManager.useSetting('date-colors');
+  const tagColorsFromHook = stateManager.useSetting('tag-colors');
 
+  const [boardData, setBoardData] = useState<Board | null>(stateManager.state);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [isLaneFormVisible, setIsLaneFormVisible] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
-  const [isSearching, setIsSearching] = useState<boolean>(false);
-
-  const [isLaneFormVisible, setIsLaneFormVisible] = useState<boolean>(
-    boardData?.children.length === 0
-  );
 
   const filePath = stateManager.file.path;
-  const maxArchiveLength = stateManager.useSetting('max-archive-size');
-  const dateColors = stateManager.useSetting('date-colors');
-  const tagColors = stateManager.useSetting('tag-colors');
-  const boardView = view.useViewState(frontmatterKey);
-
-  const closeLaneForm = useCallback(() => {
-    if (boardData?.children.length > 0) {
-      setIsLaneFormVisible(false);
-    }
-  }, [boardData?.children.length]);
+  const dateColors = dateColorsFromHook || [];
+  const tagColors = tagColorsFromHook || [];
+  const boardModifiers = getBoardModifiers(view, stateManager);
+  const boardView = view.useViewState(frontmatterKey) || 'board';
 
   useEffect(() => {
-    if (boardData?.children.length === 0 && !stateManager.hasError()) {
-      setIsLaneFormVisible(true);
-    }
-  }, [boardData?.children.length, stateManager]);
-
-  const onNewLane = useCallback(() => {
-    rootRef.current?.win.setTimeout(() => {
-      const board = rootRef.current?.getElementsByClassName(c('board'));
-
-      if (board?.length) {
-        animateScrollTo([board[0].scrollWidth, 0], {
-          elementToScroll: board[0],
-          speed: 300,
-          minDuration: 150,
-          easing: (x: number) => {
-            return x === 1 ? 1 : 1 - Math.pow(2, -10 * x);
-          },
-        });
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    const onSearchHotkey = (data: { commandId: string; data: string }) => {
-      if (data.commandId === 'editor:open-search') {
-        if (typeof data.data === 'string') {
-          setIsSearching(true);
-          setSearchQuery(data.data);
-          setDebouncedSearchQuery(data.data);
-        } else {
-          setIsSearching((val) => !val);
-        }
-      }
-    };
-
-    const showLaneForm = () => {
-      setIsLaneFormVisible(true);
-    };
-
-    view.emitter.on('hotkey', onSearchHotkey);
-    view.emitter.on('showLaneForm', showLaneForm);
-
-    return () => {
-      view.emitter.off('hotkey', onSearchHotkey);
-      view.emitter.off('showLaneForm', showLaneForm);
-    };
-  }, [view]);
-
-  useEffect(() => {
-    if (isSearching) {
-      searchRef.current?.focus();
+    if (isSearching && searchRef.current) {
+      searchRef.current.focus();
     }
   }, [isSearching]);
 
-  useEffect(() => {
-    const win = view.getWindow();
-    const trimmed = searchQuery.trim();
-    let id: number;
+  useDebounce(
+    () => {
+      setDebouncedSearchQuery(searchQuery);
+    },
+    200,
+    [searchQuery]
+  );
 
-    if (trimmed) {
-      id = win.setTimeout(() => {
-        setDebouncedSearchQuery(trimmed);
-      }, 250);
-    } else {
-      setDebouncedSearchQuery('');
-    }
+  const isAnythingDragging = useIsAnythingDragging();
 
-    return () => {
-      win.clearTimeout(id);
-    };
-  }, [searchQuery, view]);
+  const showLaneForm = useCallback(() => {
+    setIsLaneFormVisible(true);
+  }, []);
 
-  useEffect(() => {
-    if (maxArchiveLength === undefined || maxArchiveLength === -1) {
-      return;
-    }
+  const closeLaneForm = useCallback(() => {
+    setIsLaneFormVisible(false);
+  }, []);
 
-    if (typeof maxArchiveLength === 'number' && boardData?.data.archive.length > maxArchiveLength) {
-      stateManager.setState((board) =>
-        update(board, {
-          data: {
-            archive: {
-              $set: board.data.archive.slice(maxArchiveLength * -1),
-            },
-          },
-        })
+  const onNewLane = useCallback(
+    (data: Partial<LaneData>) => {
+      boardModifiers.addLane(
+        stateManager.parser.getDefaultLaneData(data.title, boardData.children.length)
       );
-    }
-  }, [boardData?.data.archive.length, maxArchiveLength]);
+      closeLaneForm();
+    },
+    [boardData, boardModifiers, closeLaneForm]
+  );
 
-  const boardModifiers = useMemo(() => {
-    return getBoardModifiers(view, stateManager);
-  }, [stateManager, view]);
+  useEffect(() => {
+    const handler = (state: Board) => {
+      setBoardData(state);
+    };
+
+    stateManager.stateReceivers.push(handler);
+    return () => {
+      stateManager.stateReceivers.remove(handler);
+    };
+  }, [stateManager]);
+
+  useEffect(() => {
+    view.emitter.on('showLaneForm', showLaneForm);
+    view.emitter.on('hotkey', ({ commandId, data }) => {
+      switch (commandId) {
+        case 'editor:open-search':
+          setIsSearching(true);
+          if (data) {
+            setSearchQuery(data);
+            setDebouncedSearchQuery(data);
+          }
+          break;
+        case 'editor:clear-search':
+          setSearchQuery('');
+          setDebouncedSearchQuery('');
+          setIsSearching(false);
+          break;
+      }
+    });
+    return () => {
+      view.emitter.off('showLaneForm', showLaneForm);
+      view.emitter.off('hotkey');
+    };
+  }, [view.emitter]);
 
   const kanbanContext = useMemo(() => {
     return {
@@ -209,6 +176,18 @@ export const Kanban = ({ view, stateManager }: KanbanProps) => {
     setDebouncedSearchQuery,
     setIsSearching
   );
+
+  useEffect(() => {
+    console.log(
+      '[Kanban Component] useEffect for initialSearch: view.initialSearchQuery is:',
+      view.initialSearchQuery
+    );
+    if (view.initialSearchQuery) {
+      console.log('[Kanban Component] Applying initial search:', view.initialSearchQuery);
+      searchValue.search(view.initialSearchQuery, true);
+      view.initialSearchQuery = undefined;
+    }
+  }, [view, searchValue.search]); // searchValue.search dependency is important
 
   return (
     <DndScope id={view.id}>
@@ -278,7 +257,11 @@ export const Kanban = ({ view, stateManager }: KanbanProps) => {
               >
                 <div>
                   <Sortable axis={axis}>
-                    <Lanes lanes={boardData.children} collapseDir={axis} />
+                    <Lanes
+                      lanes={boardData.children}
+                      collapseDir={axis}
+                      targetHighlight={boardData.data.targetHighlight}
+                    />
                     <SortPlaceholder
                       accepts={boardAccepts}
                       className={c('lane-placeholder')}

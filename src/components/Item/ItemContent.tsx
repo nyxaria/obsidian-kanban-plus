@@ -20,7 +20,7 @@ import {
   MarkdownRenderer,
 } from '../MarkdownRenderer/MarkdownRenderer';
 import { KanbanContext, SearchContext } from '../context';
-import { c, useGetDateColorFn, useGetTagColorFn } from '../helpers';
+import { c, useGetDateColorFn, useGetTagColorFn, useGetTagSymbolFn } from '../helpers';
 import { EditState, EditingState, Item, isEditing } from '../types';
 import { DateAndTime, RelativeDate } from './DateAndTime';
 import { InlineMetadata } from './InlineMetadata';
@@ -134,46 +134,58 @@ export function Tags({
 }) {
   const { stateManager } = useContext(KanbanContext);
   const getTagColor = useGetTagColorFn(stateManager);
+  const getTagSymbol = useGetTagSymbolFn(stateManager);
   const search = useContext(SearchContext);
   const shouldShow = stateManager.useSetting('move-tags') || alwaysShow;
 
-  if (!tags.length || !shouldShow) return null;
+  if (!tags || !tags.length || !shouldShow) {
+    return null;
+  }
 
   return (
     <div className={c('item-tags')}>
-      {tags.map((tag, i) => {
-        const tagColor = getTagColor(tag);
+      {tags.map((originalTag, i) => {
+        const tagColor = getTagColor(originalTag);
+        const specificSymbol = getTagSymbol(originalTag);
 
         return (
-          <a
-            href={tag}
+          <span
             onClick={(e) => {
               e.preventDefault();
 
               const tagAction = stateManager.getSetting('tag-action');
               if (search && tagAction === 'kanban') {
-                search.search(tag, true);
+                search.search(originalTag, true);
                 return;
               }
 
               (stateManager.app as any).internalPlugins
                 .getPluginById('global-search')
-                .instance.openGlobalSearch(`tag:${tag}`);
+                .instance.openGlobalSearch(`tag:${originalTag}`);
             }}
             key={i}
             className={`tag ${c('item-tag')} ${
-              searchQuery && tag.toLocaleLowerCase().contains(searchQuery) ? 'is-search-match' : ''
+              searchQuery && originalTag.toLocaleLowerCase().contains(searchQuery)
+                ? 'is-search-match'
+                : ''
             }`}
-            style={
-              tagColor && {
+            style={{
+              cursor: 'pointer',
+              ...(tagColor && {
                 '--tag-color': tagColor.color,
                 '--tag-background': tagColor.backgroundColor,
-              }
-            }
+              }),
+            }}
           >
-            <span>{tag[0]}</span>
-            {tag.slice(1)}
-          </a>
+            {specificSymbol ? (
+              <>
+                <span>{specificSymbol} </span>
+                {originalTag.slice(1)}
+              </>
+            ) : (
+              originalTag
+            )}
+          </span>
         );
       })}
     </div>
