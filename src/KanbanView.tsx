@@ -1021,7 +1021,21 @@ export class KanbanView extends TextFileView implements HoverParent {
     ) {
       return;
     }
-    this.clearActiveSearchHighlight();
+    this.clearActiveSearchHighlight(); // Clears border highlight
+
+    // Also clear global search highlight if active
+    if (this.currentSearchMatch) {
+      console.log(
+        '[KanbanView] handleBoardClickToClearHighlight: Clearing currentSearchMatch for global search highlight.',
+        this.currentSearchMatch
+      );
+      this.currentSearchMatch = null;
+      this.setReactState({}); // Trigger re-render to remove global search highlights
+    } else {
+      console.log(
+        '[KanbanView] handleBoardClickToClearHighlight: No currentSearchMatch to clear for global search highlight.'
+      );
+    }
   };
 
   public setTargetHighlightLocation(
