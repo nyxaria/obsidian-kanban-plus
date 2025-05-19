@@ -4,10 +4,11 @@ import {
   ListItem as MdastListItem,
   Root as MdastRoot,
 } from 'mdast';
-import { ItemView, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
+import { FileView, ItemView, TFile, TFolder, WorkspaceLeaf, normalizePath } from 'obsidian';
 import { render, unmountComponentAtNode } from 'preact/compat';
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 
+import { KanbanView } from './KanbanView';
 import { DEFAULT_SETTINGS, KanbanSettings, SavedWorkspaceView } from './Settings';
 import { StateManager } from './StateManager';
 import { getTagColorFn, getTagSymbolFn } from './components/helpers';
@@ -243,33 +244,143 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
   const handleRowClick = useCallback(
     async (card: WorkspaceCard) => {
       const { app } = props.plugin;
-      let linkPath = card.sourceBoardPath;
-      let openState = {};
+      const targetPath = card.sourceBoardPath;
+      console.log(`[WorkspaceView] handleRowClick: Target path from card: '${targetPath}'`);
+      let existingLeaf: WorkspaceLeaf | null = null;
 
-      if (card.blockId) {
-        linkPath = `${card.sourceBoardPath}#^${card.blockId}`;
-        // For blockId links, Obsidian usually handles scrolling and focusing.
-        // We can still pass eState if we want our custom yellow border highlight.
-        openState = {
-          eState: {
-            filePath: card.sourceBoardPath,
-            blockId: card.blockId,
-          },
-        };
-      } else {
-        // Fallback if no blockId: try to highlight based on title and lane
-        // This relies on KanbanView being able to process this eState for highlighting
-        openState = {
-          eState: {
-            filePath: card.sourceBoardPath,
-            cardTitle: card.title, // Need to ensure KanbanView can use this
-            listName: card.laneTitle, // Need to ensure KanbanView can use this
-          },
-        };
+      // Normalize targetPath. It should be normalized already as it comes from TFile.path,
+      // but this ensures consistency.
+      const normalizedTargetPath = normalizePath(targetPath);
+      console.log(
+        `[WorkspaceView] Normalized target path for comparison: '${normalizedTargetPath}'`
+      );
+
+      // const leaves = app.workspace.getLeavesOfType('markdown'); // Previous approach
+      // console.log(`[WorkspaceView] Found ${leaves.length} markdown leaves to check.`);
+
+      const allLeaves: WorkspaceLeaf[] = [];
+      app.workspace.iterateAllLeaves((leaf) => {
+        allLeaves.push(leaf);
+      });
+      console.log(`[WorkspaceView] Found ${allLeaves.length} total leaves to check.`);
+
+      for (const leaf of allLeaves) {
+        // Iterate over all leaves
+        let currentLeafPath: string | undefined = undefined;
+        const view = leaf.view;
+
+        if (view instanceof KanbanView) {
+          // For KanbanView, get the file path from the view's file property
+          if (view.file) {
+            currentLeafPath = view.file.path;
+            console.log(
+              `[WorkspaceView] Leaf (type: kanban) is KanbanView. Path from .file.path: '${currentLeafPath}'`
+            );
+          }
+        } else if (view instanceof FileView) {
+          // For other FileViews (like markdown editor), get path from .file.path
+          if ((view as FileView).file) {
+            currentLeafPath = (view as FileView).file.path;
+            console.log(
+              `[WorkspaceView] Leaf (type: ${view.getViewType()}) is FileView. Path from .file.path: '${currentLeafPath}'`
+            );
+          }
+        }
+
+        // Fallback or alternative: check getViewState if path not found yet
+        if (!currentLeafPath) {
+          const leafState = leaf.getViewState();
+          const fileFromState = leafState.state?.file;
+          if (typeof fileFromState === 'string') {
+            currentLeafPath = fileFromState;
+            console.log(
+              `[WorkspaceView] Leaf (type: ${view.getViewType()}) path from .getViewState().state.file: '${currentLeafPath}'`
+            );
+          } else {
+            console.log(
+              `[WorkspaceView] Leaf (type: ${view.getViewType()}) path from .getViewState().state.file is not a string or is undefined. Value:`,
+              fileFromState
+            );
+          }
+        }
+
+        if (currentLeafPath) {
+          const normalizedLeafPath = normalizePath(currentLeafPath);
+          console.log(
+            `[WorkspaceView] Checking leaf: Type: ${view.getViewType()}, ` +
+              `Orig Path: '${currentLeafPath}', Norm Path: '${normalizedLeafPath}'`
+          );
+
+          if (normalizedLeafPath === normalizedTargetPath) {
+            console.log('[WorkspaceView] Found existing leaf for path:', normalizedTargetPath);
+            existingLeaf = leaf;
+            break; // Exit loop as we found a matching leaf
+          }
+        } else {
+          console.log(
+            `[WorkspaceView] Checking leaf: Type: ${view.getViewType()}, Path: undefined (cannot compare)`
+          );
+        }
       }
 
-      // console.log(`[WorkspaceView] Opening link: ${linkPath} with state:`, openState);
-      await app.workspace.openLinkText(linkPath, card.sourceBoardPath, false, { state: openState });
+      console.log(
+        '[WorkspaceView] Existing leaf found?',
+        existingLeaf ? `${existingLeaf.view.getViewType()} was found` : 'No'
+      );
+
+      const navigationState = {
+        eState: {
+          filePath: card.sourceBoardPath, // Use original path for state consistency
+          blockId: card.blockId,
+          cardTitle: !card.blockId ? card.title : undefined,
+          listName: !card.blockId ? card.laneTitle : undefined,
+        },
+      };
+
+      if (existingLeaf) {
+        console.log(
+          `[WorkspaceView] Activating existing leaf. View type: ${existingLeaf.view.getViewType()}`
+        );
+        app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+
+        // Check if the view in the existing leaf is a KanbanView
+        if (existingLeaf.view instanceof KanbanView) {
+          console.log('[WorkspaceView] Existing leaf is KanbanView instance. Calling setState.');
+          (existingLeaf.view as KanbanView).setState(navigationState, { history: false });
+          console.log('[WorkspaceView] setState called on existing KanbanView instance.');
+        } else if (existingLeaf.view.getViewType() === 'kanban') {
+          // Fallback check by view type string, useful if instanceof fails due to context issues
+          console.log(
+            '[WorkspaceView] Existing leaf type is "kanban" (by string). Attempting to call setState via casting.'
+          );
+          try {
+            (existingLeaf.view as unknown as KanbanView).setState(navigationState, {
+              history: false,
+            });
+            console.log(
+              '[WorkspaceView] setState call (unknown as KanbanView) attempted on existing KanbanView.'
+            );
+          } catch (e) {
+            console.error("[WorkspaceView] Error calling setState on view typed 'kanban':", e);
+          }
+        } else {
+          console.log(
+            `[WorkspaceView] Existing leaf is type '${existingLeaf.view.getViewType()}', not KanbanView. ` +
+              `Custom highlight/scroll state not passed. Obsidian's default navigation will apply if blockId was in path.`
+          );
+        }
+      } else {
+        console.log('[WorkspaceView] No existing leaf found. Opening new link.');
+        let linkPath = card.sourceBoardPath;
+        if (card.blockId) {
+          // Ensure openLinkText gets the #^blockId format for block navigation
+          linkPath = `${card.sourceBoardPath}#^${card.blockId}`;
+        }
+        console.log(`[WorkspaceView] Opening link: '${linkPath}' with state:`, navigationState);
+        await app.workspace.openLinkText(linkPath, card.sourceBoardPath, false, {
+          state: navigationState,
+        });
+      }
     },
     [props.plugin]
   );
