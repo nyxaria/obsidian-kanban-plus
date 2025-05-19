@@ -195,3 +195,10 @@ export function isEditing(state: EditState): state is EditCoordinates {
 export interface KanbanSettings extends GlobalSettings {
   [key: string]: any; // Allow for dynamic keys, though try to define known ones
 }
+
+export type FilterDisplayMode = 'popover' | 'inline';
+export type DateDisplayFormat = 'relative' | 'absolute' | string;
+
+export interface CellLocation {
+  // ... existing code ...
+}

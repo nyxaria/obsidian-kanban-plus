@@ -8,10 +8,10 @@ import { ItemView, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
 import { render, unmountComponentAtNode } from 'preact/compat';
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 
-import { DEFAULT_SETTINGS } from './Settings';
+import { DEFAULT_SETTINGS, KanbanSettings, SavedWorkspaceView } from './Settings';
 import { StateManager } from './StateManager';
 import { getTagColorFn, getTagSymbolFn } from './components/helpers';
-import { ItemData, KanbanSettings, TagColor, TagSymbolSetting } from './components/types';
+import { ItemData, TagColor, TagSymbolSetting } from './components/types';
 import { hasFrontmatterKey } from './helpers';
 import KanbanPlugin from './main';
 import { listItemToItemData } from './parsers/formats/list';
@@ -56,6 +56,30 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
   const [filteredCards, setFilteredCards] = useState<WorkspaceCard[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // New state for saved views
+  const [savedViews, setSavedViews] = useState<SavedWorkspaceView[]>([]);
+  const [newViewName, setNewViewName] = useState('');
+  const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
+
+  // Load saved views from settings
+  useEffect(() => {
+    const loadedSavedViews = props.plugin.settings.savedWorkspaceViews || [];
+    setSavedViews(loadedSavedViews);
+
+    // Attempt to load the last selected view on initial mount
+    const lastViewId = props.plugin.settings.lastSelectedWorkspaceViewId;
+    if (lastViewId) {
+      const viewToLoad = loadedSavedViews.find((v) => v.id === lastViewId);
+      if (viewToLoad) {
+        setActiveFilterTags([...viewToLoad.tags]);
+        setSelectedViewId(viewToLoad.id); // Update dropdown to reflect loaded view
+      }
+    }
+  }, [
+    props.plugin.settings.savedWorkspaceViews,
+    props.plugin.settings.lastSelectedWorkspaceViewId,
+  ]);
 
   // console.log('[WorkspaceView] Raw tag-colors setting:', JSON.stringify(props.plugin.settings['tag-colors'], null, 2));
   // console.log('[WorkspaceView] Raw tag-symbols setting:', JSON.stringify(props.plugin.settings['tag-symbols'], null, 2));
@@ -250,9 +274,109 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
     [props.plugin]
   );
 
+  const handleSaveView = useCallback(async () => {
+    if (!newViewName.trim() || activeFilterTags.length === 0) {
+      // Optionally, show an error message to the user
+      console.warn('[WorkspaceView] Cannot save view: name is empty or no active tags.');
+      return;
+    }
+    const newId = Date.now().toString();
+    const newSavedView: SavedWorkspaceView = {
+      id: newId,
+      name: newViewName.trim(),
+      tags: [...activeFilterTags], // Save a copy of current tags
+    };
+
+    const currentSavedViews = props.plugin.settings.savedWorkspaceViews || [];
+    const updatedViews = [...currentSavedViews, newSavedView];
+
+    props.plugin.settings.savedWorkspaceViews = updatedViews;
+    await props.plugin.saveSettings();
+    // No need to call setSavedViews here as the useEffect listening to props.plugin.settings will update it.
+    setNewViewName(''); // Clear input
+    alert(`View "${newSavedView.name}" saved!`); // Simple feedback
+  }, [newViewName, activeFilterTags, props.plugin]);
+
+  const handleLoadView = useCallback(async () => {
+    if (!selectedViewId) return;
+    const viewToLoad = savedViews.find((v) => v.id === selectedViewId);
+    if (viewToLoad) {
+      setActiveFilterTags([...viewToLoad.tags]); // Set active tags, which will trigger re-scan
+      // Save the loaded view ID as the last selected
+      props.plugin.settings.lastSelectedWorkspaceViewId = viewToLoad.id;
+      await props.plugin.saveSettings();
+    }
+  }, [selectedViewId, savedViews, props.plugin]);
+
   return (
     <div style={{ padding: '10px' }}>
       <h2>Kanban Workspace - Tag Filter</h2>
+
+      {/* Combined Save/Load Section - MOVED HERE */}
+      <div
+        style={{
+          marginTop: '10px',
+          marginBottom: '20px',
+          padding: '10px',
+          border: '1px solid var(--background-modifier-border-hover)',
+          borderRadius: '4px',
+          maxWidth: '420px',
+        }}
+      >
+        {/* Save View Controls */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            marginBottom: savedViews.length > 0 ? '10px' : '0',
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Enter view name to save"
+            value={newViewName}
+            onInput={(e) => setNewViewName((e.target as HTMLInputElement).value)}
+            style={{ flexGrow: 1, padding: '5px' }}
+          />
+          <button
+            onClick={handleSaveView}
+            disabled={!newViewName.trim() || activeFilterTags.length === 0}
+            style={{ minWidth: '150px' }}
+          >
+            Save Current View
+          </button>
+        </div>
+
+        {/* Load View Controls - only render if there are saved views */}
+        {savedViews.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <select
+              value={selectedViewId || ''}
+              onChange={(e) => setSelectedViewId((e.target as HTMLSelectElement).value)}
+              style={{ flexGrow: 1, padding: '5px' }}
+            >
+              <option value="" disabled>
+                Select a view to load...
+              </option>
+              {savedViews.map((view) => (
+                <option key={view.id} value={view.id}>
+                  {view.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleLoadView}
+              disabled={!selectedViewId}
+              style={{ minWidth: '150px' }}
+            >
+              Load Selected View
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Add Tag Section */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px' }}>
         <label htmlFor="workspace-tag-input" style={{ marginRight: '5px' }}>
           Add Tag:{' '}
@@ -276,6 +400,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
         </button>
       </div>
 
+      {/* Active tags display - REMAINS BELOW ADD TAG */}
       {activeFilterTags.length > 0 && (
         <div style={{ marginBottom: '10px', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
           {activeFilterTags.map((tag) => {
@@ -327,14 +452,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
         </div>
       )}
 
-      <button
-        onClick={() => handleScanDirectory(activeFilterTags)}
-        disabled={isLoading || activeFilterTags.length === 0}
-        style={{ marginBottom: '10px' }}
-      >
-        {isLoading ? 'Scanning...' : 'Refresh Scan with Current Tags'}
-      </button>
-
+      {/* Error and Table display - REMAINS AT THE BOTTOM */}
       {error && <div style={{ color: 'red', marginTop: '10px' }}>Error: {error}</div>}
       <div
         style={{
@@ -354,7 +472,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
         )}
         {!isLoading && filteredCards.length === 0 && !error && activeFilterTags.length === 0 && (
           <p>
-            <i>Add one or more tags above and click scan to find cards.</i>
+            <i>Add one or more tags above to automatically find cards.</i>
           </p>
         )}
         {!isLoading && filteredCards.length > 0 && (
@@ -362,9 +480,13 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
             <thead>
               <tr>
                 <th
-                  style={{ border: '1px solid var(--background-modifier-border)', padding: '4px' }}
+                  style={{
+                    border: '1px solid var(--background-modifier-border)',
+                    padding: '4px',
+                    paddingLeft: '0px',
+                  }}
                 >
-                  Title
+                  Ticket
                 </th>
                 <th
                   style={{
@@ -373,7 +495,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                     textAlign: 'center',
                   }}
                 >
-                  Tags
+                  Category
                 </th>
                 <th
                   style={{
@@ -391,7 +513,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                     textAlign: 'center',
                   }}
                 >
-                  Lane
+                  Tags
                 </th>
               </tr>
             </thead>
@@ -410,9 +532,28 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                     style={{
                       border: '1px solid var(--background-modifier-border)',
                       padding: '4px',
+                      paddingLeft: '8px',
                     }}
                   >
                     {card.title}
+                  </td>
+                  <td
+                    style={{
+                      border: '1px solid var(--background-modifier-border)',
+                      padding: '4px',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {card.laneTitle}
+                  </td>
+                  <td
+                    style={{
+                      border: '1px solid var(--background-modifier-border)',
+                      padding: '4px',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {card.sourceBoardName}
                   </td>
                   <td
                     style={{
@@ -446,24 +587,6 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                         </span>
                       );
                     })}
-                  </td>
-                  <td
-                    style={{
-                      border: '1px solid var(--background-modifier-border)',
-                      padding: '4px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {card.sourceBoardName}
-                  </td>
-                  <td
-                    style={{
-                      border: '1px solid var(--background-modifier-border)',
-                      padding: '4px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {card.laneTitle}
                   </td>
                 </tr>
               ))}
