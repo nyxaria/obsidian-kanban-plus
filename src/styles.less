@@ -1793,3 +1793,18 @@ body:not(.native-scrollbars) .kanban-plugin__scroll-container::-webkit-scrollbar
   background-color: transparent; /* Or revert to its normal background if necessary */
   box-shadow: none; /* Or revert to its normal box-shadow */
 }
+
+// Style for Mark.js based global search term highlighting
+.obsidian-search-match-highlight {
+  background-color: rgba(
+    255,
+    255,
+    0,
+    0.4
+  ); // A common search highlight color, semi-transparent yellow
+  border-radius: 3px;
+  // Optionally, if you want to ensure it doesn't affect padding/layout too much:
+  // padding: 0 1px;
+  // box-decoration-break: clone; /* Ensures background applies nicely across line breaks */
+  // -webkit-box-decoration-break: clone;
+}

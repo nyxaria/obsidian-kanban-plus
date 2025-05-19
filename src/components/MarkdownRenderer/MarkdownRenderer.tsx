@@ -19,6 +19,7 @@ interface MarkdownRendererProps extends HTMLAttributes<HTMLDivElement> {
   markdownString: string;
   searchQuery?: string;
   entityId?: string;
+  searchMatches?: any[];
 }
 
 function colorizeTags(wrapperEl: HTMLElement, getTagColor: (tag: string) => TagColor) {
@@ -62,6 +63,7 @@ export class BasicMarkdownRenderer extends Component {
   observer: ResizeObserver;
   isVisible: boolean = false;
   mark: Mark;
+  public searchMatches?: any[];
 
   lastWidth = -1;
   lastHeight = -1;
@@ -70,7 +72,8 @@ export class BasicMarkdownRenderer extends Component {
 
   constructor(
     public view: KanbanView,
-    public markdown: string
+    public markdown: string,
+    initialSearchMatches?: any[]
   ) {
     super();
     this.containerEl = createDiv(
@@ -78,6 +81,9 @@ export class BasicMarkdownRenderer extends Component {
     );
     this.mark = new Mark(this.containerEl);
     this.renderCapability = new PromiseCapability<void>();
+    if (initialSearchMatches) {
+      this.searchMatches = initialSearchMatches;
+    }
   }
 
   onload() {
@@ -87,7 +93,7 @@ export class BasicMarkdownRenderer extends Component {
   // eslint-disable-next-line react/require-render-return
   async render() {
     this.containerEl.empty();
-
+    // Always render the base markdown first
     await ObsidianRenderer.render(
       this.view.app,
       this.markdown,
@@ -95,6 +101,44 @@ export class BasicMarkdownRenderer extends Component {
       this.view.file.path,
       this
     );
+
+    // Then, if global search matches are present, apply them using Mark.js
+    if (
+      this.searchMatches &&
+      this.searchMatches.length > 0 &&
+      this.view.currentSearchMatch?.content
+    ) {
+      console.log(
+        '[BasicMarkdownRenderer] Applying Mark.js highlights for global search matches:',
+        this.searchMatches
+      );
+      const fullContentForSearchOffsets = this.view.currentSearchMatch.content;
+      const termsToMark = this.searchMatches.map((matchOffsets: [number, number]) => {
+        return fullContentForSearchOffsets.substring(matchOffsets[0], matchOffsets[1]);
+      });
+      // Remove duplicate terms to avoid marking issues if search terms overlap or are identical
+      const uniqueTerms = [...new Set(termsToMark)];
+      console.log('[BasicMarkdownRenderer] Unique terms to mark:', uniqueTerms);
+
+      this.mark.unmark({
+        // Clear previous marks from Mark.js before applying new ones
+        done: () => {
+          uniqueTerms.forEach((term) => {
+            if (term && term.trim() !== '') {
+              // Ensure term is not empty
+              this.mark.mark(term, {
+                className: 'obsidian-search-match-highlight', // Custom class for styling
+                accuracy: 'exact', // Try 'partially' or 'complementary' if 'exact' is too strict
+                separateWordSearch: false, // Mark occurrences within words
+              });
+            }
+          });
+        },
+      });
+    } else {
+      // If no search matches, ensure any previous Mark.js highlights are cleared
+      this.mark.unmark();
+    }
 
     this.renderCapability.resolve();
     if (!(this.view as any)?._loaded || !(this as any)._loaded) return;
@@ -189,9 +233,10 @@ export class BasicMarkdownRenderer extends Component {
     this.isVisible = false;
   }
 
-  set(markdown: string) {
+  set(markdown: string, newSearchMatches?: any[]) {
     if ((this as any)._loaded) {
       this.markdown = markdown;
+      this.searchMatches = newSearchMatches;
       this.renderCapability = new PromiseCapability<void>();
       this.unload();
       this.load();
@@ -223,6 +268,7 @@ export const MarkdownRenderer = memo(function MarkdownPreviewRenderer({
   className,
   markdownString,
   searchQuery,
+  searchMatches,
   ...divProps
 }: MarkdownRendererProps) {
   const { view, stateManager } = useContext(KanbanContext);
@@ -289,7 +335,7 @@ export const MarkdownRenderer = memo(function MarkdownPreviewRenderer({
       return () => entityManager?.emitter.off('visibility-change', onVisibilityChange);
     }
 
-    const markdownRenderer = new BasicMarkdownRenderer(view, markdownString);
+    const markdownRenderer = new BasicMarkdownRenderer(view, markdownString, searchMatches);
     markdownRenderer.wrapperEl = elRef.current;
 
     const preview = (renderer.current = view.addChild(markdownRenderer));
@@ -306,7 +352,7 @@ export const MarkdownRenderer = memo(function MarkdownPreviewRenderer({
       renderer.current?.renderCapability.resolve();
       entityManager?.emitter.off('visibility-change', onVisibilityChange);
     };
-  }, [view, entityId, entityManager]);
+  }, [view, entityId, entityManager, searchMatches]);
 
   // Respond to changes to the markdown string
   useEffect(() => {
@@ -315,12 +361,12 @@ export const MarkdownRenderer = memo(function MarkdownPreviewRenderer({
 
     preview.renderCapability.resolve();
 
-    preview.set(markdownString);
+    preview.set(markdownString, searchMatches);
     preview.renderCapability.promise.then(() => {
       colorizeTags(elRef.current, getTagColor);
       colorizeDates(elRef.current, getDateColor);
     });
-  }, [markdownString]);
+  }, [markdownString, searchMatches]);
 
   useEffect(() => {
     if (!renderer.current) return;
@@ -368,31 +414,41 @@ export const MarkdownRenderer = memo(function MarkdownPreviewRenderer({
 export const MarkdownClonedPreviewRenderer = memo(function MarkdownClonedPreviewRenderer({
   entityId,
   className,
+  markdownString,
+  searchQuery,
+  searchMatches,
   ...divProps
 }: MarkdownRendererProps) {
   const { view } = useContext(KanbanContext);
   const elRef = useRef<HTMLDivElement>();
-  const preview = view.previewCache.get(entityId);
 
-  let styles: CSSProperties | undefined = undefined;
-  if (preview && preview.lastRefHeight > 0) {
-    styles = {
-      width: `${preview.lastRefWidth}px`,
-      height: `${preview.lastRefHeight}px`,
+  useEffect(() => {
+    if (!elRef.current) return;
+    const currentEl = elRef.current;
+
+    let renderer = view.previewCache.get(entityId);
+
+    if (!renderer) {
+      renderer = new BasicMarkdownRenderer(view, markdownString, searchMatches);
+      if (entityId) {
+        view.previewCache.set(entityId, renderer);
+      }
+      view.addChild(renderer);
+    } else {
+      renderer.set(markdownString, searchMatches);
+    }
+
+    renderer.migrate(currentEl);
+    renderer.show();
+
+    return () => {
+      if (renderer && !entityId) {
+        view.removeChild(renderer);
+      }
     };
-  }
+  }, [view, entityId, markdownString, searchMatches]);
 
   return (
-    <div
-      style={styles}
-      ref={(el) => {
-        elRef.current = el;
-        if (el && preview && el.childElementCount === 0) {
-          el.append(preview.containerEl.cloneNode(true));
-        }
-      }}
-      className={classcat([c('markdown-preview-wrapper'), className])}
-      {...divProps}
-    />
+    <div ref={elRef} className={classcat([c('markdown-renderer'), className])} {...divProps}></div>
   );
 });

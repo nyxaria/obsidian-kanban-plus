@@ -82,6 +82,7 @@ export interface ItemContentProps {
   showMetadata?: boolean;
   editState: EditState;
   isStatic: boolean;
+  targetHighlight?: any;
 }
 
 function checkCheckbox(stateManager: StateManager, title: string, checkboxIndex: number) {
@@ -199,6 +200,7 @@ export const ItemContent = memo(function ItemContent({
   searchQuery,
   showMetadata = true,
   isStatic,
+  targetHighlight,
 }: ItemContentProps) {
   const { stateManager, filePath, boardModifiers } = useContext(KanbanContext);
   const getDateColor = useGetDateColorFn(stateManager);
@@ -295,6 +297,7 @@ export const ItemContent = memo(function ItemContent({
           markdownString={item.data.title}
           searchQuery={searchQuery}
           onPointerUp={onCheckboxContainerClick}
+          searchMatches={targetHighlight?.match?.matches}
         />
       ) : (
         <MarkdownRenderer
