@@ -20,6 +20,8 @@ import {
   DateColor,
   DateColorSetting,
   DateColorSettingTemplate,
+  DateDisplayFormat,
+  FilterDisplayMode,
   MetadataSetting,
   MetadataSettingTemplate,
   TagColor,
@@ -53,6 +55,14 @@ const numberRegEx = /^\d+(?:\.\d+)?$/;
 
 export type KanbanFormat = 'basic' | 'board' | 'table' | 'list';
 
+export type TimeFormat = 'h:mm A' | 'HH:mm';
+
+export interface SavedWorkspaceView {
+  id: string;
+  name: string;
+  tags: string[];
+}
+
 export interface KanbanSettings {
   [frontmatterKey]?: KanbanFormat;
   'append-archive-date'?: boolean;
@@ -62,7 +72,7 @@ export interface KanbanSettings {
   'date-colors'?: DateColor[];
   'date-display-format'?: string;
   'date-format'?: string;
-  'date-picker-week-start'?: number;
+  'date-picker-week-start'?: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   'date-time-display-format'?: string;
   'date-trigger'?: string;
   'full-list-lane-width'?: boolean;
@@ -89,17 +99,31 @@ export interface KanbanSettings {
   'show-set-view'?: boolean;
   'show-view-as-markdown'?: boolean;
   'table-sizing'?: Record<string, number>;
-  'tag-action'?: 'kanban' | 'obsidian';
+  'tag-action'?: 'kanban' | 'obsidian' | 'global';
   'tag-colors'?: TagColor[];
-  'tag-sort'?: TagSort[];
+  'tag-sort'?: TagSort[] | string[];
   'time-format'?: string;
   'time-trigger'?: string;
   'tag-symbols'?: TagSymbolSetting[];
+  'new-card-template'?: string;
+  'new-lane-template'?: string;
+  'show-button-for-new-card'?: boolean;
+  'archive-heading'?: string;
+  'archive-empty-tasks'?: boolean;
+  'enable-markdown-preview-checkbox-toggle'?: boolean;
+  'default-time'?: string;
+  'filter-display-mode'?: FilterDisplayMode;
+  'inline-date-format'?: DateDisplayFormat;
+  'inline-time-format'?: TimeFormat;
+  savedWorkspaceViews: SavedWorkspaceView[];
+  lastSelectedWorkspaceViewId?: string;
 }
 
 export interface KanbanViewSettings {
   [frontmatterKey]?: KanbanFormat;
   'list-collapse'?: boolean[];
+  'tag-symbols': [];
+  savedWorkspaceViews: [];
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -1173,7 +1197,7 @@ export class SettingsManager {
           if (value) {
             this.applySettingsUpdate({
               'date-picker-week-start': {
-                $set: Number(value),
+                $set: Number(value) as 0 | 1 | 2 | 3 | 4 | 5 | 6,
               },
             });
           } else {
@@ -1674,7 +1698,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'date-format': 'YYYY-MM-DD',
   'date-picker-week-start': 0,
   'date-time-display-format': 'MMM D, YYYY h:mm a',
-  'date-trigger': '',
+  'date-trigger': '@',
   'full-list-lane-width': false,
   'hide-card-count': false,
   'inline-metadata-position': 'body',
@@ -1694,15 +1718,27 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'show-archive-all': true,
   'show-board-settings': true,
   'show-checkboxes': true,
-  'show-relative-date': true,
+  'show-relative-date': false,
   'show-search': true,
   'show-set-view': true,
   'show-view-as-markdown': true,
   'table-sizing': {},
-  'tag-action': 'obsidian',
+  'tag-action': 'kanban',
   'tag-colors': [],
   'tag-sort': [],
   'time-format': 'HH:mm',
-  'time-trigger': '',
+  'time-trigger': '@@',
   'tag-symbols': [],
+  'new-card-template': '',
+  'new-lane-template': '',
+  'show-button-for-new-card': true,
+  'archive-heading': '## Archive',
+  'archive-empty-tasks': false,
+  'enable-markdown-preview-checkbox-toggle': false,
+  'default-time': '12:00',
+  'filter-display-mode': 'popover',
+  'inline-date-format': 'relative',
+  'inline-time-format': 'h:mm A',
+  savedWorkspaceViews: [],
+  lastSelectedWorkspaceViewId: undefined,
 };
