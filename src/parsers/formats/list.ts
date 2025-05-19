@@ -110,86 +110,80 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     checkChar: item.checked ? item.checkChar || ' ' : ' ',
   };
 
-  visit(
-    item,
-    (node) => {
-      return node.type !== 'paragraph';
-    },
-    (node, i, parent) => {
-      const genericNode = node as ValueNode;
+  visit(item, (node, i, parent) => {
+    const genericNode = node as ValueNode;
 
-      if (genericNode.type === 'blockid') {
-        itemData.blockId = genericNode.value;
-        return true;
-      }
-
-      if (
-        genericNode.type === 'hashtag' &&
-        !(parent.children.first() as any)?.value?.startsWith('```')
-      ) {
-        if (!itemData.metadata.tags) {
-          itemData.metadata.tags = [];
-        }
-
-        itemData.metadata.tags.push('#' + genericNode.value);
-
-        if (moveTags) {
-          title = markRangeForDeletion(title, {
-            start: node.position.start.offset - itemBoundary.start,
-            end: node.position.end.offset - itemBoundary.start,
-          });
-        }
-        return true;
-      }
-
-      if (genericNode.type === 'date' || genericNode.type === 'dateLink') {
-        itemData.metadata.dateStr = (genericNode as DateNode).date;
-
-        if (moveDates) {
-          title = markRangeForDeletion(title, {
-            start: node.position.start.offset - itemBoundary.start,
-            end: node.position.end.offset - itemBoundary.start,
-          });
-        }
-        return true;
-      }
-
-      if (genericNode.type === 'time') {
-        itemData.metadata.timeStr = (genericNode as TimeNode).time;
-        if (moveDates) {
-          title = markRangeForDeletion(title, {
-            start: node.position.start.offset - itemBoundary.start,
-            end: node.position.end.offset - itemBoundary.start,
-          });
-        }
-        return true;
-      }
-
-      if (genericNode.type === 'embedWikilink') {
-        itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
-        return true;
-      }
-
-      if (genericNode.type === 'wikilink') {
-        itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
-        itemData.metadata.fileMetadata = (genericNode as FileNode).fileMetadata;
-        itemData.metadata.fileMetadataOrder = (genericNode as FileNode).fileMetadataOrder;
-        return true;
-      }
-
-      if (genericNode.type === 'link' && (genericNode as FileNode).fileAccessor) {
-        itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
-        itemData.metadata.fileMetadata = (genericNode as FileNode).fileMetadata;
-        itemData.metadata.fileMetadataOrder = (genericNode as FileNode).fileMetadataOrder;
-        return true;
-      }
-
-      if (genericNode.type === 'embedLink') {
-        itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
-        return true;
-      }
+    if (genericNode.type === 'blockid') {
+      itemData.blockId = genericNode.value;
+      return true;
     }
-  );
+
+    if (
+      genericNode.type === 'hashtag' &&
+      !(parent.children.first() as any)?.value?.startsWith('```')
+    ) {
+      if (!itemData.metadata.tags) {
+        itemData.metadata.tags = [];
+      }
+
+      itemData.metadata.tags.push('#' + genericNode.value);
+
+      if (moveTags) {
+        title = markRangeForDeletion(title, {
+          start: node.position.start.offset - itemBoundary.start,
+          end: node.position.end.offset - itemBoundary.start,
+        });
+      }
+      return true;
+    }
+
+    if (genericNode.type === 'date' || genericNode.type === 'dateLink') {
+      itemData.metadata.dateStr = (genericNode as DateNode).date;
+
+      if (moveDates) {
+        title = markRangeForDeletion(title, {
+          start: node.position.start.offset - itemBoundary.start,
+          end: node.position.end.offset - itemBoundary.start,
+        });
+      }
+      return true;
+    }
+
+    if (genericNode.type === 'time') {
+      itemData.metadata.timeStr = (genericNode as TimeNode).time;
+      if (moveDates) {
+        title = markRangeForDeletion(title, {
+          start: node.position.start.offset - itemBoundary.start,
+          end: node.position.end.offset - itemBoundary.start,
+        });
+      }
+      return true;
+    }
+
+    if (genericNode.type === 'embedWikilink') {
+      itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
+      return true;
+    }
+
+    if (genericNode.type === 'wikilink') {
+      itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
+      itemData.metadata.fileMetadata = (genericNode as FileNode).fileMetadata;
+      itemData.metadata.fileMetadataOrder = (genericNode as FileNode).fileMetadataOrder;
+      return true;
+    }
+
+    if (genericNode.type === 'link' && (genericNode as FileNode).fileAccessor) {
+      itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
+      itemData.metadata.fileMetadata = (genericNode as FileNode).fileMetadata;
+      itemData.metadata.fileMetadataOrder = (genericNode as FileNode).fileMetadataOrder;
+      return true;
+    }
+
+    if (genericNode.type === 'embedLink') {
+      itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
+      return true;
+    }
+  });
 
   itemData.title = preprocessTitle(stateManager, dedentNewLines(executeDeletion(title)));
 

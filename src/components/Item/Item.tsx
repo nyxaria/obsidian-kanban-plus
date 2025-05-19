@@ -73,65 +73,57 @@ const ItemInner = memo(function ItemInner({
   }, [item.data.forceEditMode]);
 
   useEffect(() => {
-    console.log(
-      `[ItemInner] ID: ${item.id}, targetHighlight received:`,
-      JSON.stringify(targetHighlight, null, 2)
-    );
-    let shouldHighlight = false;
+    let shouldApplyYellowBorder = false;
     if (targetHighlight && itemInnerRef.current) {
-      // Try to highlight based on blockId first
-      if (targetHighlight.blockId && item.data.blockId) {
-        const itemBlockId = item.data.blockId.startsWith('#^')
-          ? item.data.blockId.substring(2)
-          : item.data.blockId.startsWith('^')
-            ? item.data.blockId.substring(1)
-            : item.data.blockId;
-        if (itemBlockId === targetHighlight.blockId) {
-          console.log(
-            `[ItemInner] Highlighting item ${item.id} by blockId: ${targetHighlight.blockId}`
-          );
-          shouldHighlight = true;
+      // Case 1: targetHighlight is from Workspace Navigation (has blockId and/or cardTitle)
+      if (targetHighlight.blockId) {
+        if (item.data.blockId) {
+          const itemBlockId = item.data.blockId.startsWith('#^')
+            ? item.data.blockId.substring(2)
+            : item.data.blockId.startsWith('^')
+              ? item.data.blockId.substring(1)
+              : item.data.blockId;
+          if (itemBlockId === targetHighlight.blockId) {
+            // console.log(`[ItemInner] Yellow border for item ${item.id} by workspace nav blockId: ${targetHighlight.blockId}`);
+            shouldApplyYellowBorder = true;
+          }
+        }
+        // Fallback for workspace nav if blockId didn't match or was absent, but cardTitle is present
+        if (!shouldApplyYellowBorder && targetHighlight.cardTitle && item.data.titleRaw) {
+          if (item.data.titleRaw.startsWith(targetHighlight.cardTitle)) {
+            // console.log(`[ItemInner] Yellow border for item ${item.id} by workspace nav cardTitle (fallback): ${targetHighlight.cardTitle}`);
+            shouldApplyYellowBorder = true;
+          }
         }
       }
-      // RESTORED: Fallback to highlighting based on text match
-      else if (
-        targetHighlight.match &&
-        targetHighlight.match.matches &&
-        targetHighlight.match.matches.length > 0 &&
-        item.data.titleRaw
-      ) {
-        const matchedText = targetHighlight.match.content.substring(
-          targetHighlight.match.matches[0][0],
-          targetHighlight.match.matches[0][1]
-        );
-        if (item.data.titleRaw.includes(matchedText)) {
-          console.log(`[ItemInner] Highlighting item ${item.id} by text content match.`);
-          shouldHighlight = true; // Set true if text matches
+      // Case 2: targetHighlight is from Global Search (has content and matches properties directly)
+      else if (targetHighlight.matches && targetHighlight.content) {
+        if (item.data.titleRaw && targetHighlight.matches.length > 0) {
+          // Use the first match to determine if this card is relevant for the border
+          const firstMatchOffsets = targetHighlight.matches[0]; // e.g., [startIndex, endIndex]
+          const matchedTextInGlobalSearch = targetHighlight.content.substring(
+            firstMatchOffsets[0],
+            firstMatchOffsets[1]
+          );
+          // Check if the item's raw title contains the text that was matched by global search.
+          if (item.data.titleRaw.includes(matchedTextInGlobalSearch)) {
+            // console.log(`[ItemInner] Yellow border for item ${item.id} by global search text content match: "${matchedTextInGlobalSearch}"`);
+            shouldApplyYellowBorder = true;
+          }
         }
       }
 
-      if (shouldHighlight) {
+      if (shouldApplyYellowBorder) {
         itemInnerRef.current.classList.add('search-result-highlight');
+        // This scrollIntoView was part of the original logic.
+        // It might provide more precise centering than other scrolling mechanisms.
         itemInnerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
       } else {
         itemInnerRef.current.classList.remove('search-result-highlight');
       }
     } else if (itemInnerRef.current) {
+      // Ensure highlight is removed if targetHighlight is null or itemInnerRef.current was not available initially
       itemInnerRef.current.classList.remove('search-result-highlight');
-      // Optional: Log if targetHighlight was present but no highlight occurred
-      if (targetHighlight) {
-        let reason = 'unknown';
-        if (!targetHighlight.blockId && !targetHighlight.match) {
-          reason = 'targetHighlight missing blockId and match structure';
-        } else if (targetHighlight.blockId && !item.data.blockId) {
-          reason = 'targetHighlight has blockId but item does not';
-        }
-        console.log(
-          `[ItemInner] Item ID: ${item.id}, No highlight occurred. Reason: ${reason}. Target: `,
-          JSON.stringify(targetHighlight, null, 2),
-          `Item blockId: ${item.data.blockId}, Item titleRaw: ${item.data.titleRaw}`
-        );
-      }
     }
   }, [targetHighlight, item.id, item.data.blockId, item.data.titleRaw]);
 
@@ -197,6 +189,7 @@ const ItemInner = memo(function ItemInner({
           setEditState={setEditState}
           editState={editState}
           isStatic={isStatic}
+          targetHighlight={targetHighlight}
         />
         <ItemMenuButton editState={editState} setEditState={setEditState} showMenu={showItemMenu} />
       </div>

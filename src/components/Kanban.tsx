@@ -29,6 +29,7 @@ const boardAccepts = [DataTypes.Lane];
 interface KanbanProps {
   stateManager: StateManager;
   view: KanbanView;
+  reactState: any;
 }
 
 function getCSSClass(frontmatter: Record<string, any>): string[] {
@@ -47,7 +48,7 @@ function getCSSClass(frontmatter: Record<string, any>): string[] {
   return classes;
 }
 
-export const Kanban = ({ view, stateManager }: KanbanProps) => {
+export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
   const dateColorsFromHook = stateManager.useSetting('date-colors');
   const tagColorsFromHook = stateManager.useSetting('tag-colors');
 
@@ -109,6 +110,19 @@ export const Kanban = ({ view, stateManager }: KanbanProps) => {
       stateManager.stateReceivers.remove(handler);
     };
   }, [stateManager]);
+
+  useEffect(() => {
+    if (boardData && (view.pendingHighlightScroll || view.currentSearchMatch)) {
+      let reason = '';
+      if (view.pendingHighlightScroll) reason = 'pendingHighlightScroll is true';
+      if (view.currentSearchMatch)
+        reason += (reason ? ' and ' : '') + 'currentSearchMatch is present';
+      console.log(
+        `[Kanban Component] useEffect: Relevant condition met (${reason}). Calling view.setReactState({}).`
+      );
+      view.setReactState({});
+    }
+  }, [boardData, view, view.pendingHighlightScroll, view.currentSearchMatch]);
 
   useEffect(() => {
     view.emitter.on('showLaneForm', showLaneForm);
@@ -260,7 +274,7 @@ export const Kanban = ({ view, stateManager }: KanbanProps) => {
                     <Lanes
                       lanes={boardData.children}
                       collapseDir={axis}
-                      targetHighlight={boardData.data.targetHighlight}
+                      targetHighlight={reactState?.targetHighlight ?? null}
                     />
                     <SortPlaceholder
                       accepts={boardAccepts}

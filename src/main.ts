@@ -14,6 +14,11 @@ import { render, unmountComponentAtNode, useEffect, useState } from 'preact/comp
 
 import { createApp } from './DragDropApp';
 import { KanbanView, kanbanIcon, kanbanViewType } from './KanbanView';
+import {
+  KANBAN_WORKSPACE_ICON,
+  KANBAN_WORKSPACE_VIEW_TYPE,
+  KanbanWorkspaceView,
+} from './KanbanWorkspaceView';
 import { KanbanSettings, KanbanSettingsTab } from './Settings';
 import { StateManager } from './StateManager';
 import { DateSuggest, TimeSuggest } from './components/Editor/suggest';
@@ -132,6 +137,7 @@ export default class KanbanPlugin extends Plugin {
     this.addSettingTab(this.settingsTab);
 
     this.registerView(kanbanViewType, (leaf) => new KanbanView(leaf, this));
+    this.registerView(KANBAN_WORKSPACE_VIEW_TYPE, (leaf) => new KanbanWorkspaceView(leaf, this));
     this.registerMonkeyPatches();
     this.registerCommands();
     this.registerEvents();
@@ -141,33 +147,30 @@ export default class KanbanPlugin extends Plugin {
         if (!file) {
           return;
         }
-
         await new Promise((resolve) => setTimeout(resolve, 50));
-
         const activeLeaf = this.app.workspace.activeLeaf;
         if (!activeLeaf || !activeLeaf.view) {
-          console.log("[Kanban Main] 'file-open': No active leaf or active leaf has no view.");
+          // console.log("[Kanban Main] 'file-open': No active leaf or active leaf has no view.");
           return;
         }
-
         if (!(activeLeaf.view instanceof KanbanView)) {
-          this.app.workspace.getLeavesOfType(kanbanViewType).forEach((leaf) => {
-            if (leaf.view instanceof KanbanView) {
-              leaf.view.clearActiveSearchHighlight();
-            }
-          });
+          // This logic for clearing highlights on non-active Kanban views should remain if desired,
+          // but the click-to-clear on the active KanbanView is the primary mechanism now.
+          // For maximum cleanup, this could also be removed if the click-to-clear is deemed sufficient.
+          // this.app.workspace.getLeavesOfType(kanbanViewType).forEach((leaf) => {
+          //   if (leaf.view instanceof KanbanView) {
+          //     leaf.view.clearActiveSearchHighlight();
+          //   }
+          // });
           return;
         }
-
         const kanbanView = activeLeaf.view as KanbanView;
         if (kanbanView.file !== file) {
-          kanbanView.clearActiveSearchHighlight();
+          // kanbanView.clearActiveSearchHighlight(); // This was part of the previous strategy
           return;
         }
-
         let eStateToUse: any = null;
         const currentHistoryState = (activeLeaf as any).history?.current;
-
         if (currentHistoryState && currentHistoryState.eState) {
           eStateToUse = currentHistoryState.eState;
         } else {
@@ -176,11 +179,13 @@ export default class KanbanPlugin extends Plugin {
             eStateToUse = viewState.eState;
           }
         }
-
         if (eStateToUse && (eStateToUse.blockId || eStateToUse.match)) {
           kanbanView.processHighlightFromExternal(eStateToUse);
         } else {
-          kanbanView.clearActiveSearchHighlight();
+          // This specific call might be redundant if click-to-clear is effective,
+          // but harmless if clearActiveSearchHighlight handles null state gracefully.
+          // For now, let it be, or remove if click-to-clear is robust enough.
+          // kanbanView.clearActiveSearchHighlight();
         }
       })
     );
@@ -196,6 +201,13 @@ export default class KanbanPlugin extends Plugin {
 
     this.addRibbonIcon(kanbanIcon, t('Create new board'), () => {
       this.newKanban();
+    });
+
+    this.addRibbonIcon(KANBAN_WORKSPACE_ICON, 'Open Kanban Workspace View', () => {
+      this.app.workspace.getLeaf(true).setViewState({
+        type: KANBAN_WORKSPACE_VIEW_TYPE,
+        active: true,
+      });
     });
   }
 
@@ -771,6 +783,17 @@ export default class KanbanPlugin extends Plugin {
         view.getBoardSettings();
       },
     });
+
+    this.addCommand({
+      id: 'open-kanban-workspace-view',
+      name: 'Kanban Workspace: Open tag filter view',
+      callback: () => {
+        this.app.workspace.getLeaf(true).setViewState({
+          type: KANBAN_WORKSPACE_VIEW_TYPE,
+          active: true,
+        });
+      },
+    });
   }
 
   registerMonkeyPatches() {
@@ -828,74 +851,50 @@ export default class KanbanPlugin extends Plugin {
         },
 
         setViewState: (originalMethod: any) => {
-          // Ensure 'pluginInstance' refers to your plugin's 'this' context, e.g., by declaring 'const pluginInstance = this;'
-          // in the outer scope where 'this.registerMonkeyPatch' is called.
-          // For this snippet, we'll assume 'pluginInstance' is available.
-          // 'this' inside this async function refers to the WorkspaceLeaf instance.
-
           return async function (viewState: ViewState, navState?: any) {
-            // const pluginInstance = self; // self would be 'this' from the outer main.ts scope.
-            // This is a placeholder, ensure pluginInstance is correctly scoped from your main plugin class.
-            // For example, if 'this.registerMonkeyPatch' is in a method of your plugin class, then:
-            // const pluginInstance = this; (in that method, before around:)
-            // Then pluginInstance.app would be valid.
-
-            // For the purpose of this tool call, we'll assume 'this.app' on WorkspaceLeaf provides the App instance,
-            // or that a correctly scoped 'pluginInstance.app' can be substituted by the user.
-            // Let's use 'this.app' (as WorkspaceLeaf often has an 'app' property) and cast if needed.
-            const currentApp = this.app as App;
-
-            console.log(
-              '[Kanban Main] setViewState MONKEYPATCH ENTRY. Incoming ViewState (JSON):',
-              JSON.stringify(viewState, null, 2),
-              'Incoming navState:',
-              JSON.stringify(navState, null, 2)
-            );
+            // console.log(
+            //   '[Kanban Main] setViewState MONKEYPATCH ENTRY. Incoming ViewState (JSON):',
+            //   JSON.stringify(viewState, null, 2),
+            //   'Incoming navState:',
+            //   JSON.stringify(navState, null, 2)
+            // );
 
             let eStateForHighlighting: any = null;
-
-            // Prioritize eState from viewState.state if it exists
             if (viewState.state?.eState) {
               eStateForHighlighting = viewState.state.eState;
-              console.log(
-                '[Kanban Main] setViewState: Found eState directly in viewState.state.eState:',
-                JSON.stringify(eStateForHighlighting, null, 2)
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: Found eState directly in viewState.state.eState:',
+              //   JSON.stringify(eStateForHighlighting, null, 2)
+              // );
             } else if ((viewState as any).eState) {
-              // Check top-level eState on viewState (less common but seen in attempts)
               eStateForHighlighting = (viewState as any).eState;
-              console.log(
-                '[Kanban Main] setViewState: Found eState at viewState.eState (top-level):',
-                JSON.stringify(eStateForHighlighting, null, 2)
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: Found eState at viewState.eState (top-level):',
+              //   JSON.stringify(eStateForHighlighting, null, 2)
+              // );
             } else if (navState) {
-              // Fallback to the explicit navState argument
               eStateForHighlighting = navState;
-              console.log(
-                '[Kanban Main] setViewState: Using eState from explicit navState argument:',
-                JSON.stringify(eStateForHighlighting, null, 2)
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: Using eState from explicit navState argument:',
+              //   JSON.stringify(eStateForHighlighting, null, 2)
+              // );
             }
 
-            // If eStateForHighlighting is still not found (or lacks blockId) and it's a navigation to a markdown file,
-            // try to derive blockId from the global search query.
             if (
               (!eStateForHighlighting || !eStateForHighlighting.blockId) &&
               viewState.type === 'markdown' &&
               viewState.state?.file
             ) {
-              console.log(
-                '[Kanban Main] setViewState: eState (with blockId) not found directly, trying global search query for file:',
-                viewState.state.file
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: eState (with blockId) not found directly, trying global search query for file:',
+              //   viewState.state.file
+              // );
               try {
-                const searchPluginInstance = (currentApp as any).internalPlugins?.getPluginById(
+                const searchPluginInstance = (this.app as any).internalPlugins?.getPluginById(
                   'global-search'
                 )?.instance;
-
                 if (searchPluginInstance) {
                   let potentialQuery: string | undefined;
-                  // Order of preference for query source
                   if (searchPluginInstance.searchQueryInputEl?.value) {
                     potentialQuery = searchPluginInstance.searchQueryInputEl.value;
                   } else if (searchPluginInstance.lastSearch?.query) {
@@ -905,31 +904,26 @@ export default class KanbanPlugin extends Plugin {
                   } else if (searchPluginInstance.searchQuery) {
                     potentialQuery = searchPluginInstance.searchQuery;
                   }
-
                   if (
                     potentialQuery &&
                     typeof potentialQuery === 'string' &&
                     potentialQuery.trim() !== ''
                   ) {
-                    console.log(
-                      '[Kanban Main] setViewState: Found potentialQuery from global search:',
-                      potentialQuery
-                    );
-
-                    const blockIdMatch = potentialQuery.match(/#\\^([a-zA-Z0-9]+)/);
+                    // console.log(
+                    //   '[Kanban Main] setViewState: Found potentialQuery from global search:',
+                    //   potentialQuery
+                    // );
+                    const blockIdMatch = potentialQuery.match(/#\^([a-zA-Z0-9]+)/);
                     if (blockIdMatch && blockIdMatch[1]) {
                       const blockIdFromQuery = blockIdMatch[1];
                       const targetFilePath = viewState.state.file as string;
                       const targetFileName = targetFilePath.substring(
                         targetFilePath.lastIndexOf('/') + 1
                       );
-                      const targetFileNameNoExt = targetFileName.replace(/\\.md$/, '');
-
-                      // Heuristic: if the query mentions the current file (name or full path) and has a blockId.
+                      const targetFileNameNoExt = targetFileName.replace(/\.md$/, '');
                       const normalizedQuery = potentialQuery.toLowerCase();
                       const normalizedFileName = targetFileNameNoExt.toLowerCase();
                       const normalizedFilePath = targetFilePath.toLowerCase();
-
                       if (
                         normalizedQuery.includes(normalizedFileName) ||
                         normalizedQuery.includes(normalizedFilePath)
@@ -938,126 +932,105 @@ export default class KanbanPlugin extends Plugin {
                           blockId: blockIdFromQuery,
                           sourceQuery: potentialQuery,
                         };
-                        console.log(
-                          `[Kanban Main] setViewState: Constructed eState from global search query. BlockId: ${blockIdFromQuery}, Target File: ${targetFileName}`
-                        );
+                        // console.log(
+                        //   `[Kanban Main] setViewState: Constructed eState from global search query. BlockId: ${blockIdFromQuery}, Target File: ${targetFileName}`
+                        // );
                       } else {
-                        console.log(
-                          `[Kanban Main] setViewState: Query contains blockId ${blockIdFromQuery}, but target filename "${targetFileNameNoExt}" not detected in query "${potentialQuery}".`
-                        );
+                        // console.log(
+                        //   `[Kanban Main] setViewState: Query contains blockId ${blockIdFromQuery}, but target filename "${targetFileNameNoExt}" not detected in query "${potentialQuery}".`
+                        // );
                       }
                     } else {
-                      console.log(
-                        '[Kanban Main] setViewState: Global search query did not contain a #^blockId pattern:',
-                        potentialQuery
-                      );
+                      // console.log(
+                      //   '[Kanban Main] setViewState: Global search query did not contain a #^blockId pattern:',
+                      //   potentialQuery
+                      // );
                     }
                   } else {
-                    console.log(
-                      '[Kanban Main] setViewState: No usable potentialQuery found in global search instance.'
-                    );
+                    // console.log(
+                    //   '[Kanban Main] setViewState: No usable potentialQuery found in global search instance.'
+                    // );
                   }
                 } else {
-                  console.log(
-                    '[Kanban Main] setViewState: Global search plugin instance not found when trying to get query.'
-                  );
+                  // console.log(
+                  //   '[Kanban Main] setViewState: Global search plugin instance not found when trying to get query.'
+                  // );
                 }
               } catch (err) {
-                console.warn(
-                  '[Kanban Main] setViewState: Error trying to get global search query for eState:',
-                  err
-                );
+                // console.warn(
+                //   '[Kanban Main] setViewState: Error trying to get global search query for eState:',
+                //   err
+                // );
               }
             }
-
             if (!eStateForHighlighting?.blockId) {
-              // Check specifically for blockId
-              console.log(
-                '[Kanban Main] setViewState: No blockId found for highlighting after all checks.'
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: No blockId found for highlighting after all checks.'
+              // );
             } else {
-              console.log(
-                '[Kanban Main] setViewState: eStateForHighlighting that will be used (JSON):',
-                JSON.stringify(eStateForHighlighting, null, 2)
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: eStateForHighlighting that will be used (JSON):'
+              //   JSON.stringify(eStateForHighlighting, null, 2)
+              // );
             }
-
-            // Prepare the new state to be passed to the original method
             const newState = { ...viewState };
             if (newState.state) {
-              // Inject the determined eState into newState.state.eState for KanbanView to pick up
               newState.state.eState = eStateForHighlighting || null;
             } else {
-              // If viewState.state is null/undefined, create it to hold eState
               newState.state = { eState: eStateForHighlighting || null } as any;
             }
-
-            // Determine if the file is a Kanban file
-            // 'this' is WorkspaceLeaf. 'self' is the plugin instance (KanbanPlugin).
             let isKanbanFile = false;
             if (newState.state?.file) {
               const filePath = newState.state.file as string;
-              console.log(
-                '[Kanban Main] setViewState: self.app object presence:',
-                self.app ? 'exists' : 'null or undefined'
-              );
-
+              // console.log(
+              //   '[Kanban Main] setViewState: self.app object presence:',
+              //   self.app ? 'exists' : 'null or undefined'
+              // );
               if (self.app?.vault) {
-                // Check for vault
                 const file = self.app.vault.getAbstractFileByPath(filePath);
                 if (file instanceof TFile) {
-                  isKanbanFile = hasFrontmatterKey(file); // Pass TFile object
-                  console.log(
-                    `[Kanban Main] setViewState: Check isKanbanFile for ${filePath} (using TFile). Result: ${isKanbanFile}`
-                  );
+                  isKanbanFile = hasFrontmatterKey(file);
+                  // console.log(
+                  //   `[Kanban Main] setViewState: Check isKanbanFile for ${filePath} (using TFile). Result: ${isKanbanFile}`
+                  // );
                 } else {
-                  console.log(
-                    `[Kanban Main] setViewState: Could not get TFile for ${filePath}. Path might be a folder or non-existent.`
-                  );
+                  // console.log(
+                  //   `[Kanban Main] setViewState: Could not get TFile for ${filePath}. Path might be a folder or non-existent.`
+                  // );
                 }
               } else {
-                console.log('[Kanban Main] setViewState: self.app.vault is not available.');
+                // console.log('[Kanban Main] setViewState: self.app.vault is not available.');
               }
             }
-
             if (isKanbanFile && newState.type !== kanbanViewType) {
-              console.log(
-                '[Kanban Main] setViewState: Is a Kanban file, will change type to kanban.'
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: Is a Kanban file, will change type to kanban.'
+              // );
               newState.type = kanbanViewType;
             } else if (isKanbanFile && newState.type === kanbanViewType) {
-              console.log(
-                '[Kanban Main] setViewState: Is a Kanban file and type is already kanban.'
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: Is a Kanban file and type is already kanban.'
+              // );
             } else {
-              // This path will be taken if it's not a kanban file
-              console.log(
-                '[Kanban Main] setViewState: Not a Kanban file or type does not need change. Current type:',
-                newState.type
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: Not a Kanban file or type does not need change. Current type:',
+              //   newState.type
+              // );
             }
-
-            console.log(
-              '[Kanban Main] setViewState: newState being passed to original setViewState (JSON):',
-              JSON.stringify(newState, null, 2)
-            );
-
-            // Store the determined eState on the leaf for KanbanView to potentially pick up later
-            // if the initial view type was markdown but then switches to Kanban.
+            // console.log(
+            //   '[Kanban Main] setViewState: newState being passed to original setViewState (JSON):',
+            //   JSON.stringify(newState, null, 2)
+            // );
             if (
               eStateForHighlighting &&
               (eStateForHighlighting.blockId || eStateForHighlighting.match)
             ) {
               (this as any)._kanbanPendingHighlightState = eStateForHighlighting;
-              console.log(
-                '[Kanban Main] setViewState: Stored _kanbanPendingHighlightState on leaf:',
-                JSON.stringify(eStateForHighlighting, null, 2)
-              );
+              // console.log(
+              //   '[Kanban Main] setViewState: Stored _kanbanPendingHighlightState on leaf:',
+              //   JSON.stringify(eStateForHighlighting, null, 2)
+              // );
             }
-
-            // Call the original method.
-            // Pass 'eStateForHighlighting' as the second argument (navState)
-            // as it contains the most accurate navigation intent we could determine.
             return originalMethod.call(this, newState, eStateForHighlighting);
           };
         },

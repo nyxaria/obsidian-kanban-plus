@@ -165,6 +165,12 @@ export class StateManager {
         this.saveToDisk();
       }
 
+      console.log(
+        '[StateManager] setState: About to notify stateReceivers. Number of receivers:',
+        this.stateReceivers.length,
+        'New state ID:',
+        this.state?.id
+      );
       this.stateReceivers.forEach((receiver) => receiver(this.state));
 
       if (oldSettings !== newSettings && newSettings) {

@@ -39,10 +39,7 @@ export interface TagSort {
   tag: string;
 }
 
-export interface TagSymbol {
-  tagKey: string;
-  symbol: string;
-}
+export type TagSymbol = '#' | '🏷️' | string;
 
 export interface DateColor {
   isToday?: boolean;
@@ -193,4 +190,8 @@ export function isEditing(state: EditState): state is EditCoordinates {
   if (state === null) return false;
   if (typeof state === 'number') return false;
   return true;
+}
+
+export interface KanbanSettings extends GlobalSettings {
+  [key: string]: any; // Allow for dynamic keys, though try to define known ones
 }
