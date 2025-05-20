@@ -178,7 +178,11 @@ const ItemInner = memo(function ItemInner({
 
   const onDoubleClick: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
     (e) => {
-      if (isStatic || !stateManager.userSetting('editable')) return;
+      console.log('[ItemInner] onDoubleClick triggered', {
+        isStatic,
+        editable: stateManager.getSetting('editable'),
+      });
+      if (isStatic || !stateManager.getSetting('editable')) return;
       setEditState({ x: e.clientX, y: e.clientY });
       e.stopPropagation();
     },

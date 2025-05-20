@@ -19,7 +19,12 @@ import {
   KANBAN_WORKSPACE_VIEW_TYPE,
   KanbanWorkspaceView,
 } from './KanbanWorkspaceView';
-import { KanbanSettings, KanbanSettingsTab } from './Settings';
+import {
+  DEFAULT_SETTINGS,
+  KanbanSettings,
+  KanbanSettingsTab,
+  SettingsManagerConfig,
+} from './Settings';
 import { StateManager } from './StateManager';
 import { DateSuggest, TimeSuggest } from './components/Editor/suggest';
 import { Item } from './components/types';
@@ -55,7 +60,7 @@ function getEditorClass(app: any) {
 
 export default class KanbanPlugin extends Plugin {
   settingsTab: KanbanSettingsTab;
-  settings: KanbanSettings = { savedWorkspaceViews: [] };
+  settings: KanbanSettings;
 
   // leafid => view mode
   kanbanFileModes: Record<string, string> = {};
@@ -92,7 +97,7 @@ export default class KanbanPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, await this.loadData());
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
   }
 
   async saveSettings() {
