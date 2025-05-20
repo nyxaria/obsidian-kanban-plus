@@ -40,18 +40,23 @@ export function LaneForm({ onNewLane, closeLaneForm }: LaneFormProps) {
         },
       });
 
-      cm.dispatch({
-        changes: {
-          from: 0,
-          to: cm.state.doc.length,
-          insert: '',
-        },
-      });
+      setTimeout(() => {
+        console.log(
+          '[LaneForm] createLane (inner setTimeout): Dispatching CM changes and local state updates.'
+        );
+        cm.dispatch({
+          changes: {
+            from: 0,
+            to: cm.state.doc.length,
+            insert: '',
+          },
+        });
 
-      setShouldMarkAsComplete(false);
-      onNewLane();
+        setShouldMarkAsComplete(false);
+        onNewLane();
+      }, 0);
     },
-    [onNewLane, setShouldMarkAsComplete, boardModifiers]
+    [onNewLane, setShouldMarkAsComplete, boardModifiers, shouldMarkAsComplete]
   );
 
   const editState = useMemo(() => ({ x: 0, y: 0 }), []);
@@ -92,9 +97,12 @@ export function LaneForm({ onNewLane, closeLaneForm }: LaneFormProps) {
         <button
           className={c('lane-action-add')}
           onClick={() => {
-            if (editorRef.current) {
-              createLane(editorRef.current, editorRef.current.state.doc.toString());
-            }
+            setTimeout(() => {
+              console.log('[LaneForm] Add list onClick: Calling createLane via setTimeout');
+              if (editorRef.current) {
+                createLane(editorRef.current, editorRef.current.state.doc.toString());
+              }
+            }, 0);
           }}
         >
           {t('Add list')}

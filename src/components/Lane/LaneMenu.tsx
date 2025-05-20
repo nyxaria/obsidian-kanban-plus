@@ -71,12 +71,47 @@ export function useSettingsMenu({ setEditState, path, lane }: UseSettingsMenuPar
   const [confirmAction, setConfirmAction] = useState<LaneAction>(null);
 
   const settingsMenu = useMemo(() => {
+    if (!lane || !lane.data) {
+      console.error(
+        '[LaneMenu] CRITICAL: lane or lane.data is undefined during menu construction. Lane ID:',
+        lane?.id,
+        'Lane object:',
+        lane
+      );
+      return new Menu().addItem((item) =>
+        item.setTitle(t('Error: Lane data missing') || 'Error: Lane data missing').setDisabled(true)
+      );
+    }
+    console.log(
+      '[LaneMenu] useMemo: Building menu for lane ID:',
+      lane.id,
+      'Title:',
+      lane.data.title,
+      'Sorted:',
+      lane.data.sorted,
+      'Children count:',
+      lane.children.length
+    );
+
     const metadataSortOptions = new Set<string>();
     let canSortDate = false;
     let canSortTags = false;
 
-    lane.children.forEach((item) => {
-      const taskData = item.data.metadata.inlineMetadata;
+    lane.children.forEach((item, index) => {
+      if (!item) {
+        console.error(`[LaneMenu] Item at index ${index} is undefined. Lane ID: ${lane.id}`);
+        return;
+      }
+      if (!item.data) {
+        console.error(
+          `[LaneMenu] item.data is undefined for item ID ${item.id} (index ${index}). Lane ID: ${lane.id}`
+        );
+        return;
+      }
+      // item.data.metadata can be legitimately undefined if no metadata exists.
+      // Access to its properties will use optional chaining.
+
+      const taskData = item.data.metadata?.inlineMetadata;
       if (taskData) {
         taskData.forEach((m) => {
           if (m.key === 'repeat') return;
@@ -84,28 +119,70 @@ export function useSettingsMenu({ setEditState, path, lane }: UseSettingsMenuPar
         });
       }
 
-      if (!canSortDate && item.data.metadata.date) canSortDate = true;
-      if (!canSortTags && item.data.metadata.tags?.length) canSortTags = true;
+      if (!canSortDate && item.data.metadata?.date) canSortDate = true;
+      if (!canSortTags && item.data.metadata?.tags?.length) canSortTags = true;
     });
 
     const menu = new Menu()
       .addItem((item) => {
-        item
-          .setIcon('lucide-edit-3')
-          .setTitle(t('Edit list'))
-          .onClick(() => setEditState({ x: 0, y: 0 }));
+        console.log('[LaneMenu] AddItem: "Edit list" - MenuItem created:', item);
+        const titleString = t('Edit list') || 'Edit list';
+        console.log(
+          '[LaneMenu] AddItem: "Edit list" - Title string for setTitle:',
+          titleString,
+          typeof titleString
+        );
+        if (typeof titleString === 'undefined') {
+          console.error('[LaneMenu] CRITICAL: t("Edit list") returned undefined!');
+        }
+        item.setTitle(titleString);
+        console.log('[LaneMenu] AddItem: "Edit list" - After setTitle:', item);
+        item.setIcon('lucide-edit-3').onClick(() => {
+          console.log(
+            '[LaneMenu] "Edit list" onClick triggered. Scheduling setEditState via setTimeout.'
+          );
+          setTimeout(() => {
+            console.log('[LaneMenu] setEditState called via setTimeout for Edit list.');
+            setEditState({ x: 0, y: 0 });
+          }, 0);
+        });
+        console.log('[LaneMenu] AddItem: "Edit list" - After onClick:', item);
       })
       .addItem((item) => {
-        item
-          .setIcon('lucide-archive')
-          .setTitle(t('Archive cards'))
-          .onClick(() => setConfirmAction('archive-items'));
+        console.log('[LaneMenu] AddItem: "Archive cards" - MenuItem created:', item);
+        const titleString = t('Archive cards') || 'Archive cards';
+        console.log(
+          '[LaneMenu] AddItem: "Archive cards" - Title string for setTitle:',
+          titleString,
+          typeof titleString
+        );
+        item.setTitle(titleString);
+        console.log('[LaneMenu] AddItem: "Archive cards" - After setTitle:', item);
+        item.setIcon('lucide-archive').onClick(() => {
+          console.log('[LaneMenu] "Archive cards" onClick. Scheduling setConfirmAction.');
+          setTimeout(() => {
+            console.log('[LaneMenu] setConfirmAction called via setTimeout for "Archive cards".');
+            setConfirmAction('archive-items');
+          }, 0);
+        });
+        console.log('[LaneMenu] AddItem: "Archive cards" - After onClick:', item);
       })
       .addSeparator()
       .addItem((i) => {
-        i.setIcon('arrow-left-to-line')
-          .setTitle(t('Insert list before'))
-          .onClick(() =>
+        console.log('[LaneMenu] AddItem: "Insert list before" - MenuItem created:', i);
+        const titleString = t('Insert list before') || 'Insert list before';
+        console.log(
+          '[LaneMenu] AddItem: "Insert list before" - Title string for setTitle:',
+          titleString,
+          typeof titleString
+        );
+        i.setTitle(titleString);
+        console.log('[LaneMenu] AddItem: "Insert list before" - After setTitle:', i);
+        i.setIcon('arrow-left-to-line').onClick(() => {
+          console.log('[LaneMenu] "Insert list before" onClick. Scheduling insertLane.');
+          i.menu.hide();
+          setTimeout(() => {
+            console.log('[LaneMenu] insertLane called via setTimeout for "Insert list before".');
             boardModifiers.insertLane(path, {
               ...LaneTemplate,
               id: generateInstanceId(),
@@ -115,17 +192,28 @@ export function useSettingsMenu({ setEditState, path, lane }: UseSettingsMenuPar
                 shouldMarkItemsComplete: false,
                 forceEditMode: true,
               },
-            })
-          );
+            });
+          }, 0);
+        });
+        console.log('[LaneMenu] AddItem: "Insert list before" - After onClick:', i);
       })
       .addItem((i) => {
-        i.setIcon('arrow-right-to-line')
-          .setTitle(t('Insert list after'))
-          .onClick(() => {
+        console.log('[LaneMenu] AddItem: "Insert list after" - MenuItem created:', i);
+        const titleString = t('Insert list after') || 'Insert list after';
+        console.log(
+          '[LaneMenu] AddItem: "Insert list after" - Title string for setTitle:',
+          titleString,
+          typeof titleString
+        );
+        i.setTitle(titleString);
+        console.log('[LaneMenu] AddItem: "Insert list after" - After setTitle:', i);
+        i.setIcon('arrow-right-to-line').onClick(() => {
+          console.log('[LaneMenu] "Insert list after" onClick. Scheduling insertLane.');
+          i.menu.hide();
+          setTimeout(() => {
+            console.log('[LaneMenu] insertLane called via setTimeout for "Insert list after".');
             const newPath = [...path];
-
             newPath[newPath.length - 1] = newPath[newPath.length - 1] + 1;
-
             boardModifiers.insertLane(newPath, {
               ...LaneTemplate,
               id: generateInstanceId(),
@@ -136,38 +224,82 @@ export function useSettingsMenu({ setEditState, path, lane }: UseSettingsMenuPar
                 forceEditMode: true,
               },
             });
-          });
+          }, 0);
+        });
+        console.log('[LaneMenu] AddItem: "Insert list after" - After onClick:', i);
       })
       .addSeparator()
       .addItem((item) => {
-        item
-          .setIcon('lucide-archive')
-          .setTitle(t('Archive list'))
-          .onClick(() => setConfirmAction('archive'));
+        console.log('[LaneMenu] AddItem: "Archive list" - MenuItem created:', item);
+        const titleString = t('Archive list') || 'Archive list';
+        console.log(
+          '[LaneMenu] AddItem: "Archive list" - Title string for setTitle:',
+          titleString,
+          typeof titleString
+        );
+        item.setTitle(titleString);
+        console.log('[LaneMenu] AddItem: "Archive list" - After setTitle:', item);
+        item.setIcon('lucide-archive').onClick(() => {
+          console.log('[LaneMenu] "Archive list" onClick. Scheduling setConfirmAction.');
+          setTimeout(() => {
+            console.log('[LaneMenu] setConfirmAction called via setTimeout for "Archive list".');
+            setConfirmAction('archive');
+          }, 0);
+        });
+        console.log('[LaneMenu] AddItem: "Archive list" - After onClick:', item);
       })
       .addItem((item) => {
-        item
-          .setIcon('lucide-trash-2')
-          .setTitle(t('Delete list'))
-          .onClick(() => setConfirmAction('delete'));
+        console.log('[LaneMenu] AddItem: "Delete list" - MenuItem created:', item);
+        const titleString = t('Delete list') || 'Delete list';
+        console.log(
+          '[LaneMenu] AddItem: "Delete list" - Title string for setTitle:',
+          titleString,
+          typeof titleString
+        );
+        item.setTitle(titleString);
+        console.log('[LaneMenu] AddItem: "Delete list" - After setTitle:', item);
+        item.setIcon('lucide-trash-2').onClick(() => {
+          console.log('[LaneMenu] "Delete list" onClick. Scheduling setConfirmAction.');
+          setTimeout(() => {
+            console.log('[LaneMenu] setConfirmAction called via setTimeout for "Delete list".');
+            setConfirmAction('delete');
+          }, 0);
+        });
+        console.log('[LaneMenu] AddItem: "Delete list" - After onClick:', item);
       })
       .addSeparator();
 
-    const addSortOptions = (menu: Menu) => {
-      menu.addItem((item) => {
-        item
-          .setIcon('arrow-down-up')
-          .setTitle(t('Sort by card text'))
-          .onClick(() => {
-            const children = lane.children.slice();
+    const addSortOptions = (menuInstance: Menu, isSubmenu: boolean) => {
+      menuInstance.addItem((item) => {
+        console.log(
+          '[LaneMenu] AddSortOptions: "Sort by card text" - MenuItem created:',
+          item,
+          'Is Submenu:',
+          isSubmenu
+        );
+        const titleString = t('Sort by card text') || 'Sort by card text';
+        console.log(
+          '[LaneMenu] AddSortOptions: "Sort by card text" - Title string for setTitle:',
+          titleString,
+          typeof titleString
+        );
+        item.setTitle(titleString);
+        console.log('[LaneMenu] AddSortOptions: "Sort by card text" - After setTitle:', item);
+        item.setIcon('arrow-down-up').onClick(() => {
+          console.log('[LaneMenu] "Sort by card text" onClick. Scheduling sort.');
+          item.menu.hide();
+          setTimeout(() => {
+            console.log('[LaneMenu] Performing sort for "Sort by card text".');
+            const children = lane.children.slice().filter((child) => child && child.data);
             const isAsc = lane.data.sorted === LaneSort.TitleAsc;
 
             children.sort((a, b) => {
+              const titleA = a.data.title || '';
+              const titleB = b.data.title || '';
               if (isAsc) {
-                return b.data.title.localeCompare(a.data.title);
+                return titleB.localeCompare(titleA);
               }
-
-              return a.data.title.localeCompare(b.data.title);
+              return titleA.localeCompare(titleB);
             });
 
             boardModifiers.updateLane(
@@ -186,27 +318,46 @@ export function useSettingsMenu({ setEditState, path, lane }: UseSettingsMenuPar
                 },
               })
             );
-          });
+          }, 0);
+        });
       });
 
       if (canSortDate) {
-        menu.addItem((item) => {
-          item
-            .setIcon('arrow-down-up')
-            .setTitle(t('Sort by date'))
-            .onClick(() => {
-              const children = lane.children.slice();
+        menuInstance.addItem((item) => {
+          console.log(
+            '[LaneMenu] AddSortOptions: "Sort by date" - MenuItem created:',
+            item,
+            'Is Submenu:',
+            isSubmenu
+          );
+          const titleString = t('Sort by date') || 'Sort by date';
+          console.log(
+            '[LaneMenu] AddSortOptions: "Sort by date" - Title string for setTitle:',
+            titleString,
+            typeof titleString
+          );
+          item.setTitle(titleString);
+          console.log('[LaneMenu] AddSortOptions: "Sort by date" - After setTitle:', item);
+          item.setIcon('arrow-down-up').onClick(() => {
+            console.log('[LaneMenu] "Sort by date" onClick. Scheduling sort.');
+            item.menu.hide();
+            setTimeout(() => {
+              console.log('[LaneMenu] Performing sort for "Sort by date".');
+              const children = lane.children
+                .slice()
+                .filter((child) => child && child.data && child.data.metadata);
               const mod = lane.data.sorted === LaneSort.DateAsc ? -1 : 1;
 
               children.sort((a, b) => {
                 const aDate: moment.Moment | undefined =
-                  a.data.metadata.time || a.data.metadata.date;
+                  a.data.metadata?.time || a.data.metadata?.date;
                 const bDate: moment.Moment | undefined =
-                  b.data.metadata.time || b.data.metadata.date;
+                  b.data.metadata?.time || b.data.metadata?.date;
 
                 if (aDate && !bDate) return -1 * mod;
                 if (bDate && !aDate) return 1 * mod;
                 if (!aDate && !bDate) return 0;
+                if (!aDate || !bDate) return 0; // Should be covered by above, but for type safety
 
                 return (aDate.isBefore(bDate) ? -1 : 1) * mod;
               });
@@ -225,23 +376,41 @@ export function useSettingsMenu({ setEditState, path, lane }: UseSettingsMenuPar
                   },
                 })
               );
-            });
+            }, 0);
+          });
         });
       }
 
       if (canSortTags) {
-        menu.addItem((item) => {
-          item
-            .setIcon('arrow-down-up')
-            .setTitle(t('Sort by tags'))
-            .onClick(() => {
+        menuInstance.addItem((item) => {
+          console.log(
+            '[LaneMenu] AddSortOptions: "Sort by tags" - MenuItem created:',
+            item,
+            'Is Submenu:',
+            isSubmenu
+          );
+          const titleString = t('Sort by tags') || 'Sort by tags';
+          console.log(
+            '[LaneMenu] AddSortOptions: "Sort by tags" - Title string for setTitle:',
+            titleString,
+            typeof titleString
+          );
+          item.setTitle(titleString);
+          console.log('[LaneMenu] AddSortOptions: "Sort by tags" - After setTitle:', item);
+          item.setIcon('arrow-down-up').onClick(() => {
+            console.log('[LaneMenu] "Sort by tags" onClick. Scheduling sort.');
+            item.menu.hide();
+            setTimeout(() => {
+              console.log('[LaneMenu] Performing sort for "Sort by tags".');
               const tagSortOrder = stateManager.getSetting('tag-sort');
-              const children = lane.children.slice();
+              const children = lane.children
+                .slice()
+                .filter((child) => child && child.data && child.data.metadata);
               const desc = lane.data.sorted === LaneSort.TagsAsc ? true : false;
 
               children.sort((a, b) => {
-                const tagsA = a.data.metadata.tags;
-                const tagsB = b.data.metadata.tags;
+                const tagsA = a.data.metadata?.tags;
+                const tagsB = b.data.metadata?.tags;
 
                 if (!tagsA?.length && !tagsB?.length) return 0;
                 if (!tagsA?.length) return 1;
@@ -276,37 +445,57 @@ export function useSettingsMenu({ setEditState, path, lane }: UseSettingsMenuPar
                   },
                 })
               );
-            });
+            }, 0);
+          });
         });
       }
 
       if (metadataSortOptions.size) {
         metadataSortOptions.forEach((k) => {
-          menu.addItem((i) => {
-            i.setIcon('arrow-down-up')
-              .setTitle(t('Sort by') + ' ' + lableToName(k).toLocaleLowerCase())
-              .onClick(() => {
-                const children = lane.children.slice();
+          menuInstance.addItem((i) => {
+            const sortByKeyTitle =
+              (t('Sort by') || 'Sort by') + ' ' + lableToName(k).toLocaleLowerCase();
+            console.log(
+              '[LaneMenu] AddSortOptions: "Sort by ' + k + '" - MenuItem created:',
+              i,
+              'Is Submenu:',
+              isSubmenu
+            );
+            console.log(
+              '[LaneMenu] AddSortOptions: "Sort by ' + k + '" - Title string for setTitle:',
+              sortByKeyTitle,
+              typeof sortByKeyTitle
+            );
+            i.setTitle(sortByKeyTitle);
+            console.log('[LaneMenu] AddSortOptions: "Sort by ' + k + '" - After setTitle:', i);
+            i.setIcon('arrow-down-up').onClick(() => {
+              console.log('[LaneMenu] "Sort by ' + k + '" onClick. Scheduling sort.');
+              i.menu.hide();
+              setTimeout(() => {
+                console.log('[LaneMenu] Performing sort for "Sort by ' + k + '".');
+                const children = lane.children
+                  .slice()
+                  .filter((child) => child && child.data && child.data.metadata);
                 const desc = lane.data.sorted === k + '-asc' ? true : false;
 
                 children.sort((a, b) => {
-                  const valA = a.data.metadata.inlineMetadata?.find((m) => m.key === k);
-                  const valB = b.data.metadata.inlineMetadata?.find((m) => m.key === k);
+                  const valA = a.data.metadata?.inlineMetadata?.find((m) => m.key === k);
+                  const valB = b.data.metadata?.inlineMetadata?.find((m) => m.key === k);
 
                   if (valA === undefined && valB === undefined) return 0;
                   if (valA === undefined) return 1;
                   if (valB === undefined) return -1;
 
+                  // Ensure valA.value and valB.value exist before passing to anyToString
+                  const strA =
+                    valA.value !== undefined ? anyToString(valA.value, stateManager) : '';
+                  const strB =
+                    valB.value !== undefined ? anyToString(valB.value, stateManager) : '';
+
                   if (desc) {
-                    return defaultSort(
-                      anyToString(valB.value, stateManager),
-                      anyToString(valA.value, stateManager)
-                    );
+                    return defaultSort(strB, strA);
                   }
-                  return defaultSort(
-                    anyToString(valA.value, stateManager),
-                    anyToString(valB.value, stateManager)
-                  );
+                  return defaultSort(strA, strB);
                 });
 
                 boardModifiers.updateLane(
@@ -322,24 +511,44 @@ export function useSettingsMenu({ setEditState, path, lane }: UseSettingsMenuPar
                     },
                   })
                 );
-              });
+              }, 0);
+            });
           });
         });
       }
     };
 
     if (Platform.isPhone) {
-      addSortOptions(menu);
+      addSortOptions(menu, false);
     } else {
       menu.addItem((item) => {
-        const submenu = (item as any).setTitle(t('Sort by')).setIcon('arrow-down-up').setSubmenu();
-
-        addSortOptions(submenu);
+        const submenuTitle = t('Sort by') || 'Sort by';
+        console.log('[LaneMenu] MainMenu: "Sort by" (for submenu) - MenuItem created:', item);
+        console.log(
+          '[LaneMenu] MainMenu: "Sort by" (for submenu) - Title string for setTitle:',
+          submenuTitle,
+          typeof submenuTitle
+        );
+        item.setTitle(submenuTitle);
+        console.log('[LaneMenu] MainMenu: "Sort by" (for submenu) - After setTitle:', item);
+        const submenu = (item as any).setIcon('arrow-down-up').setSubmenu();
+        console.log('[LaneMenu] MainMenu: "Sort by" (for submenu) - Submenu created:', submenu);
+        addSortOptions(submenu, true);
+        console.log(
+          '[LaneMenu] MainMenu: "Sort by" (for submenu) - After addSortOptions to submenu. Parent item:',
+          item
+        );
       });
     }
 
+    console.log(
+      '[LaneMenu] useMemo: Finished building menu for lane ID:',
+      lane.id,
+      'Menu object:',
+      menu
+    );
     return menu;
-  }, [stateManager, setConfirmAction, path, lane]);
+  }, [stateManager, boardModifiers, setConfirmAction, path, lane]);
 
   return {
     settingsMenu,

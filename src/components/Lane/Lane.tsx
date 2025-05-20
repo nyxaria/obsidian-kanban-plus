@@ -73,15 +73,21 @@ function DraggableLaneRaw({
   const shouldPrepend = isCompactPrepend || insertionMethod === 'prepend';
 
   const toggleIsCollapsed = useCallback(() => {
-    stateManager.setState((board) => {
-      const collapseState = [...view.getViewState('list-collapse')];
-      collapseState[laneIndex] = !collapseState[laneIndex];
-      view.setViewState('list-collapse', collapseState);
-      return update(board, {
-        data: { settings: { 'list-collapse': { $set: collapseState } } },
+    setTimeout(() => {
+      console.log(
+        '[LaneComponent] toggleIsCollapsed: Calling stateManager.setState via setTimeout for laneIndex:',
+        laneIndex
+      );
+      stateManager.setState((board) => {
+        const collapseState = [...view.getViewState('list-collapse')];
+        collapseState[laneIndex] = !collapseState[laneIndex];
+        view.setViewState('list-collapse', collapseState);
+        return update(board, {
+          data: { settings: { 'list-collapse': { $set: collapseState } } },
+        });
       });
-    });
-  }, [stateManager, laneIndex]);
+    }, 0);
+  }, [stateManager, view, laneIndex]);
 
   const addItems = useCallback(
     (items: Item[]) => {

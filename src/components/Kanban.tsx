@@ -125,17 +125,9 @@ export const Kanban = ({
     setIsLaneFormVisible(false);
   }, []);
 
-  const onNewLane = useCallback(
-    (data: Partial<Lane>) => {
-      if (boardData?.children) {
-        boardModifiers.addLane(
-          stateManager.parser.getDefaultLaneData(data.title, boardData.children.length)
-        );
-        closeLaneForm();
-      }
-    },
-    [boardData, boardModifiers, closeLaneForm, stateManager.parser]
-  );
+  const onNewLane = useCallback(() => {
+    closeLaneForm();
+  }, [closeLaneForm]);
 
   useEffect(() => {
     const handler = (newState: Board) => {

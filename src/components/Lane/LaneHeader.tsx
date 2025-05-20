@@ -10,9 +10,10 @@ import { getDropAction } from '../Editor/helpers';
 import { GripIcon } from '../Icon/GripIcon';
 import { Icon } from '../Icon/Icon';
 import { KanbanContext } from '../context';
-import { c } from '../helpers';
+import { c, generateInstanceId } from '../helpers';
 import { EditState, EditingProcessState, Lane, isEditCoordinates } from '../types';
 import { ConfirmAction, useSettingsMenu } from './LaneMenu';
+import { LaneMenuIcon } from './LaneMenuIcon';
 import { LaneSettings } from './LaneSettings';
 import { LaneLimitCounter, LaneTitle } from './LaneTitle';
 
@@ -43,7 +44,14 @@ function LaneButtons({
     <div className={c('lane-settings-button-wrapper')}>
       {isEditCoordinates(editState) ? (
         <a
-          onClick={() => setEditState(EditingProcessState.cancel)}
+          onClick={() => {
+            setTimeout(() => {
+              console.log(
+                '[LaneHeader] [LaneButtons] Close button onClick: Calling setEditState via setTimeout'
+              );
+              setEditState(EditingProcessState.cancel);
+            }, 0);
+          }}
           aria-label={t('Close')}
           className={`${c('lane-settings-button')} is-enabled clickable-icon`}
         >
@@ -55,7 +63,14 @@ function LaneButtons({
             <a
               aria-label={t('Add a card')}
               className={`${c('lane-settings-button')} clickable-icon`}
-              onClick={() => setIsItemInputVisible({ x: 0, y: 0 })}
+              onClick={() => {
+                setTimeout(() => {
+                  console.log(
+                    '[LaneHeader] [LaneButtons] Add a card onClick: Calling setIsItemInputVisible via setTimeout'
+                  );
+                  setIsItemInputVisible({ x: 0, y: 0 });
+                }, 0);
+              }}
               onDragOver={(e) => {
                 if (getDropAction(stateManager, e.dataTransfer)) {
                   setIsItemInputVisible({ x: 0, y: 0 });
@@ -69,7 +84,12 @@ function LaneButtons({
             aria-label={t('More options')}
             className={`${c('lane-settings-button')} clickable-icon`}
             onClick={(e) => {
-              settingsMenu.showAtMouseEvent(e);
+              setTimeout(() => {
+                console.log(
+                  '[LaneHeader] [LaneButtons] More options onClick: Showing settingsMenu via setTimeout'
+                );
+                settingsMenu.showAtMouseEvent(e);
+              }, 0);
             }}
           >
             <Icon name="lucide-more-vertical" />
@@ -91,12 +111,36 @@ export const LaneHeader = memo(function LaneHeader({
   const [editState, setEditState] = useState<EditState>(EditingProcessState.cancel);
   const lanePath = useNestedEntityPath(laneIndex);
 
-  const { boardModifiers } = useContext(KanbanContext);
+  const { app, stateManager, boardModifiers } = useContext(KanbanContext);
   const { settingsMenu, confirmAction, setConfirmAction } = useSettingsMenu({
     setEditState,
     path: lanePath,
     lane,
   });
+
+  // Defensive check for lane.data
+  if (!lane.data) {
+    console.error(
+      `[LaneHeader] CRITICAL: lane.data is undefined for lane ID: ${lane.id}. Rendering fallback.`
+    );
+    // Render a minimal fallback to prevent crashes
+    return (
+      <div className={c('lane-header', 'lane-header-error')}>
+        <div className={c('lane-title')}>Error: Lane data missing</div>
+      </div>
+    );
+  }
+
+  // Additional check for lane.data.title
+  if (typeof lane.data.title !== 'string') {
+    console.error(
+      `[LaneHeader] CRITICAL: lane.data.title is not a string for lane ID: ${lane.id}. Type: ${typeof lane.data.title}. Value:`,
+      lane.data.title,
+      '. Rendering fallback title.'
+    );
+    // Potentially modify lane.data.title or use a hardcoded fallback in rendering if this occurs
+    // For now, just logging. The LaneTitle component might handle it or have its own checks.
+  }
 
   useEffect(() => {
     if (lane.data.forceEditMode) {
@@ -122,7 +166,13 @@ export const LaneHeader = memo(function LaneHeader({
 
   const onDoubleClick = useCallback(
     (e: MouseEvent) => {
-      !isCollapsed && setEditState({ x: e.clientX, y: e.clientY });
+      setTimeout(() => {
+        console.log(
+          '[LaneHeader] onDoubleClick: Calling setEditState via setTimeout. isCollapsed:',
+          isCollapsed
+        );
+        !isCollapsed && setEditState({ x: e.clientX, y: e.clientY });
+      }, 0);
     },
     [isCollapsed, setEditState]
   );
