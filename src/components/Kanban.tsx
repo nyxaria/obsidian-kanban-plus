@@ -98,7 +98,7 @@ export const Kanban = ({
   const filePath = file.path;
   const dateColors = dateColorsFromHook || [];
   const tagColors = tagColorsFromHook || [];
-  const boardModifiers = getBoardModifiers(view, stateManager);
+  const boardModifiers = useMemo(() => getBoardModifiers(view, stateManager), [view, stateManager]);
   const boardView = view.useViewState(frontmatterKey) || 'board';
 
   useEffect(() => {

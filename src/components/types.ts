@@ -190,8 +190,8 @@ export interface EditCoordinates {
 }
 
 export enum EditingProcessState {
-  cancel,
-  complete,
+  Complete = 1,
+  Cancel = 2,
 }
 
 export interface CardEditingState {

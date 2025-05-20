@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view';
+import moment from 'moment';
 import { JSX, memo } from 'preact/compat';
 import {
   Dispatch,
@@ -226,12 +227,14 @@ export interface AssignedMembersProps {
   assignedMembers?: string[];
   searchQuery?: string;
   teamMemberColors?: Record<string, TeamMemberColorConfig>;
+  style?: JSX.CSSProperties;
 }
 
 export function AssignedMembers({
   assignedMembers,
   searchQuery,
   teamMemberColors,
+  style,
 }: AssignedMembersProps) {
   const { stateManager } = useContext(KanbanContext);
   const shouldShow = stateManager.useSetting('move-tags');
@@ -251,8 +254,7 @@ export function AssignedMembers({
         gap: '0px',
         paddingRight: '0px',
         marginRight: '0px',
-        position: 'relative',
-        left: '2px',
+        ...style,
       }}
     >
       {assignedMembers.map((member, i) => {
@@ -289,7 +291,7 @@ export function AssignedMembers({
   );
 }
 
-export const ItemContent = memo(function ItemContent({
+const ItemContentComponent = function ItemContent({
   item,
   editState,
   setEditState,
@@ -299,6 +301,11 @@ export const ItemContent = memo(function ItemContent({
   targetHighlight,
   style,
 }: ItemContentProps) {
+  // USEITEMCONTENT LOG
+  console.log(
+    `[ItemContent ${item.id}] Render START. EditState: ${editState}, TitleRaw: ${JSON.stringify(item.data.titleRaw?.slice(0, 20))}`
+  );
+
   const { stateManager, view, boardModifiers, filePath } = useContext(KanbanContext);
   const { onEditDate, onEditTime } = useDatePickers(item);
   const getDateColor = useGetDateColorFn(stateManager);
@@ -309,12 +316,17 @@ export const ItemContent = memo(function ItemContent({
   const path = useNestedEntityPath();
 
   const [titleForEditor, setTitleForEditor] = useState<string>('');
-  const extractedPartsRef = useRef<{ tags: string[]; members: string[] } | null>(null);
+  const extractedPartsRef = useRef<{
+    tags: string[];
+    members: string[];
+    dateStr?: string;
+    timeStr?: string;
+  } | null>(null);
 
   const editorWrapperRef = useOnclickOutside(
     () => {
       if (showCardTitleEditor && stateManager.getSetting('clickOutsideCardToSaveEdit')) {
-        setEditState(EditingProcessState.complete);
+        setEditState(EditingProcessState.Complete);
       }
     },
     {
@@ -327,11 +339,23 @@ export const ItemContent = memo(function ItemContent({
 
   useEffect(() => {
     if (showCardTitleEditor) {
+      console.log(
+        `[ItemContent ${item.id}] EditorSetupEffect RUN. showCardTitleEditor: ${showCardTitleEditor}, Current titleForEditor: "${titleForEditor}"`
+      );
       const rawTitle = item.data.titleRaw;
       console.log('[ItemContent] Editing starts. Raw title:', JSON.stringify(rawTitle));
 
       const originalTagsFromMetadata = item.data.metadata?.tags || [];
       const originalMembersFromMetadata = item.data.assignedMembers || [];
+      const originalDateStr = item.data.metadata?.dateStr;
+      const originalTimeStr = item.data.metadata?.timeStr;
+
+      extractedPartsRef.current = {
+        tags: [...originalTagsFromMetadata],
+        members: [...originalMembersFromMetadata],
+        dateStr: originalDateStr,
+        timeStr: originalTimeStr,
+      };
 
       const tagStringsForRemoval = originalTagsFromMetadata.map((t) => `#${t.replace(/^#/, '')}`);
       const memberStringsForRemoval = originalMembersFromMetadata.map(
@@ -341,78 +365,199 @@ export const ItemContent = memo(function ItemContent({
       let cleanTitle = rawTitle;
 
       for (const memberSyntax of memberStringsForRemoval) {
-        const memberRegex = new RegExp(
-          `(?:^|\\s)(${escapeRegExpStr(memberSyntax)})(?=\\s|$)`,
-          'gi'
-        );
+        const memberRegex = new RegExp(escapeRegExpStr(memberSyntax), 'gi');
         cleanTitle = cleanTitle.replace(memberRegex, ' ');
       }
 
       for (const tagSyntax of tagStringsForRemoval) {
-        const tagRegex = new RegExp(`(?:^|\\s)(${escapeRegExpStr(tagSyntax)})(?=\\s|$)`, 'gi');
+        const tagRegex = new RegExp(escapeRegExpStr(tagSyntax), 'gi');
         cleanTitle = cleanTitle.replace(tagRegex, ' ');
       }
 
-      cleanTitle = cleanTitle.replace(/ {2,}/g, ' ');
-      cleanTitle = cleanTitle.trim();
+      const dateTrigger = stateManager.getSetting('date-trigger');
+      const dateFormat = stateManager.getSetting('date-format');
 
-      console.log('[ItemContent] Cleaned title for editor:', JSON.stringify(cleanTitle));
+      if (dateTrigger) {
+        const dateBraceRegex = new RegExp(
+          `(?:^|\\s)${escapeRegExpStr(dateTrigger)}{([^}]+)}`,
+          'gi'
+        );
+        cleanTitle = cleanTitle.replace(dateBraceRegex, ' ');
 
+        const dateBracketRegex = new RegExp(
+          `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\[\\[([^]]+)\\]\\]`,
+          'gi'
+        );
+        cleanTitle = cleanTitle.replace(dateBracketRegex, ' ');
+      }
+
+      const wikilinkDateRegex = /\[\[([^\]]+)\]\]/g;
+      let match;
+      const tempTitleForWikilinkStripping = cleanTitle;
+      const rangesToReplace: { start: number; end: number }[] = [];
+
+      while ((match = wikilinkDateRegex.exec(tempTitleForWikilinkStripping)) !== null) {
+        const potentialDateStr = match[1].trim();
+        if (dateFormat && moment(potentialDateStr, dateFormat, true).isValid()) {
+          rangesToReplace.push({ start: match.index, end: wikilinkDateRegex.lastIndex });
+        }
+      }
+
+      for (let i = rangesToReplace.length - 1; i >= 0; i--) {
+        const range = rangesToReplace[i];
+        cleanTitle = cleanTitle.substring(0, range.start) + ' ' + cleanTitle.substring(range.end);
+      }
+
+      cleanTitle = cleanTitle.replace(/\\s{2,}/g, ' ').trim();
+      console.log('[ItemContent] Clean title for editor:', JSON.stringify(cleanTitle));
       setTitleForEditor(cleanTitle);
-      extractedPartsRef.current = { tags: tagStringsForRemoval, members: memberStringsForRemoval };
       titleRef.current = cleanTitle;
+      console.log(
+        `[ItemContent ${item.id}] EditorSetupEffect END. titleForEditor set to: "${cleanTitle}", titleRef.current set to: "${titleRef.current}"`
+      );
     }
   }, [
     showCardTitleEditor,
     item.data.titleRaw,
-    item.data.metadata?.tags,
+    item.data.metadata,
     item.data.assignedMembers,
+    stateManager,
   ]);
 
   useEffect(() => {
-    if (editState === EditingProcessState.complete) {
-      if (titleRef.current !== null) {
-        const userEditedCleanText = titleRef.current;
+    const currentEditStateProp = editState; // Capture prop value at effect run time
+    console.log(
+      `[ItemContent ${item.id}] SaveEffect TRIGGERED. Captured editStateProp: ${JSON.stringify(currentEditStateProp)} (type: ${typeof currentEditStateProp})` +
+        `, Compared against Complete: 1, Cancel: 2`
+    );
 
-        const currentTags = item.data.metadata?.tags || [];
-        const currentMembers = item.data.assignedMembers || [];
+    if (currentEditStateProp === 1) {
+      // Explicitly use 1 for EditingProcessState.Complete
+      console.log(
+        `[ItemContent ${item.id}] SaveEffect RUN COMPLETE. Matched editState: ${JSON.stringify(currentEditStateProp)}, titleRef.current: ${JSON.stringify(titleRef.current)}, extractedPartsRef.current: ${JSON.stringify(extractedPartsRef.current)}`
+      );
+      const workTitle = titleRef.current; // Capture current title for processing
+      titleRef.current = null; // Clear ref immediately to prevent re-entry for this specific edit cycle
+      extractedPartsRef.current = null; // Also clear other extracted parts
 
-        let reconstructedTitle = userEditedCleanText;
+      if (workTitle !== null) {
+        console.log('[ItemContent] Submission: User edited clean text:', JSON.stringify(workTitle));
 
-        const tagStrings = currentTags.map((t) => `#${t.replace(/^#/, '')}`);
-        const memberStrings = currentMembers.map((m) => `@@${m.replace(/^@@/, '')}`);
+        let finalTitle = workTitle;
 
-        const partsToAppend: string[] = [];
-        if (tagStrings.length > 0) {
-          partsToAppend.push(tagStrings.join(' '));
+        // Re-accessing original parts from item.data for reconstruction
+        // This assumes that item.data (passed as prop) reflects the state *before* this current edit's title change.
+        const originalTagsFromMetadata = item.data.metadata?.tags || [];
+        const originalMembersFromMetadata = item.data.assignedMembers || [];
+        const originalDateStr = item.data.metadata?.dateStr;
+        const originalTimeStr = item.data.metadata?.timeStr;
+
+        console.log(
+          '[ItemContent] Reconstructing from item.data.metadata. Extracted Parts estimate:',
+          JSON.stringify({
+            tags: originalTagsFromMetadata,
+            members: originalMembersFromMetadata,
+            dateStr: originalDateStr,
+            timeStr: originalTimeStr,
+          })
+        );
+
+        const dateTrigger = stateManager.getSetting('date-trigger');
+        const timeTrigger = stateManager.getSetting('time-trigger');
+        const shouldLinkDateToDailyNote = stateManager.getSetting('link-date-to-daily-note');
+
+        let addedSomething = false;
+
+        if (originalDateStr) {
+          console.log('[ItemContent] Reconstructing: Adding date', originalDateStr);
+          const datePart = shouldLinkDateToDailyNote
+            ? `[[${originalDateStr}]]`
+            : `{${originalDateStr}}`;
+          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
+            finalTitle += ' ';
+          else if (addedSomething) finalTitle += ' ';
+          finalTitle += `${dateTrigger}${datePart}`;
+          addedSomething = true;
         }
-        if (memberStrings.length > 0) {
-          partsToAppend.push(memberStrings.join(' '));
+
+        if (originalTimeStr && originalDateStr) {
+          console.log('[ItemContent] Reconstructing: Adding time (with date)', originalTimeStr);
+          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
+            finalTitle += ' ';
+          else if (addedSomething) finalTitle += ' ';
+          finalTitle += `${timeTrigger}{${originalTimeStr}}`;
+          addedSomething = true;
+        } else if (originalTimeStr && !originalDateStr) {
+          console.log('[ItemContent] Reconstructing: Adding time (standalone)', originalTimeStr);
+          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
+            finalTitle += ' ';
+          else if (addedSomething) finalTitle += ' ';
+          finalTitle += `${timeTrigger}{${originalTimeStr}}`;
+          addedSomething = true;
         }
 
-        if (partsToAppend.length > 0) {
-          if (reconstructedTitle.length > 0 && !/\s$/.test(reconstructedTitle)) {
-            reconstructedTitle += ' ';
-          }
-          reconstructedTitle += partsToAppend.join(' ');
+        if (originalMembersFromMetadata && originalMembersFromMetadata.length > 0) {
+          console.log('[ItemContent] Reconstructing: Adding members', originalMembersFromMetadata);
+          const membersString = originalMembersFromMetadata
+            .map((m) => `@@${m.replace(/^@@/, '')}`)
+            .join(' ');
+          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
+            finalTitle += ' ';
+          else if (addedSomething) finalTitle += ' ';
+          finalTitle += membersString;
+          addedSomething = true;
         }
 
-        reconstructedTitle = reconstructedTitle.trim();
-        reconstructedTitle = reconstructedTitle.replace(/ {2,}/g, ' ');
+        if (originalTagsFromMetadata && originalTagsFromMetadata.length > 0) {
+          console.log('[ItemContent] Reconstructing: Adding tags', originalTagsFromMetadata);
+          const tagsString = originalTagsFromMetadata.join(' ');
+          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
+            finalTitle += ' ';
+          else if (addedSomething) finalTitle += ' ';
+          finalTitle += tagsString;
+          addedSomething = true;
+        }
 
-        console.log('[ItemContent] Saving final title:', JSON.stringify(reconstructedTitle));
-        boardModifiers.updateItem(path, stateManager.updateItemContent(item, reconstructedTitle));
+        finalTitle = finalTitle.replace(/\s{2,}/g, ' ').trim();
+
+        console.log(
+          `[ItemContent ${item.id}] SaveEffect: About to call updateItem. Current item.data.titleRaw: "${item.data.titleRaw}", New finalTitle: "${finalTitle}"`
+        );
+
+        if (finalTitle !== item.data.titleRaw) {
+          console.log(
+            `[ItemContent ${item.id}] SaveEffect: Calling boardModifiers.updateItem. Path: ${JSON.stringify(path)}`
+          );
+          boardModifiers.updateItem(path, stateManager.updateItemContent(item, finalTitle));
+        } else {
+          console.log(
+            `[ItemContent ${item.id}] SaveEffect: finalTitle is same as item.data.titleRaw, skipping updateItem.`
+          );
+        }
+      } else {
+        console.log(
+          `[ItemContent ${item.id}] SaveEffect: workTitle is null, skipping update logic.`
+        );
       }
+      // Always transition out of edit mode if state was 'complete'
+      setEditState(false);
+      console.log(`[ItemContent ${item.id}] SaveEffect COMPLETE END. Set editState to false.`);
+    } else if (currentEditStateProp === 2) {
+      // Explicitly use 2 for EditingProcessState.Cancel
+      console.log(
+        `[ItemContent ${item.id}] SaveEffect RUN CANCEL. Matched editState: ${JSON.stringify(currentEditStateProp)}`
+      );
+      setEditState(false);
       titleRef.current = null;
-    } else if (editState === EditingProcessState.cancel) {
-      titleRef.current = null;
+      extractedPartsRef.current = null;
+      console.log(`[ItemContent ${item.id}] SaveEffect CANCEL END. Set editState to false.`);
     }
-  }, [editState, stateManager, item, boardModifiers, path]);
+  }, [editState, boardModifiers, item, path, stateManager, setEditState]);
 
   const onEnter = useCallback(
     (cm: EditorView, mod: boolean, shift: boolean) => {
       if (!allowNewLine(stateManager, mod, shift)) {
-        setEditState(EditingProcessState.complete);
+        setEditState(EditingProcessState.Complete);
         return true;
       }
       return false;
@@ -421,12 +566,12 @@ export const ItemContent = memo(function ItemContent({
   );
 
   const onEscape = useCallback(() => {
-    setEditState(EditingProcessState.cancel);
+    setEditState(EditingProcessState.Cancel);
     return true;
   }, [setEditState]);
 
   const onSubmit = useCallback(() => {
-    setEditState(EditingProcessState.complete);
+    setEditState(EditingProcessState.Complete);
   }, [setEditState]);
 
   const onWrapperClick = useCallback(
@@ -491,7 +636,7 @@ export const ItemContent = memo(function ItemContent({
       <div
         onPointerUp={onCheckboxContainerClick}
         className={c('item-text-wrapper')}
-        style={{ width: '100%' }}
+        style={{ width: '100%', display: 'block' }}
       >
         <MarkdownRenderer
           entityId={item.id}
@@ -501,22 +646,122 @@ export const ItemContent = memo(function ItemContent({
         />
       </div>
       {!showCardTitleEditor && showMetadata && (
-        <div className={c('item-metadata')} style={{ width: '100%' }}>
+        <div className={c('item-metadata')} style={{ width: '100%', display: 'block' }}>
           <InlineMetadata item={item} stateManager={stateManager} />
-          <DateAndTime
-            item={item}
-            stateManager={stateManager}
-            filePath={filePath}
-            getDateColor={getDateColor}
-          />
           <RelativeDate item={item} stateManager={stateManager} />
-          <AssignedMembers
-            assignedMembers={item.data.assignedMembers}
-            searchQuery={searchQuery}
-            teamMemberColors={teamMemberColors}
-          />
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-end',
+              width: '100%',
+              marginTop: '4px',
+            }}
+          >
+            <DateAndTime
+              item={item}
+              stateManager={stateManager}
+              filePath={filePath}
+              getDateColor={getDateColor}
+              style={{ flexGrow: 0, flexShrink: 0 }}
+            />
+            <AssignedMembers
+              assignedMembers={item.data.assignedMembers}
+              searchQuery={searchQuery}
+              teamMemberColors={teamMemberColors}
+              style={{ flexGrow: 0, flexShrink: 0 }}
+            />
+          </div>
         </div>
       )}
     </div>
   );
-});
+};
+
+function areItemPropsEqual(prevProps: ItemContentProps, nextProps: ItemContentProps): boolean {
+  // USEITEMCONTENTMEMO LOG
+  console.log(
+    `[ItemContentMemo] Comparing props for item ${nextProps.item.id}. Prev title: "${prevProps.item.data.titleRaw?.slice(0, 25)}", Next title: "${nextProps.item.data.titleRaw?.slice(0, 25)}"`
+  );
+
+  const prevItemData = prevProps.item.data;
+  const nextItemData = nextProps.item.data;
+
+  const idSame = prevProps.item.id === nextProps.item.id;
+  const titleRawSame = prevItemData.titleRaw === nextItemData.titleRaw;
+  const metadataRefSame = prevItemData.metadata === nextItemData.metadata;
+  const assignedMembersRefSame = prevItemData.assignedMembers === nextItemData.assignedMembers;
+  const itemInstanceSame = prevProps.item === nextProps.item;
+
+  // If the item object instance itself is the same, we consider its data basically the same
+  // for the purpose of this shallow-ish comparison. Deeper changes within item.data
+  // (if item instance is same) should ideally be handled by memoization of child components
+  // or specific checks if necessary.
+  // If the item instance has changed, we must verify key data points.
+  const itemDataBasicallySame =
+    itemInstanceSame || (idSame && titleRawSame && metadataRefSame && assignedMembersRefSame);
+
+  const editStateSame = prevProps.editState === nextProps.editState;
+  const searchQuerySame = prevProps.searchQuery === nextProps.searchQuery;
+  const showMetadataSame = prevProps.showMetadata === nextProps.showMetadata;
+  const isStaticSame = prevProps.isStatic === nextProps.isStatic;
+  const targetHighlightSame = prevProps.targetHighlight === nextProps.targetHighlight;
+
+  const criticalPropsSame =
+    itemDataBasicallySame &&
+    editStateSame &&
+    searchQuerySame &&
+    showMetadataSame &&
+    isStaticSame &&
+    targetHighlightSame;
+
+  if (!criticalPropsSame) {
+    console.log(`[ItemContentMemo] সিদ্ধান্ত Re-rendering item ${nextProps.item.id}. Reason:`);
+    if (!itemDataBasicallySame) {
+      console.log('  - itemDataBasicallySame: false');
+      if (itemInstanceSame) {
+        // This case implies item instance is same, but some other check made itemDataBasicallySame false (should not happen with current logic)
+        console.log(
+          '    - item prop instance IS THE SAME, but itemDataBasicallySame is false (logical error in checks?).'
+        );
+      } else {
+        console.log('    - item prop instance changed.');
+      }
+      if (!idSame) console.log('    - item.id changed.');
+      if (!titleRawSame) {
+        console.log('    - item.data.titleRaw changed.');
+        // console.log(`      Prev: "${prevItemData.titleRaw}"`);
+        // console.log(`      Next: "${nextItemData.titleRaw}"`);
+      }
+      if (!metadataRefSame) console.log('    - item.data.metadata reference changed.');
+      if (!assignedMembersRefSame)
+        console.log('    - item.data.assignedMembers reference changed.');
+    }
+    if (!editStateSame)
+      console.log(
+        `  - editState changed (prev: ${prevProps.editState}, next: ${nextProps.editState})`
+      );
+    if (!searchQuerySame)
+      console.log(
+        `  - searchQuery changed (prev: ${prevProps.searchQuery}, next: ${nextProps.searchQuery})`
+      );
+    if (!showMetadataSame)
+      console.log(
+        `  - showMetadata changed (prev: ${prevProps.showMetadata}, next: ${nextProps.showMetadata})`
+      );
+    if (!isStaticSame)
+      console.log(
+        `  - isStatic changed (prev: ${prevProps.isStatic}, next: ${nextProps.isStatic})`
+      );
+    if (!targetHighlightSame)
+      console.log(
+        `  - targetHighlight changed (prev: ${JSON.stringify(prevProps.targetHighlight)}, next: ${JSON.stringify(nextProps.targetHighlight)})`
+      );
+    return false; // Props are not equal, re-render
+  } else {
+    // console.log(`[ItemContentMemo] Skipping re-render for item ${nextProps.item.id}`);
+    return true; // Props are equal, skip re-render
+  }
+}
+
+export const ItemContent = memo(ItemContentComponent, areItemPropsEqual);

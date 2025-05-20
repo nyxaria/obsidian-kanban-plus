@@ -1,5 +1,5 @@
 import update from 'immutability-helper';
-import { memo, useCallback, useEffect, useState } from 'preact/compat';
+import { JSX, memo, useCallback, useEffect, useState } from 'preact/compat';
 import { StateManager } from 'src/StateManager';
 import { Path } from 'src/dnd/types';
 import { getTaskStatusDone, toggleTask } from 'src/parsers/helpers/inlineMetadata';
@@ -15,6 +15,8 @@ interface ItemCheckboxProps {
   shouldMarkItemsComplete: boolean;
   stateManager: StateManager;
   boardModifiers: BoardModifiers;
+  isVisible?: boolean;
+  style?: JSX.CSSProperties;
 }
 
 export const ItemCheckbox = memo(function ItemCheckbox({
@@ -23,6 +25,8 @@ export const ItemCheckbox = memo(function ItemCheckbox({
   item,
   stateManager,
   boardModifiers,
+  isVisible = true,
+  style,
 }: ItemCheckboxProps) {
   const shouldShowCheckbox = stateManager.useSetting('show-checkboxes');
 
@@ -83,6 +87,17 @@ export const ItemCheckbox = memo(function ItemCheckbox({
 
   return (
     <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        opacity: isVisible ? 1 : 0,
+        maxWidth: isVisible ? '30px' : '0px',
+        minWidth: isVisible ? 'auto' : '0px',
+        overflow: 'hidden',
+        transition:
+          'opacity 0.2s ease-in-out, max-width 0.2s ease-in-out, min-width 0.2s ease-in-out',
+        ...style,
+      }}
       onMouseEnter={(e) => {
         setIsHoveringCheckbox(true);
 
