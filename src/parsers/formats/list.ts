@@ -323,12 +323,37 @@ export function astToUnhydratedBoard(
       const title = getStringFromBoundary(md, headingBoundary);
 
       let shouldMarkItemsComplete = false;
+      let parsedLaneId: string | null = null;
 
-      const list = getNextOfType(root.children, index, 'list', (child) => {
-        if (child.type === 'heading') return false;
+      // Attempt to parse lane ID from HTML comment
+      // Look at the next few nodes after the heading for the comment
+      for (let i = index + 1; i < root.children.length; i++) {
+        const nextNode = root.children[i];
+        // Stop if we hit another heading (start of a new lane) or a list (items of current lane)
+        if (nextNode.type === 'heading') break;
+        // If we encounter a list immediately, the comment (if any) should be before it or not present for this lane.
+        // If it's not a paragraph (where comments might be), or html, break.
+        if (nextNode.type === 'list') break;
 
-        if (child.type === 'paragraph') {
-          const childStr = toString(child);
+        if (nextNode.type === 'html') {
+          const idCommentRegex = /<!--\s*kanban-lane-id:\s*(.*?)\s*-->/;
+          const match = idCommentRegex.exec(nextNode.value as string);
+          if (match && match[1]) {
+            parsedLaneId = match[1].trim();
+            console.log(`[list.ts] Parsed lane ID: ${parsedLaneId} for lane titled: ${title}`);
+            break; // Found ID, no need to look further for this lane
+          }
+        }
+        // If it's a paragraph, it might just be empty lines between heading and comment or items.
+        // If we've checked more than 2-3 non-list/non-heading nodes without finding the ID, it's probably not there.
+        if (i > index + 3 && nextNode.type !== 'paragraph') break; // Limit search depth for non-paragraph, non-HTML nodes
+      }
+
+      const list = getNextOfType(root.children, index, 'list', (nodeAfterHeading) => {
+        if (nodeAfterHeading.type === 'heading') return false;
+
+        if (nodeAfterHeading.type === 'paragraph') {
+          const childStr = toString(nodeAfterHeading);
 
           if (childStr.startsWith('%% kanban:settings')) {
             return false;
@@ -361,7 +386,7 @@ export function astToUnhydratedBoard(
         lanes.push({
           ...LaneTemplate,
           children: [],
-          id: generateInstanceId(),
+          id: parsedLaneId || generateInstanceId(),
           data: {
             ...parseLaneTitle(title),
             shouldMarkItemsComplete,
@@ -378,7 +403,7 @@ export function astToUnhydratedBoard(
               data,
             };
           }),
-          id: generateInstanceId(),
+          id: parsedLaneId || generateInstanceId(),
           data: {
             ...parseLaneTitle(title),
             shouldMarkItemsComplete,
@@ -498,7 +523,7 @@ function laneToMd(lane: Lane) {
   const lines: string[] = [];
 
   lines.push(`## ${replaceNewLines(laneTitleWithMaxItems(lane.data.title, lane.data.maxItems))}`);
-
+  lines.push(`<!-- kanban-lane-id: ${lane.id} -->`);
   lines.push('');
 
   if (lane.data.shouldMarkItemsComplete) {

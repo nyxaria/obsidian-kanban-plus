@@ -34,6 +34,8 @@ import {
   EditState,
   EditingProcessState,
   Item,
+  ItemData,
+  KanbanSettings,
   TeamMemberColorConfig,
   isCardEditingState,
   isEditCoordinates,
@@ -41,6 +43,7 @@ import {
 } from '../types';
 import { DateAndTime, RelativeDate } from './DateAndTime';
 import { InlineMetadata } from './InlineMetadata';
+import { MetadataTable } from './MetadataTable';
 import {
   constructDatePicker,
   constructMenuDatePickerOnChange,
@@ -301,9 +304,45 @@ const ItemContentComponent = function ItemContent({
   targetHighlight,
   style,
 }: ItemContentProps) {
+  const path = useNestedEntityPath();
+
+  // Critical check for item and item.data at the very beginning
+  if (!item || !item.data) {
+    const itemId = item?.id || 'unknown';
+    console.error(
+      `[ItemContent] CRITICAL: item or item.data is undefined for item ID: ${itemId}. Path:`,
+      path,
+      'Item object:',
+      item
+    );
+    // Render nothing or a minimal error placeholder to prevent crashes
+    return null;
+  }
+
+  // Additional checks for item.data.title and item.data.titleRaw
+  let safeTitle = item.data.title;
+  let safeTitleRaw = item.data.titleRaw;
+
+  if (typeof item.data.title !== 'string') {
+    console.error(
+      `[ItemContent] CRITICAL: item.data.title is not a string for item ID: ${item.id}. Type: ${typeof item.data.title}. Value:`,
+      item.data.title,
+      '. Using empty string fallback.'
+    );
+    safeTitle = '';
+  }
+  if (typeof item.data.titleRaw !== 'string') {
+    console.error(
+      `[ItemContent] CRITICAL: item.data.titleRaw is not a string for item ID: ${item.id}. Type: ${typeof item.data.titleRaw}. Value:`,
+      item.data.titleRaw,
+      '. Using empty string fallback.'
+    );
+    safeTitleRaw = '';
+  }
+
   // USEITEMCONTENT LOG
   console.log(
-    `[ItemContent ${item.id}] Render START. EditState: ${editState}, TitleRaw: ${JSON.stringify(item.data.titleRaw?.slice(0, 20))}`
+    `[ItemContent ${item.id}] Render START. EditState: ${editState}, TitleRaw (safe): ${JSON.stringify(safeTitleRaw?.slice(0, 20))}`
   );
 
   const { stateManager, view, boardModifiers, filePath } = useContext(KanbanContext);
@@ -313,7 +352,6 @@ const ItemContentComponent = function ItemContent({
     view.plugin.settings.teamMemberColors || {};
 
   const titleRef = useRef<string | null>(null);
-  const path = useNestedEntityPath();
 
   const [titleForEditor, setTitleForEditor] = useState<string>('');
   const extractedPartsRef = useRef<{
@@ -342,8 +380,8 @@ const ItemContentComponent = function ItemContent({
       console.log(
         `[ItemContent ${item.id}] EditorSetupEffect RUN. showCardTitleEditor: ${showCardTitleEditor}, Current titleForEditor: "${titleForEditor}"`
       );
-      const rawTitle = item.data.titleRaw;
-      console.log('[ItemContent] Editing starts. Raw title:', JSON.stringify(rawTitle));
+      const rawTitle = safeTitleRaw;
+      console.log('[ItemContent] Editing starts. Raw title (safe):', JSON.stringify(rawTitle));
 
       const originalTagsFromMetadata = item.data.metadata?.tags || [];
       const originalMembersFromMetadata = item.data.assignedMembers || [];
@@ -521,10 +559,10 @@ const ItemContentComponent = function ItemContent({
         finalTitle = finalTitle.replace(/\s{2,}/g, ' ').trim();
 
         console.log(
-          `[ItemContent ${item.id}] SaveEffect: About to call updateItem. Current item.data.titleRaw: "${item.data.titleRaw}", New finalTitle: "${finalTitle}"`
+          `[ItemContent ${item.id}] SaveEffect: About to call updateItem. Current item.data.titleRaw (safe): "${safeTitleRaw}", New finalTitle: "${finalTitle}"`
         );
 
-        if (finalTitle !== item.data.titleRaw) {
+        if (finalTitle !== safeTitleRaw) {
           console.log(
             `[ItemContent ${item.id}] SaveEffect: Calling boardModifiers.updateItem. Path: ${JSON.stringify(path)}`
           );
@@ -641,7 +679,7 @@ const ItemContentComponent = function ItemContent({
         <MarkdownRenderer
           entityId={item.id}
           className={c('item-markdown')}
-          markdownString={item.data.title}
+          markdownString={safeTitle}
           searchQuery={searchQuery}
         />
       </div>
@@ -657,7 +695,7 @@ const ItemContentComponent = function ItemContent({
 function areItemPropsEqual(prevProps: ItemContentProps, nextProps: ItemContentProps): boolean {
   // USEITEMCONTENTMEMO LOG
   console.log(
-    `[ItemContentMemo] Comparing props for item ${nextProps.item.id}. Prev title: "${prevProps.item.data.titleRaw?.slice(0, 25)}", Next title: "${nextProps.item.data.titleRaw?.slice(0, 25)}"`
+    `[ItemContentMemo] Comparing props for item ${nextProps.item.id}. Prev titleRaw (safe): "${prevProps.item.data.titleRaw && typeof prevProps.item.data.titleRaw === 'string' ? prevProps.item.data.titleRaw.slice(0, 25) : '[INVALID_PREV_RAW_TITLE]'}", Next titleRaw (safe): "${nextProps.item.data.titleRaw && typeof nextProps.item.data.titleRaw === 'string' ? nextProps.item.data.titleRaw.slice(0, 25) : '[INVALID_NEXT_RAW_TITLE]'}"`
   );
 
   const prevItemData = prevProps.item.data;

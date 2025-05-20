@@ -575,4 +575,39 @@ export class StateManager {
   updateItemContent(item: Item, content: string) {
     return this.parser.updateItemContent(item, content);
   }
+
+  async setLaneBackgroundColor(laneId: string, color: string) {
+    if (!this.state) {
+      console.error(
+        '[StateManager] setLaneBackgroundColor: Cannot set color, state is not initialized.'
+      );
+      return;
+    }
+
+    const laneIndex = this.state.children.findIndex((lane) => lane.id === laneId);
+
+    if (laneIndex === -1) {
+      console.error(`[StateManager] setLaneBackgroundColor: Lane with ID "${laneId}" not found.`);
+      return;
+    }
+
+    // Ensure data property exists, initialize if not (though it should for a valid lane)
+    const currentLaneData = this.state.children[laneIndex].data || {};
+
+    const updatedBoard = update(this.state, {
+      children: {
+        [laneIndex]: {
+          data: {
+            // Using $set to define/overwrite the backgroundColor property on the existing data object
+            $set: { ...currentLaneData, backgroundColor: color },
+          },
+        },
+      },
+    });
+
+    this.setState(updatedBoard); // shouldSave defaults to true
+    console.log(
+      `[StateManager] setLaneBackgroundColor: Color set for lane ${laneId} to ${color}. State updated.`
+    );
+  }
 }
