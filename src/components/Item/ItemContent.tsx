@@ -648,30 +648,6 @@ const ItemContentComponent = function ItemContent({
       {!showCardTitleEditor && showMetadata && (
         <div className={c('item-metadata')} style={{ width: '100%', display: 'block' }}>
           <InlineMetadata item={item} stateManager={stateManager} />
-          <RelativeDate item={item} stateManager={stateManager} />
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'flex-end',
-              width: '100%',
-              marginTop: '4px',
-            }}
-          >
-            <DateAndTime
-              item={item}
-              stateManager={stateManager}
-              filePath={filePath}
-              getDateColor={getDateColor}
-              style={{ flexGrow: 0, flexShrink: 0 }}
-            />
-            <AssignedMembers
-              assignedMembers={item.data.assignedMembers}
-              searchQuery={searchQuery}
-              teamMemberColors={teamMemberColors}
-              style={{ flexGrow: 0, flexShrink: 0 }}
-            />
-          </div>
         </div>
       )}
     </div>

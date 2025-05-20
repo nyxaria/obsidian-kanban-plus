@@ -15,17 +15,19 @@ import { useDragHandle } from 'src/dnd/managers/DragManager';
 import { frontmatterKey } from 'src/parsers/common';
 
 import { KanbanContext, SearchContext } from '../context';
-import { c } from '../helpers';
+import { c, useGetDateColorFn } from '../helpers';
 import {
   EditState,
   EditingProcessState,
   Item,
+  TeamMemberColorConfig,
   isCardEditingState,
   isEditCoordinates,
   isEditingActive,
 } from '../types';
+import { DateAndTime, RelativeDate } from './DateAndTime';
 import { ItemCheckbox } from './ItemCheckbox';
-import { ItemContent, Tags } from './ItemContent';
+import { AssignedMembers, ItemContent, Tags } from './ItemContent';
 import { useItemMenu } from './ItemMenu';
 import { ItemMenuButton } from './ItemMenuButton';
 import { ItemMetadata } from './MetadataTable';
@@ -59,13 +61,18 @@ const ItemInner = memo(function ItemInner({
   targetHighlight,
   cancelEditCounter,
 }: ItemInnerProps) {
-  const { stateManager, boardModifiers } = useContext(KanbanContext);
+  const { stateManager, boardModifiers, filePath, view } = useContext(KanbanContext);
   const [editState, setEditState] = useState<EditState>(EditingProcessState.Cancel);
   const [isHovered, setIsHovered] = useState(false);
   const itemInnerRef = useRef<HTMLDivElement>(null);
   const prevCancelEditCounterRef = useRef<number>(cancelEditCounter);
 
   const dndManager = useContext(DndManagerContext);
+  const path = useNestedEntityPath();
+
+  const getDateColor = useGetDateColorFn(stateManager);
+  const teamMemberColors: Record<string, TeamMemberColorConfig> =
+    view.plugin.settings.teamMemberColors || {};
 
   useEffect(() => {
     const handler = () => {
@@ -85,10 +92,9 @@ const ItemInner = memo(function ItemInner({
   }, [item.data.forceEditMode]);
 
   useEffect(() => {
-    const currentEditStateAtEffectStart = editState; // Capture editState when effect runs
+    const currentEditStateAtEffectStart = editState;
     if (prevCancelEditCounterRef.current !== cancelEditCounter) {
       if (isEditingActive(currentEditStateAtEffectStart)) {
-        // Use captured state
         console.log(
           `[ItemInner item ${item.id}] cancelEditCounter changed to ${cancelEditCounter}. Was ${prevCancelEditCounterRef.current}. Condition isEditingActive(${JSON.stringify(currentEditStateAtEffectStart)}) is TRUE. Setting editState from`,
           currentEditStateAtEffectStart,
@@ -108,7 +114,6 @@ const ItemInner = memo(function ItemInner({
   useEffect(() => {
     let shouldApplyYellowBorder = false;
     if (targetHighlight && itemInnerRef.current) {
-      // Case 1: targetHighlight is from Workspace Navigation (has blockId and/or cardTitle)
       if (targetHighlight.blockId) {
         if (item.data.blockId) {
           const itemBlockId = item.data.blockId.startsWith('#^')
@@ -117,30 +122,22 @@ const ItemInner = memo(function ItemInner({
               ? item.data.blockId.substring(1)
               : item.data.blockId;
           if (itemBlockId === targetHighlight.blockId) {
-            // console.log(`[ItemInner] Yellow border for item ${item.id} by workspace nav blockId: ${targetHighlight.blockId}`);
             shouldApplyYellowBorder = true;
           }
         }
-        // Fallback for workspace nav if blockId didn't match or was absent, but cardTitle is present
         if (!shouldApplyYellowBorder && targetHighlight.cardTitle && item.data.titleRaw) {
           if (item.data.titleRaw.startsWith(targetHighlight.cardTitle)) {
-            // console.log(`[ItemInner] Yellow border for item ${item.id} by workspace nav cardTitle (fallback): ${targetHighlight.cardTitle}`);
             shouldApplyYellowBorder = true;
           }
         }
-      }
-      // Case 2: targetHighlight is from Global Search (has content and matches properties directly)
-      else if (targetHighlight.matches && targetHighlight.content) {
+      } else if (targetHighlight.matches && targetHighlight.content) {
         if (item.data.titleRaw && targetHighlight.matches.length > 0) {
-          // Use the first match to determine if this card is relevant for the border
-          const firstMatchOffsets = targetHighlight.matches[0]; // e.g., [startIndex, endIndex]
+          const firstMatchOffsets = targetHighlight.matches[0];
           const matchedTextInGlobalSearch = targetHighlight.content.substring(
             firstMatchOffsets[0],
             firstMatchOffsets[1]
           );
-          // Check if the item's raw title contains the text that was matched by global search.
           if (item.data.titleRaw.includes(matchedTextInGlobalSearch)) {
-            // console.log(`[ItemInner] Yellow border for item ${item.id} by global search text content match: "${matchedTextInGlobalSearch}"`);
             shouldApplyYellowBorder = true;
           }
         }
@@ -148,19 +145,14 @@ const ItemInner = memo(function ItemInner({
 
       if (shouldApplyYellowBorder) {
         itemInnerRef.current.classList.add('search-result-highlight');
-        // This scrollIntoView was part of the original logic.
-        // It might provide more precise centering than other scrolling mechanisms.
         itemInnerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
       } else {
         itemInnerRef.current.classList.remove('search-result-highlight');
       }
     } else if (itemInnerRef.current) {
-      // Ensure highlight is removed if targetHighlight is null or itemInnerRef.current was not available initially
       itemInnerRef.current.classList.remove('search-result-highlight');
     }
   }, [targetHighlight, item.id, item.data.blockId, item.data.titleRaw]);
-
-  const path = useNestedEntityPath();
 
   const showItemMenu = useItemMenu({
     boardModifiers,
@@ -184,7 +176,7 @@ const ItemInner = memo(function ItemInner({
     [showItemMenu, editState]
   );
 
-  const onDoubleClick: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
+  const onDoubleClickCallback: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
     (e) => {
       console.log('[ItemInner] onDoubleClick triggered', {
         isStatic,
@@ -203,7 +195,6 @@ const ItemInner = memo(function ItemInner({
         'data-ignore-drag': true,
       };
     }
-
     return {};
   }, [editState]);
 
@@ -212,8 +203,7 @@ const ItemInner = memo(function ItemInner({
       ref={itemInnerRef}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      // eslint-disable-next-line react/no-unknown-property
-      onDblClick={onDoubleClick}
+      onDblClick={onDoubleClickCallback}
       onContextMenu={onContextMenu}
       className={c('item-content-wrapper')}
       {...ignoreAttr}
@@ -224,21 +214,20 @@ const ItemInner = memo(function ItemInner({
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'flex-start',
-            marginBottom: '4px',
+            marginBottom: '6px',
           }}
         >
-          <Tags
-            tags={item.data.metadata?.tags}
-            searchQuery={isMatch ? searchQuery : undefined}
-            alwaysShow={true}
-            style={{
-              flexGrow: 1,
-              marginRight: '8px',
-              marginLeft: '8px',
-              marginTop: '4px',
-              minWidth: 0,
-            }}
-          />
+          <div style={{ flexGrow: 1, marginRight: '8px', minWidth: 0 }}>
+            <Tags
+              tags={item.data.metadata?.tags}
+              searchQuery={isMatch ? searchQuery : undefined}
+              alwaysShow={true}
+              style={{
+                marginLeft: '8px',
+                marginTop: '2.5px',
+              }}
+            />
+          </div>
           <ItemMenuButton
             editState={editState}
             setEditState={setEditState}
@@ -249,33 +238,70 @@ const ItemInner = memo(function ItemInner({
       )}
 
       <div
-        className={c('item-title-wrapper')}
-        {...ignoreAttr}
-        style={{ display: 'flex', alignItems: 'flex-start' }}
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          marginBottom: '4px',
+        }}
       >
         <ItemCheckbox
-          boardModifiers={boardModifiers}
+          isVisible={isHovered && !isEditingActive(editState) && !isStatic}
           item={item}
           path={path}
-          shouldMarkItemsComplete={shouldMarkItemsComplete}
+          shouldMarkItemsComplete={shouldMarkItemsComplete ?? false}
           stateManager={stateManager}
-          style={{ marginTop: '0px' }}
-          isVisible={isHovered}
+          boardModifiers={boardModifiers}
+          style={{ marginRight: '4px', marginLeft: '8px' }}
         />
-        <ItemContent
-          item={item}
-          searchQuery={isMatch ? searchQuery : undefined}
-          setEditState={setEditState}
-          editState={editState}
-          isStatic={isStatic}
-          targetHighlight={targetHighlight}
-          style={{
-            flexGrow: 1,
-            marginLeft: isHovered ? '8px' : '0px',
-            transition: 'margin-left 0.2s ease-in-out',
-          }}
-        />
+        <div style={{ flexGrow: 1, minWidth: 0 }}>
+          <ItemContent
+            item={item}
+            editState={editState}
+            setEditState={setEditState}
+            searchQuery={isMatch ? searchQuery : undefined}
+            isStatic={!!isStatic}
+            targetHighlight={targetHighlight}
+            style={{ marginLeft: '-2px' }}
+          />
+        </div>
       </div>
+
+      {!isCardEditingState(editState) && (
+        <div
+          className={c('item-bottom-metadata')}
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-end',
+            width: '100%',
+            marginTop: '0px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <DateAndTime
+              item={item}
+              stateManager={stateManager}
+              filePath={filePath}
+              getDateColor={getDateColor}
+              style={{
+                flexGrow: 0,
+                flexShrink: 0,
+                marginRight: item.data.metadata?.dateStr ? '4px' : '0px',
+                marginLeft: '8px',
+                marginBottom: '7px',
+              }}
+            />
+            <RelativeDate item={item} stateManager={stateManager} />
+          </div>
+          <AssignedMembers
+            assignedMembers={item.data.assignedMembers}
+            searchQuery={isMatch ? searchQuery : undefined}
+            teamMemberColors={teamMemberColors}
+            style={{ flexGrow: 0, flexShrink: 0, marginRight: '8px', marginBottom: '7px' }}
+          />
+        </div>
+      )}
+
       <ItemMetadata searchQuery={isMatch ? searchQuery : undefined} item={item} />
     </div>
   );
