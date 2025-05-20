@@ -4,6 +4,7 @@ import {
   ListItem as MdastListItem,
   Root as MdastRoot,
 } from 'mdast';
+import moment from 'moment';
 import { FileView, ItemView, TFile, TFolder, WorkspaceLeaf, normalizePath } from 'obsidian';
 import { render, unmountComponentAtNode } from 'preact/compat';
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
@@ -28,6 +29,7 @@ interface WorkspaceCard {
   laneTitle: string;
   blockId?: string;
   assignedMembers?: string[];
+  date?: moment.Moment;
 }
 
 export const KANBAN_WORKSPACE_VIEW_TYPE = 'kanban-workspace';
@@ -57,9 +59,15 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
   const [activeFilterTags, setActiveFilterTags] = useState<string[]>([]);
   const [selectedMemberForFilter, setSelectedMemberForFilter] = useState('');
   const [activeFilterMembers, setActiveFilterMembers] = useState<string[]>([]);
+  const [dueDateFilterValue, setDueDateFilterValue] = useState<number | ''>('');
+  const [dueDateFilterUnit, setDueDateFilterUnit] = useState<'days' | 'weeks' | 'months'>('days');
   const [filteredCards, setFilteredCards] = useState<WorkspaceCard[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // New toggles for Archive and Done
+  const [excludeArchive, setExcludeArchive] = useState(true);
+  const [excludeDone, setExcludeDone] = useState(true);
 
   // New state for saved views
   const [savedViews, setSavedViews] = useState<SavedWorkspaceView[]>([]);
@@ -78,6 +86,16 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       if (viewToLoad) {
         setActiveFilterTags([...viewToLoad.tags]);
         setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
+        if (viewToLoad.dueDateFilter) {
+          setDueDateFilterValue(viewToLoad.dueDateFilter.value);
+          setDueDateFilterUnit(viewToLoad.dueDateFilter.unit);
+        } else {
+          setDueDateFilterValue('');
+          setDueDateFilterUnit('days');
+        }
+        // Load new toggles, defaulting to true if not present
+        setExcludeArchive(viewToLoad.excludeArchive ?? true);
+        setExcludeDone(viewToLoad.excludeDone ?? true);
         setSelectedViewId(viewToLoad.id);
       }
     }
@@ -130,10 +148,33 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
 
   const handleScanDirectory = useCallback(
     async (tagsToFilterBy: string[], membersToFilterBy: string[]) => {
+      console.log(
+        '[WorkspaceView] handleScanDirectory called with:',
+        'Tags:',
+        tagsToFilterBy,
+        'Members:',
+        membersToFilterBy,
+        'Due Value:',
+        dueDateFilterValue,
+        'Due Unit:',
+        dueDateFilterUnit,
+        'Exclude Archive:',
+        excludeArchive, // Log new filter
+        'Exclude Done:',
+        excludeDone // Log new filter
+      );
       setIsLoading(true);
       setError(null);
-      setFilteredCards([]);
+      // setFilteredCards([]); // Keep existing cards while loading new ones, or clear if preferred
       const app = props.plugin.app;
+
+      // Due Date Filter Logic - START
+      let maxDueDate: moment.Moment | null = null;
+      if (typeof dueDateFilterValue === 'number' && dueDateFilterValue > 0) {
+        maxDueDate = moment().add(dueDateFilterValue, dueDateFilterUnit).endOf('day');
+      }
+      const today = moment().startOf('day');
+      // Due Date Filter Logic - END
 
       const currentFile = app.workspace.getActiveFile();
       let targetFolder: TFolder | null = null;
@@ -187,6 +228,35 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                         fileContent,
                         listItemNode as MdastListItem
                       );
+
+                      // Manually hydrate the date field from dateStr
+                      if (itemData.metadata?.dateStr) {
+                        console.log(
+                          '[WorkspaceView] Hydrating date. dateStr:',
+                          itemData.metadata.dateStr,
+                          'Board:',
+                          mdFile.basename,
+                          'Card:',
+                          itemData.titleRaw.slice(0, 20)
+                        );
+                        itemData.metadata.date = moment(
+                          itemData.metadata.dateStr,
+                          tempStateManager.getSetting('date-format')
+                        );
+                        console.log(
+                          '[WorkspaceView] Hydrated date. Result:',
+                          itemData.metadata.date?.isValid()
+                            ? itemData.metadata.date.format()
+                            : 'Invalid Date',
+                          'Board:',
+                          mdFile.basename,
+                          'Card:',
+                          itemData.titleRaw.slice(0, 20)
+                        );
+                      } else {
+                        // console.log('[WorkspaceView] No dateStr to hydrate. Board:', mdFile.basename, 'Card:', itemData.titleRaw.slice(0,20) );
+                      }
+
                       const cardTags = (itemData.metadata?.tags || []).map((t) =>
                         t.replace(/^#/, '').toLowerCase()
                       );
@@ -202,7 +272,84 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                           cardAssignedMembers.includes(reqMember)
                         );
 
-                      if (hasAllRequiredTags && hasAllRequiredMembers) {
+                      // Due Date Filter Check - START
+                      let passesDueDateFilter = true;
+                      if (maxDueDate && itemData.metadata?.date) {
+                        const cardDate = itemData.metadata.date.clone().startOf('day');
+
+                        // ##### Log the dates being compared #####
+                        console.log(
+                          `[DueDateFilter] Checking card: ${itemData.titleRaw.slice(0, 20)}, ` +
+                            `cardDate: ${cardDate.format()}, today: ${today.format()}, maxDueDate: ${maxDueDate.format()}`
+                        );
+                        const isValid = cardDate.isValid();
+                        const isAfterMax = cardDate.isAfter(maxDueDate);
+                        const isBeforeToday = cardDate.isBefore(today); // card is in the past
+                        console.log(
+                          `[DueDateFilter] Conditions for ${itemData.titleRaw.slice(0, 20)}: ` +
+                            `isValid: ${isValid}, isAfterMax: ${isAfterMax}, isBeforeToday (Overdue?): ${isBeforeToday}`
+                        );
+                        // ##### End Logs #####
+
+                        if (
+                          !isValid || // Date is not valid
+                          isAfterMax || // Date is beyond the filter's future window
+                          isBeforeToday // Date is in the past (already due or before today)
+                        ) {
+                          passesDueDateFilter = false;
+                          console.log(
+                            `[DueDateFilter] Card ${itemData.titleRaw.slice(0, 20)} FAILED due date filter. Conditions: !isValid=${!isValid}, isAfterMax=${isAfterMax}, isBeforeToday=${isBeforeToday}`
+                          );
+                        } else {
+                          console.log(
+                            `[DueDateFilter] Card ${itemData.titleRaw.slice(0, 20)} PASSED due date filter. Conditions: isValid=${isValid}, isAfterMax=${isAfterMax}, isBeforeToday=${isBeforeToday}`
+                          );
+                        }
+                      } else if (maxDueDate && !itemData.metadata?.date) {
+                        passesDueDateFilter = false;
+                        console.log(
+                          `[DueDateFilter] Card ${itemData.titleRaw.slice(0, 20)} FAILED (no date, but filter active).`
+                        );
+                      }
+                      // Due Date Filter Check - END
+
+                      // Archive Filter Check - START
+                      let passesArchiveFilter = true;
+                      if (excludeArchive && currentLaneTitle.toLowerCase() === 'archive') {
+                        passesArchiveFilter = false;
+                        // console.log(`[ArchiveFilter] Card ${itemData.titleRaw.slice(0,20)} FAILED (in Archive lane and excludeArchive is true).`);
+                      }
+                      // Archive Filter Check - END
+
+                      // Done Filter Check - START
+                      let passesDoneFilter = true;
+                      if (excludeDone && itemData.checked) {
+                        passesDoneFilter = false;
+                        // console.log(`[DoneFilter] Card ${itemData.titleRaw.slice(0,20)} FAILED (is checked and excludeDone is true).`);
+                      }
+                      // Done Filter Check - END
+
+                      if (
+                        hasAllRequiredTags &&
+                        hasAllRequiredMembers &&
+                        passesDueDateFilter &&
+                        passesArchiveFilter && // Add archive filter result
+                        passesDoneFilter // Add done filter result
+                      ) {
+                        console.log(
+                          '[WorkspaceView] PRE-PUSH. Card Title:',
+                          itemData.titleRaw.slice(0, 20),
+                          'itemData.metadata.date:',
+                          itemData.metadata?.date,
+                          'isMoment:',
+                          moment.isMoment(itemData.metadata?.date),
+                          'isValid:',
+                          itemData.metadata?.date?.isValid(),
+                          'dateStr:',
+                          itemData.metadata?.dateStr,
+                          'Board:',
+                          mdFile.basename
+                        );
                         allCards.push({
                           id:
                             itemData.blockId ||
@@ -216,6 +363,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                           sourceBoardPath: mdFile.path,
                           laneTitle: currentLaneTitle,
                           blockId: itemData.blockId,
+                          date: itemData.metadata?.date,
                         });
                       }
                     }
@@ -242,12 +390,31 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       }
       setIsLoading(false);
     },
-    [props.plugin, setIsLoading, setError, setFilteredCards]
+    [
+      props.plugin,
+      setIsLoading,
+      setError,
+      setFilteredCards,
+      dueDateFilterValue,
+      dueDateFilterUnit,
+      excludeArchive, // Add to dependencies
+      excludeDone, // Add to dependencies
+    ]
   );
 
+  // Effect to re-scan when filters change
   useEffect(() => {
-    handleScanDirectory(activeFilterTags, activeFilterMembers);
-  }, [activeFilterTags, activeFilterMembers, handleScanDirectory]);
+    // Pass copies of the filter arrays to avoid issues with useCallback dependencies if the arrays themselves are modified elsewhere
+    handleScanDirectory([...activeFilterTags], [...activeFilterMembers]);
+  }, [
+    activeFilterTags,
+    activeFilterMembers,
+    dueDateFilterValue,
+    dueDateFilterUnit,
+    excludeArchive, // Add to dependency array
+    excludeDone, // Add to dependency array
+    handleScanDirectory,
+  ]); // Added dueDate filters to dependency array
 
   const handleRowClick = useCallback(
     async (card: WorkspaceCard) => {
@@ -428,6 +595,12 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       name: newViewName.trim(),
       tags: [...activeFilterTags],
       members: [...activeFilterMembers], // Save active member filters
+      dueDateFilter:
+        dueDateFilterValue !== ''
+          ? { value: dueDateFilterValue, unit: dueDateFilterUnit }
+          : undefined,
+      excludeArchive: excludeArchive, // Save new toggle
+      excludeDone: excludeDone, // Save new toggle
     };
 
     const currentSavedViews = props.plugin.settings.savedWorkspaceViews || [];
@@ -449,6 +622,10 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
     setSavedViews,
     setSelectedViewId,
     setNewViewName,
+    dueDateFilterValue,
+    dueDateFilterUnit,
+    excludeArchive, // Add to dependencies
+    excludeDone, // Add to dependencies
   ]); // Added activeFilterMembers and setters to deps
 
   const handleDeleteView = useCallback(async () => {
@@ -473,6 +650,10 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       // Clear filters if the deleted view was the last selected active one
       setActiveFilterTags([]);
       setActiveFilterMembers([]);
+      setDueDateFilterValue('');
+      setDueDateFilterUnit('days');
+      setExcludeArchive(true); // Reset new toggle
+      setExcludeDone(true); // Reset new toggle
     }
 
     await props.plugin.saveSettings();
@@ -488,11 +669,31 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
     setActiveFilterMembers,
     setSavedViews,
     setSelectedViewId,
+    setDueDateFilterValue,
+    setDueDateFilterUnit,
+    setExcludeArchive, // Add to dependencies
+    setExcludeDone, // Add to dependencies
   ]); // Added setters to deps
 
   const availableTeamMembers = useMemo(() => {
     return props.plugin.settings.teamMembers || [];
   }, [props.plugin.settings.teamMembers]);
+
+  const handleClearAllFilters = useCallback(() => {
+    setActiveFilterTags([]);
+    setActiveFilterMembers([]);
+    setDueDateFilterValue('');
+    setDueDateFilterUnit('days');
+    setExcludeArchive(true); // Reset new toggle
+    setExcludeDone(true); // Reset new toggle
+  }, [
+    setActiveFilterTags,
+    setActiveFilterMembers,
+    setDueDateFilterValue,
+    setDueDateFilterUnit,
+    setExcludeArchive, // Add to dependencies
+    setExcludeDone, // Add to dependencies
+  ]);
 
   return (
     <div style={{ padding: '10px' }}>
@@ -548,6 +749,16 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                   if (viewToLoad) {
                     setActiveFilterTags([...viewToLoad.tags]);
                     setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
+                    if (viewToLoad.dueDateFilter) {
+                      setDueDateFilterValue(viewToLoad.dueDateFilter.value);
+                      setDueDateFilterUnit(viewToLoad.dueDateFilter.unit);
+                    } else {
+                      setDueDateFilterValue('');
+                      setDueDateFilterUnit('days');
+                    }
+                    // Load new toggles, defaulting to true
+                    setExcludeArchive(viewToLoad.excludeArchive ?? true);
+                    setExcludeDone(viewToLoad.excludeDone ?? true);
                     props.plugin.settings.lastSelectedWorkspaceViewId = viewToLoad.id;
                     await props.plugin.saveSettings();
                   }
@@ -584,16 +795,18 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: '20px',
-          marginTop: '20px',
-          marginBottom: '10px',
+          gap: '15px', // Adjusted gap
+          alignItems: 'flex-end', // Align items to the bottom for a cleaner inline look
+          marginBottom: '20px',
+          flexWrap: 'wrap', // Allow wrapping on smaller screens
         }}
       >
-        {/* Add Tag Section */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <label htmlFor="workspace-tag-input" style={{ marginRight: '5px' }}>
-            Filter by Tag:{' '}
+        {/* Tag Filter Section */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '5px' }}>
+          <label htmlFor="workspace-tag-input" style={{ marginBottom: '5px' }}>
+            {' '}
+            {/* Added margin for alignment */}
+            Tag:
           </label>
           <input
             type="text"
@@ -606,107 +819,168 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                 e.preventDefault();
               }
             }}
-            style={{ marginRight: '0px' }}
+            style={{ padding: '5px' }} // Standardized padding
             placeholder="e.g. mechanics"
           />
-          <button onClick={handleAddTag} disabled={!currentTagInput.trim()}>
+          <button
+            onClick={handleAddTag}
+            disabled={!currentTagInput.trim()}
+            style={{ padding: '5px' }}
+          >
             +
           </button>
         </div>
 
-        {/* Add Member Filter Section */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <label htmlFor="workspace-member-select" style={{ marginRight: '5px' }}>
-            Filter by Member:{' '}
+        {/* Vertical Divider */}
+        <div
+          style={{
+            borderLeft: '1px solid var(--background-modifier-border)',
+            height: '30px',
+            alignSelf: 'flex-end',
+          }}
+        ></div>
+
+        {/* Member Filter Section */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '5px' }}>
+          <label htmlFor="member-filter-select" style={{ marginBottom: '5px' }}>
+            {' '}
+            {/* Added margin for alignment */}
+            Member:
           </label>
           <select
-            id="workspace-member-select"
+            id="member-filter-select"
             value={selectedMemberForFilter}
             onChange={(e) => setSelectedMemberForFilter((e.target as HTMLSelectElement).value)}
-            style={{ marginRight: '0px', minWidth: '150px', padding: '5px' }}
+            style={{ minWidth: '150px', padding: '5px' }} // Standardized padding
           >
-            <option value="">Select a member...</option>
+            <option value="">Select member...</option> {/* Changed placeholder text */}
             {availableTeamMembers.map((member) => (
               <option key={member} value={member}>
                 {member}
               </option>
             ))}
           </select>
-          <button onClick={handleAddMemberFilter} disabled={!selectedMemberForFilter.trim()}>
+          <button
+            onClick={handleAddMemberFilter}
+            disabled={!selectedMemberForFilter.trim()}
+            style={{ padding: '5px' }}
+          >
             +
           </button>
         </div>
+
+        {/* Vertical Divider */}
+        <div
+          style={{
+            borderLeft: '1px solid var(--background-modifier-border)',
+            height: '30px',
+            alignSelf: 'flex-end',
+          }}
+        ></div>
+
+        {/* Due Date, Archive, and Done Filter Section Group - CHANGED TO ROW LAYOUT */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px' }}>
+          {/* Due Date Filter Section (remains as a sub-group) */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '5px' }}>
+            <label
+              htmlFor="due-date-filter-value"
+              style={{ marginBottom: '5px', minWidth: '80px' }}
+            >
+              Due in next:
+            </label>
+            <input
+              type="number"
+              id="due-date-filter-value"
+              value={dueDateFilterValue}
+              onInput={(e) => {
+                const val = (e.target as HTMLInputElement).value;
+                setDueDateFilterValue(val === '' ? '' : parseInt(val, 10));
+              }}
+              placeholder="N"
+              style={{ width: '60px', padding: '5px' }} // Standardized padding
+              min="0"
+            />
+            <select
+              id="due-date-filter-unit"
+              value={dueDateFilterUnit}
+              onChange={(e) =>
+                setDueDateFilterUnit(
+                  (e.target as HTMLSelectElement).value as 'days' | 'weeks' | 'months'
+                )
+              }
+              style={{ padding: '5px' }} // Standardized padding
+            >
+              <option value="days">Days</option>
+              <option value="weeks">Weeks</option>
+              <option value="months">Months</option>
+            </select>
+          </div>
+
+          {/* NEW Vertical Divider */}
+          <div
+            style={{
+              borderLeft: '1px solid var(--background-modifier-border)',
+              height: '30px',
+              alignSelf: 'flex-end',
+            }}
+          ></div>
+
+          {/* Exclude Archive Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '5px' }}>
+            <label
+              htmlFor="exclude-archive-toggle"
+              style={
+                {
+                  /* minWidth removed for tighter packing, or keep if preferred */
+                }
+              }
+            >
+              Exclude Archive:
+            </label>
+            <input
+              type="checkbox"
+              id="exclude-archive-toggle"
+              checked={excludeArchive}
+              onChange={(e) => setExcludeArchive((e.target as HTMLInputElement).checked)}
+              style={{ height: '16px', width: '16px' }}
+            />
+          </div>
+          <div
+            style={{
+              borderLeft: '1px solid var(--background-modifier-border)',
+              height: '30px',
+              alignSelf: 'flex-end',
+            }}
+          ></div>
+          {/* Exclude Done Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '5px' }}>
+            <label
+              htmlFor="exclude-done-toggle"
+              style={
+                {
+                  /* minWidth removed for tighter packing, or keep if preferred */
+                }
+              }
+            >
+              Exclude Done:
+            </label>
+            <input
+              type="checkbox"
+              id="exclude-done-toggle"
+              checked={excludeDone}
+              onChange={(e) => setExcludeDone((e.target as HTMLInputElement).checked)}
+              style={{ height: '16px', width: '16px' }}
+            />
+          </div>
+        </div>
       </div>
 
-      {/* Active tags display - REMAINS BELOW ADD TAG */}
-      {/* {activeFilterTags.length > 0 && (
-        <div style={{ marginBottom: '10px', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-          {activeFilterTags.map((tag) => {
-            const tagWithHashForLookup = `#${tag}`;
-            const colorSetting = getTagColor(tagWithHashForLookup);
-            const symbolInfo = getTagEmoji(tagWithHashForLookup);
-            const colorValue = colorSetting ? colorSetting.color : undefined;
-            const bgColor = colorSetting ? colorSetting.backgroundColor : undefined;
-
-            let displayContent = null;
-            if (symbolInfo) {
-              displayContent = (
-                <>
-                  {symbolInfo.symbol}
-                  {!symbolInfo.hideTag && <span style={{ marginLeft: '4px' }}>{tag}</span>}
-                </>
-              );
-            } else {
-              if (hideHashForTagsWithoutSymbols) {
-                displayContent = tag;
-              } else {
-                displayContent = `#${tag}`;
-              }
-            }
-
-            return (
-              <span
-                key={tag}
-                style={{
-                  color: colorValue,
-                  backgroundColor: bgColor,
-                  padding: '0px 6px',
-                  borderRadius: '4px',
-                  marginRight: '5px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  fontSize: '0.9em',
-                  border: bgColor ? 'none' : '1px solid var(--background-modifier-border)',
-                }}
-              >
-                {displayContent}
-                <button
-                  onClick={() => handleRemoveTag(tag)}
-                  style={{
-                    marginLeft: '5px',
-                    background: 'transparent',
-                    border: 'none',
-                    color: colorValue || 'var(--text-muted)',
-                    cursor: 'pointer',
-                    padding: '0 2px',
-                    fontSize: '1.1em',
-                    lineHeight: '1',
-                    opacity: 0.7,
-                  }}
-                  title={`Remove tag ${tag}`}
-                  onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
-                  onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
-                >
-                  &times;
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      )} */}
-
       {/* Active Member Filters Display */}
-      {(activeFilterTags.length > 0 || activeFilterMembers.length > 0) && (
+      {(activeFilterTags.length > 0 ||
+        activeFilterMembers.length > 0 ||
+        (dueDateFilterValue !== '' && dueDateFilterValue > 0) ||
+        !excludeArchive || // Display if excludeArchive is false (meaning archives are included)
+        !excludeDone) && ( // Display if excludeDone is false (meaning done items are included)
         <div
           style={{
             marginBottom: '20px',
@@ -717,7 +991,47 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
             borderRadius: '4px',
           }}
         >
-          {/* Display Active Member Filters First */}
+          {/* Display Due Date Filter First */}
+          {dueDateFilterValue !== '' && dueDateFilterValue > 0 && (
+            <span
+              key="due-date-filter"
+              style={{
+                backgroundColor: 'var(--interactive-accent)',
+                color: 'var(--text-on-accent)',
+                padding: '0px 9px',
+                borderRadius: '4px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                fontSize: '0.9em',
+                fontWeight: '500',
+              }}
+            >
+              Due in {dueDateFilterValue} {dueDateFilterUnit}
+              <button
+                onClick={() => {
+                  setDueDateFilterValue('');
+                  setDueDateFilterUnit('days');
+                }}
+                style={{
+                  marginLeft: '6px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-on-accent)',
+                  cursor: 'pointer',
+                  padding: '0 3px',
+                  fontSize: '1.1em',
+                  lineHeight: '1',
+                  opacity: 0.7,
+                }}
+                title="Remove due date filter"
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
+              >
+                &times;
+              </button>
+            </span>
+          )}
+          {/* Display Active Member Filters */}
           {activeFilterMembers.map((member) => {
             const memberConfig = props.plugin.settings.teamMemberColors?.[member] as
               | TeamMemberColorConfig
@@ -824,6 +1138,79 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
               </span>
             );
           })}
+          {/* Display Archive/Done Filter Status if they are set to "include" */}
+          {!excludeArchive && (
+            <span
+              key="include-archive-filter-status"
+              style={{
+                backgroundColor: 'var(--background-modifier-hover)',
+                color: 'var(--text-normal)',
+                padding: '0px 9px',
+                borderRadius: '4px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                fontSize: '0.9em',
+                fontWeight: '500',
+              }}
+            >
+              Archive
+              <button
+                onClick={() => setExcludeArchive(true)} // Click to re-exclude
+                style={{
+                  marginLeft: '6px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '0 3px',
+                  fontSize: '1.1em',
+                  lineHeight: '1',
+                  opacity: 0.7,
+                }}
+                title="Click to Exclude Archive"
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
+              >
+                &times;
+              </button>
+            </span>
+          )}
+          {!excludeDone && (
+            <span
+              key="include-done-filter-status"
+              style={{
+                backgroundColor: 'var(--background-modifier-hover)',
+                color: 'var(--text-normal)',
+                padding: '0px 9px',
+                borderRadius: '4px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                fontSize: '0.9em',
+                fontWeight: '500',
+              }}
+            >
+              Done
+              <button
+                onClick={() => setExcludeDone(true)} // Click to re-exclude
+                style={{
+                  marginLeft: '6px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '0 3px',
+                  fontSize: '1.1em',
+                  lineHeight: '1',
+                  opacity: 0.7,
+                }}
+                title="Click to Exclude Done"
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
+              >
+                &times;
+              </button>
+            </span>
+          )}
         </div>
       )}
 
@@ -888,134 +1275,225 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                     textAlign: 'center',
                   }}
                 >
-                  Tags
+                  Members
+                </th>
+                <th
+                  style={{
+                    border: '1px solid var(--background-modifier-border)',
+                    padding: '4px',
+                    textAlign: 'center',
+                  }}
+                >
+                  Card Tags
+                </th>
+                <th
+                  style={{
+                    border: '1px solid var(--background-modifier-border)',
+                    padding: '4px',
+                    textAlign: 'center',
+                  }}
+                >
+                  Due in (days)
                 </th>
               </tr>
             </thead>
             <tbody>
-              {filteredCards.map((card) => (
-                <tr
-                  key={card.id}
-                  onClick={() => handleRowClick(card)}
-                  style={{ cursor: 'pointer' }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.backgroundColor = 'var(--background-secondary-alt)')
+              {filteredCards.map((card) => {
+                // Due date calculation for display
+                let dueDateDisplay = '';
+                const isCardDateMoment = moment.isMoment(card.date);
+                console.log(
+                  '[WorkspaceView] IN MAP. Card Title:',
+                  card.title.slice(0, 20),
+                  'card.date:',
+                  card.date,
+                  'isMoment:',
+                  isCardDateMoment,
+                  'isValid (if moment):',
+                  isCardDateMoment ? card.date?.isValid() : 'N/A (not moment)',
+                  'Source Board:',
+                  card.sourceBoardName
+                );
+                // console.log('card:', card); // Reduced logging for clarity
+
+                if (card.date) {
+                  try {
+                    const todayMoment = moment().startOf('day');
+                    const cardDateMoment = moment.isMoment(card.date)
+                      ? card.date.clone().startOf('day')
+                      : moment(card.date).startOf('day');
+
+                    // console.log('cardDateMoment:', cardDateMoment);
+                    // console.log('todayMoment:', todayMoment);
+                    if (cardDateMoment.isValid()) {
+                      const diffDays = cardDateMoment.diff(todayMoment, 'days');
+                      dueDateDisplay = diffDays === 0 ? 'Today' : `${diffDays}`;
+                    }
+                  } catch (error) {
+                    console.error('Error calculating due date:', error, 'card:', card);
                   }
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                  <td
-                    style={{
-                      border: '1px solid var(--background-modifier-border)',
-                      padding: '4px',
-                      paddingLeft: '8px',
-                    }}
+                }
+                return (
+                  <tr
+                    key={card.id}
+                    onClick={() => handleRowClick(card)}
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.backgroundColor = 'var(--background-secondary-alt)')
+                    }
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                   >
-                    {card.title}
-                  </td>
-                  <td
-                    style={{
-                      border: '1px solid var(--background-modifier-border)',
-                      padding: '4px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {card.laneTitle}
-                  </td>
-                  <td
-                    style={{
-                      border: '1px solid var(--background-modifier-border)',
-                      padding: '4px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {card.sourceBoardName}
-                  </td>
-                  <td
-                    style={{
-                      border: '1px solid var(--background-modifier-border)',
-                      padding: '4px',
-                      textAlign: 'center',
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: '4px',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    {card.assignedMembers &&
-                      card.assignedMembers.length > 0 &&
-                      card.assignedMembers.map((member) => {
-                        const memberConfig = props.plugin.settings.teamMemberColors?.[member] as
-                          | TeamMemberColorConfig
-                          | undefined;
-                        const backgroundColor =
-                          memberConfig?.background || 'var(--background-modifier-accent-hover)';
-                        const textColor =
-                          memberConfig?.text ||
-                          (memberConfig?.background
-                            ? 'var(--text-on-accent)'
-                            : 'var(--text-normal)');
-                        return (
-                          <span
-                            key={`${card.id}-member-${member}`}
-                            style={{
-                              backgroundColor: backgroundColor,
-                              color: textColor,
-                              padding: '2px 6px',
-                              borderRadius: '3px',
-                              fontSize: '0.85em',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                            }}
-                            title={`Assigned: ${member}`}
-                          >
-                            {member}
-                          </span>
-                        );
-                      })}
-                    {card.tags.map((tagWithHash) => {
-                      const colorSetting = getTagColor(tagWithHash);
-                      const symbolInfo = getTagEmoji(tagWithHash);
-                      const colorValue = colorSetting ? colorSetting.color : undefined;
-                      const bgColor = colorSetting ? colorSetting.backgroundColor : undefined;
-                      const tagNameForDisplay = tagWithHash.substring(1);
+                    {/* Ticket Cell */}
+                    <td
+                      style={{
+                        border: '1px solid var(--background-modifier-border)',
+                        padding: '4px',
+                        paddingLeft: '8px',
+                      }}
+                    >
+                      {card.title}
+                    </td>
+                    {/* Category Cell */}
+                    <td
+                      style={{
+                        border: '1px solid var(--background-modifier-border)',
+                        padding: '4px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      {card.laneTitle}
+                    </td>
+                    {/* Board Cell */}
+                    <td
+                      style={{
+                        border: '1px solid var(--background-modifier-border)',
+                        padding: '4px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      {card.sourceBoardName}
+                    </td>
+                    {/* Members Cell - RESTORED with inner flex div */}
+                    <td
+                      style={{
+                        border: '1px solid var(--background-modifier-border)',
+                        padding: '4px',
+                        textAlign: 'center', // Keep textAlign for the cell itself if content might not fill
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '4px',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {card.assignedMembers &&
+                          card.assignedMembers.length > 0 &&
+                          card.assignedMembers.map((member) => {
+                            const memberConfig = props.plugin.settings.teamMemberColors?.[
+                              member
+                            ] as TeamMemberColorConfig | undefined;
+                            const backgroundColor =
+                              memberConfig?.background || 'var(--background-modifier-accent-hover)';
+                            const textColor =
+                              memberConfig?.text ||
+                              (memberConfig?.background
+                                ? 'var(--text-on-accent)'
+                                : 'var(--text-normal)');
+                            return (
+                              <span
+                                key={`${card.id}-member-${member}`}
+                                style={{
+                                  backgroundColor: backgroundColor,
+                                  color: textColor,
+                                  padding: '2px 6px',
+                                  borderRadius: '3px',
+                                  fontSize: '0.85em',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                }}
+                                title={`Assigned: ${member}`}
+                              >
+                                {member}
+                              </span>
+                            );
+                          })}
+                      </div>
+                    </td>
+                    {/* Card Tags Cell - RESTORED with inner flex div */}
+                    <td
+                      style={{
+                        border: '1px solid var(--background-modifier-border)',
+                        padding: '4px',
+                        textAlign: 'center', // Keep textAlign for the cell itself
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '4px',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {card.tags.map((tagWithHash) => {
+                          const colorSetting = getTagColor(tagWithHash);
+                          const symbolInfo = getTagEmoji(tagWithHash);
+                          const colorValue = colorSetting ? colorSetting.color : undefined;
+                          const bgColor = colorSetting ? colorSetting.backgroundColor : undefined;
+                          const tagNameForDisplay = tagWithHash.substring(1);
 
-                      let displayContent = null;
-                      if (symbolInfo) {
-                        displayContent = (
-                          <>
-                            {symbolInfo.symbol}
-                            {!symbolInfo.hideTag && (
-                              <span style={{ marginLeft: '4px' }}>{tagNameForDisplay}</span>
-                            )}
-                          </>
-                        );
-                      } else {
-                        if (hideHashForTagsWithoutSymbols) {
-                          displayContent = tagNameForDisplay;
-                        } else {
-                          displayContent = tagWithHash;
-                        }
-                      }
+                          let displayContent = null;
+                          if (symbolInfo) {
+                            displayContent = (
+                              <>
+                                {symbolInfo.symbol}
+                                {!symbolInfo.hideTag && (
+                                  <span style={{ marginLeft: '4px' }}>{tagNameForDisplay}</span>
+                                )}
+                              </>
+                            );
+                          } else {
+                            if (hideHashForTagsWithoutSymbols) {
+                              displayContent = tagNameForDisplay;
+                            } else {
+                              displayContent = tagWithHash;
+                            }
+                          }
 
-                      return (
-                        <span
-                          key={tagWithHash}
-                          style={{
-                            color: colorValue,
-                            backgroundColor: bgColor,
-                            padding: '2px 4px',
-                            borderRadius: '3px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                          }}
-                        >
-                          {displayContent}
-                        </span>
-                      );
-                    })}
-                  </td>
-                </tr>
-              ))}
+                          return (
+                            <span
+                              key={tagWithHash}
+                              style={{
+                                color: colorValue,
+                                backgroundColor: bgColor,
+                                padding: '2px 4px',
+                                borderRadius: '3px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                              }}
+                            >
+                              {displayContent}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </td>
+                    {/* Due in (days) Cell */}
+                    <td
+                      style={{
+                        border: '1px solid var(--background-modifier-border)',
+                        padding: '4px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      {dueDateDisplay}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

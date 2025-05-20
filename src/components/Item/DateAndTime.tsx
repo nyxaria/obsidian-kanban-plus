@@ -96,27 +96,33 @@ export function DateAndTime({
 
   if (!rawDateStr) return null;
 
-  let displayString = rawDateStr;
-  if (rawTimeStr) {
-    displayString += ` ${rawTimeStr}`;
-  }
+  // START MODIFICATION: Add onClick for global search on the date part
+  const handleDateSearchClick = (e: JSX.TargetedMouseEvent<HTMLSpanElement>) => {
+    e.stopPropagation(); // Prevent the parent div's onEditDate from firing
+    if (item.data.metadata.date) {
+      const searchDate = item.data.metadata.date.format('YYYY-MM-DD');
+      // Consistent with Tags/Members, use stateManager.app for global search
+      (stateManager.app as any).internalPlugins
+        .getPluginById('global-search')
+        .instance.openGlobalSearch(`@{${searchDate}}`);
+    }
+  };
+  // END MODIFICATION
 
   console.log(
-    '[DateAndTime] Rendering with displayString:',
-    JSON.stringify(displayString),
-    'RawDate:',
-    rawDateStr,
+    '[DateAndTime] Rendering with RawDate:',
+    JSON.stringify(rawDateStr),
     'RawTime:',
     rawTimeStr
   ); // DEBUG LOG
 
-  const dateProps: HTMLAttributes<HTMLSpanElement> = {};
+  const dateProps: HTMLAttributes<HTMLSpanElement> = {}; // This seems to be for the main div for editing
   dateProps['aria-label'] = t('Change date/time');
-  dateProps.onClick = onEditDate;
+  // dateProps.onClick = onEditDate; // This is now on the parent div
 
   return (
     <div
-      onClick={onEditDate}
+      onClick={onEditDate} // Keep onEditDate for the whole lozenge for editing
       style={{
         cursor: 'pointer',
         padding: '1px 5px',
@@ -134,7 +140,14 @@ export function DateAndTime({
       className={classcat([c('item-metadata-date-lozenge')])}
       aria-label={t('Change date/time')}
     >
-      {displayString}
+      {/* MODIFIED: Render date and time in separate spans */}
+      <span onClick={handleDateSearchClick} style={{ cursor: 'pointer' }}>
+        {' '}
+        {/* cursor: help indicates clickable for search */}
+        {rawDateStr}
+      </span>
+      {rawTimeStr && <span style={{ marginLeft: '0.4em' }}>{rawTimeStr}</span>}
+      {/* {displayString} Original rendering */}
     </div>
   );
 }

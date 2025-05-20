@@ -62,6 +62,16 @@ function DraggableLaneRaw({
     [fullWidth, laneWidth, isCollapsed]
   );
 
+  // START NEW MODIFICATION: Memoize dynamic styles for the lane itself (e.g., background color)
+  const dynamicLaneContentStyles = useMemo(() => {
+    const styles: React.CSSProperties = {};
+    if (lane.data?.backgroundColor) {
+      styles.backgroundColor = lane.data.backgroundColor;
+    }
+    return styles;
+  }, [lane.data?.backgroundColor]);
+  // END NEW MODIFICATION
+
   const elementRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const dragHandleRef = useRef<HTMLDivElement>(null);
@@ -165,6 +175,7 @@ function DraggableLaneRaw({
           data-count={lane.children.length}
           ref={elementRef}
           className={classcat([c('lane'), { 'will-prepend': shouldPrepend }])}
+          style={dynamicLaneContentStyles}
         >
           <CollapsedDropArea {...dropAreaProps}>
             <LaneHeader

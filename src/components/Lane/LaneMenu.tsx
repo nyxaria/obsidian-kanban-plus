@@ -10,6 +10,7 @@ import { anyToString } from '../Item/MetadataTable';
 import { KanbanContext } from '../context';
 import { c, generateInstanceId } from '../helpers';
 import { EditState, Lane, LaneSort, LaneTemplate } from '../types';
+import { LaneColorPickerModal } from './LaneColorPickerModal';
 
 export type LaneAction = 'delete' | 'archive' | 'archive-items' | null;
 
@@ -166,6 +167,21 @@ export function useSettingsMenu({ setEditState, path, lane }: UseSettingsMenuPar
           }, 0);
         });
         console.log('[LaneMenu] AddItem: "Archive cards" - After onClick:', item);
+      })
+      .addItem((item) => {
+        const titleString = t('Set background color') || 'Set background color';
+        item.setTitle(titleString);
+        item.setIcon('lucide-palette');
+        item.onClick(() => {
+          console.log('[LaneMenu] "Set background color" onClick. Opening LaneColorPickerModal.');
+          item.menu.hide();
+          new LaneColorPickerModal(
+            stateManager.app,
+            lane.id,
+            stateManager,
+            lane.data?.backgroundColor
+          ).open();
+        });
       })
       .addSeparator()
       .addItem((i) => {

@@ -324,29 +324,47 @@ export function astToUnhydratedBoard(
 
       let shouldMarkItemsComplete = false;
       let parsedLaneId: string | null = null;
+      let parsedLaneBackgroundColor: string | null = null;
 
-      // Attempt to parse lane ID from HTML comment
-      // Look at the next few nodes after the heading for the comment
+      let idNodeIndex = -1;
+
       for (let i = index + 1; i < root.children.length; i++) {
-        const nextNode = root.children[i];
-        // Stop if we hit another heading (start of a new lane) or a list (items of current lane)
-        if (nextNode.type === 'heading') break;
-        // If we encounter a list immediately, the comment (if any) should be before it or not present for this lane.
-        // If it's not a paragraph (where comments might be), or html, break.
-        if (nextNode.type === 'list') break;
+        const currentNode = root.children[i];
 
-        if (nextNode.type === 'html') {
-          const idCommentRegex = /<!--\s*kanban-lane-id:\s*(.*?)\s*-->/;
-          const match = idCommentRegex.exec(nextNode.value as string);
-          if (match && match[1]) {
-            parsedLaneId = match[1].trim();
-            console.log(`[list.ts] Parsed lane ID: ${parsedLaneId} for lane titled: ${title}`);
-            break; // Found ID, no need to look further for this lane
+        if (currentNode.type === 'heading' || currentNode.type === 'list') {
+          break;
+        }
+
+        if (currentNode.type === 'html') {
+          if (parsedLaneId === null) {
+            const idCommentRegex = /<!--\s*kanban-lane-id:\s*(.*?)\s*-->/;
+            const idMatch = idCommentRegex.exec(currentNode.value as string);
+            if (idMatch && idMatch[1]) {
+              parsedLaneId = idMatch[1].trim();
+              console.log(`[list.ts] Parsed lane ID: ${parsedLaneId} for lane titled: ${title}`);
+              idNodeIndex = i;
+            }
+          }
+
+          if (parsedLaneBackgroundColor === null) {
+            const colorCommentRegex = /<!--\s*kanban-lane-background-color:\s*(.*?)\s*-->/;
+            const colorMatch = colorCommentRegex.exec(currentNode.value as string);
+            if (colorMatch && colorMatch[1]) {
+              parsedLaneBackgroundColor = colorMatch[1].trim();
+              console.log(
+                `[list.ts] Parsed background color: ${parsedLaneBackgroundColor} for lane titled: ${title}`
+              );
+            }
           }
         }
-        // If it's a paragraph, it might just be empty lines between heading and comment or items.
-        // If we've checked more than 2-3 non-list/non-heading nodes without finding the ID, it's probably not there.
-        if (i > index + 3 && nextNode.type !== 'paragraph') break; // Limit search depth for non-paragraph, non-HTML nodes
+
+        if ((parsedLaneId && parsedLaneBackgroundColor) || i >= index + 2) {
+          break;
+        }
+
+        if (currentNode.type !== 'paragraph' && currentNode.type !== 'html') {
+          break;
+        }
       }
 
       const list = getNextOfType(root.children, index, 'list', (nodeAfterHeading) => {
@@ -390,6 +408,7 @@ export function astToUnhydratedBoard(
           data: {
             ...parseLaneTitle(title),
             shouldMarkItemsComplete,
+            backgroundColor: parsedLaneBackgroundColor,
           },
         });
       } else {
@@ -407,6 +426,7 @@ export function astToUnhydratedBoard(
           data: {
             ...parseLaneTitle(title),
             shouldMarkItemsComplete,
+            backgroundColor: parsedLaneBackgroundColor,
           },
         });
       }
@@ -522,8 +542,11 @@ function itemToMd(item: Item) {
 function laneToMd(lane: Lane) {
   const lines: string[] = [];
 
-  lines.push(`## ${replaceNewLines(laneTitleWithMaxItems(lane.data.title, lane.data.maxItems))}`);
+  lines.push(`## ${laneTitleWithMaxItems(lane.data.title, lane.data.maxItems)}`);
   lines.push(`<!-- kanban-lane-id: ${lane.id} -->`);
+  if (lane.data?.backgroundColor) {
+    lines.push(`<!-- kanban-lane-background-color: ${lane.data.backgroundColor} -->`);
+  }
   lines.push('');
 
   if (lane.data.shouldMarkItemsComplete) {

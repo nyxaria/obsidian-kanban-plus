@@ -46,7 +46,7 @@ const LaneColorPickerModalComponent: React.FC<LaneColorPickerModalProps> = ({
 
       <div className="setting-item modal-button-container">
         <button onClick={handleApply} className="mod-cta">
-          {t('text_apply_color_button')}
+          Submit
         </button>
         <button onClick={onClose}>{t('Cancel')}</button>
       </div>
