@@ -21,7 +21,15 @@ import {
 } from '../MarkdownRenderer/MarkdownRenderer';
 import { KanbanContext, SearchContext } from '../context';
 import { c, useGetDateColorFn, useGetTagColorFn, useGetTagSymbolFn } from '../helpers';
-import { EditState, EditingState, Item, isEditing } from '../types';
+import {
+  EditState,
+  EditingProcessState,
+  Item,
+  TeamMemberColorConfig,
+  isCardEditingState,
+  isEditCoordinates,
+  isEditingActive,
+} from '../types';
 import { DateAndTime, RelativeDate } from './DateAndTime';
 import { InlineMetadata } from './InlineMetadata';
 import {
@@ -205,6 +213,61 @@ export function Tags({
   );
 }
 
+export interface AssignedMembersProps {
+  assignedMembers?: string[];
+  searchQuery?: string;
+  teamMemberColors?: Record<string, TeamMemberColorConfig>;
+}
+
+export function AssignedMembers({
+  assignedMembers,
+  searchQuery,
+  teamMemberColors,
+}: AssignedMembersProps) {
+  const { stateManager } = useContext(KanbanContext);
+  const shouldShow = stateManager.useSetting('move-tags');
+
+  if (!assignedMembers || !assignedMembers.length || !shouldShow) {
+    return null;
+  }
+
+  return (
+    <div className={c('item-assigned-members')} style={{ marginTop: '4px' }}>
+      {assignedMembers.map((member, i) => {
+        const memberConfig = teamMemberColors?.[member];
+        const backgroundColor = memberConfig?.background || 'var(--background-modifier-hover)';
+        const textColor =
+          memberConfig?.text ||
+          (memberConfig?.background ? 'var(--text-on-accent)' : 'var(--text-normal)');
+
+        return (
+          <span
+            key={i}
+            className={`${c('item-assigned-member')} ${
+              searchQuery && member.toLocaleLowerCase().contains(searchQuery)
+                ? 'is-search-match'
+                : ''
+            }`}
+            style={{
+              cursor: 'default',
+              backgroundColor: backgroundColor,
+              color: textColor,
+              padding: '1px 5px',
+              borderRadius: '3px',
+              marginRight: '4px',
+              fontSize: '0.9em',
+              display: 'inline-flex',
+              alignItems: 'center',
+            }}
+          >
+            {member}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export const ItemContent = memo(function ItemContent({
   item,
   editState,
@@ -214,87 +277,111 @@ export const ItemContent = memo(function ItemContent({
   isStatic,
   targetHighlight,
 }: ItemContentProps) {
-  const { stateManager, filePath, boardModifiers } = useContext(KanbanContext);
+  const { stateManager, view, boardModifiers, filePath } = useContext(KanbanContext);
+  const { onEditDate, onEditTime } = useDatePickers(item);
   const getDateColor = useGetDateColorFn(stateManager);
+  const getTagColor = useGetTagColorFn(stateManager);
+  const getTagSymbol = useGetTagSymbolFn(stateManager);
+  const search = useContext(SearchContext);
+  const shouldShowTags = stateManager.useSetting('move-tags');
+  const hideHashForTagsWithoutSymbols = stateManager.useSetting('hideHashForTagsWithoutSymbols');
+  const teamMemberColors: Record<string, TeamMemberColorConfig> =
+    view.plugin.settings.teamMemberColors || {};
+
+  const isEditingCard = isCardEditingState(editState) && editState.id === item.id;
+
   const titleRef = useRef<string | null>(null);
+  const path = useNestedEntityPath();
 
   useEffect(() => {
-    if (editState === EditingState.complete) {
+    if (editState === EditingProcessState.complete) {
       if (titleRef.current !== null) {
-        boardModifiers.updateItem(path, stateManager.updateItemContent(item, titleRef.current));
+        const newContent = titleRef.current.trim();
+        boardModifiers.updateItem(path, stateManager.updateItemContent(item, newContent));
       }
       titleRef.current = null;
-    } else if (editState === EditingState.cancel) {
+    } else if (editState === EditingProcessState.cancel) {
       titleRef.current = null;
     }
-  }, [editState, stateManager, item]);
+  }, [editState, stateManager, item, boardModifiers, path]);
 
-  const path = useNestedEntityPath();
-  const { onEditDate, onEditTime } = useDatePickers(item);
   const onEnter = useCallback(
     (cm: EditorView, mod: boolean, shift: boolean) => {
       if (!allowNewLine(stateManager, mod, shift)) {
-        setEditState(EditingState.complete);
+        setEditState(EditingProcessState.complete);
         return true;
       }
+      return false;
     },
-    [stateManager]
+    [stateManager, setEditState]
   );
+
+  const onEscape = useCallback(() => {
+    setEditState(EditingProcessState.cancel);
+    return true;
+  }, [setEditState]);
+
+  const onSubmit = useCallback(() => {
+    setEditState(EditingProcessState.complete);
+  }, [setEditState]);
 
   const onWrapperClick = useCallback(
     (e: MouseEvent) => {
-      if (e.targetNode.instanceOf(HTMLElement)) {
-        if (e.targetNode.hasClass(c('item-metadata-date'))) {
+      if (e.target instanceof HTMLElement) {
+        if (e.target.classList.contains(c('item-metadata-date'))) {
           onEditDate(e);
-        } else if (e.targetNode.hasClass(c('item-metadata-time'))) {
+        } else if (e.target.classList.contains(c('item-metadata-time'))) {
           onEditTime(e);
+        } else if (e.target.closest('.tag')) {
+          e.stopPropagation();
         }
       }
     },
     [onEditDate, onEditTime]
   );
 
-  const onSubmit = useCallback(() => setEditState(EditingState.complete), []);
-
-  const onEscape = useCallback(() => {
-    setEditState(EditingState.cancel);
-    return true;
-  }, [item]);
-
   const onCheckboxContainerClick = useCallback(
-    (e: PointerEvent) => {
-      const target = e.target as HTMLElement;
-
-      if (target.hasClass('task-list-item-checkbox')) {
-        if (target.dataset.src) {
-          return;
-        }
-
-        const checkboxIndex = parseInt(target.dataset.checkboxIndex, 10);
-        const checked = checkCheckbox(stateManager, item.data.titleRaw, checkboxIndex);
-        const updated = stateManager.updateItemContent(item, checked);
-
-        boardModifiers.updateItem(path, updated);
+    (e: any) => {
+      if (e.targetNode.instanceOf(HTMLInputElement)) {
+        if (isStatic) return;
+        const checkboxIndex = parseInt(e.targetNode.dataset.checkboxIndex);
+        const newTitle = checkCheckbox(stateManager, item.data.titleRaw, checkboxIndex);
+        boardModifiers.updateItem(path, stateManager.updateItemContent(item, newTitle));
       }
     },
-    [path, boardModifiers, stateManager, item]
+    [stateManager, item, boardModifiers, path, isStatic]
   );
 
-  if (!isStatic && isEditing(editState)) {
+  const onBlur = useCallback(() => {
+    if (stateManager.getSetting('clickOutsideCardToSaveEdit')) {
+      if (isCardEditingState(editState) && editState.id === item.id) {
+        setEditState(EditingProcessState.complete);
+      }
+    }
+  }, [stateManager, editState, item.id, setEditState]);
+
+  const editCoordinates = isEditCoordinates(editState) ? editState : undefined;
+
+  const showCardTitleEditor = isCardEditingState(editState) && editState.id === item.id;
+
+  if (showCardTitleEditor) {
     return (
-      <div className={c('item-input-wrapper')}>
+      <div className={c('item-content-wrapper')} style={isStatic ? { cursor: 'default' } : {}}>
         <MarkdownEditor
-          editState={editState}
+          editState={editCoordinates}
           className={c('item-input')}
-          onEnter={onEnter}
-          onEscape={onEscape}
-          onSubmit={onSubmit}
           value={item.data.titleRaw}
           onChange={(update) => {
             if (update.docChanged) {
-              titleRef.current = update.state.doc.toString().trim();
+              titleRef.current = update.state.doc.toString();
             }
           }}
+          onBlur={onBlur}
+          onEnter={onEnter}
+          onEscape={onEscape}
+          onSubmit={onSubmit}
+          autoFocus
+          compact={false}
         />
       </div>
     );
@@ -309,7 +396,6 @@ export const ItemContent = memo(function ItemContent({
           markdownString={item.data.title}
           searchQuery={searchQuery}
           onPointerUp={onCheckboxContainerClick}
-          searchMatches={targetHighlight?.match?.matches}
         />
       ) : (
         <MarkdownRenderer
@@ -331,6 +417,11 @@ export const ItemContent = memo(function ItemContent({
           />
           <InlineMetadata item={item} stateManager={stateManager} />
           <Tags tags={item.data.metadata.tags} searchQuery={searchQuery} />
+          <AssignedMembers
+            assignedMembers={item.data.assignedMembers}
+            searchQuery={searchQuery}
+            teamMemberColors={teamMemberColors}
+          />
         </div>
       )}
     </div>

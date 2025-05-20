@@ -19,7 +19,7 @@ import { Items } from '../Item/Item';
 import { ItemForm } from '../Item/ItemForm';
 import { KanbanContext, SearchContext, SortContext } from '../context';
 import { c, generateInstanceId } from '../helpers';
-import { DataTypes, EditState, EditingState, Item, Lane } from '../types';
+import { DataTypes, EditState, EditingProcessState, Item, Lane } from '../types';
 import { LaneHeader } from './LaneHeader';
 
 const laneAccepts = [DataTypes.Item];
@@ -43,7 +43,7 @@ function DraggableLaneRaw({
   targetHighlight,
   cancelEditCounter,
 }: DraggableLaneProps) {
-  const [editState, setEditState] = useState<EditState>(EditingState.cancel);
+  const [editState, setEditState] = useState<EditState>(EditingProcessState.cancel);
   const [isSorting, setIsSorting] = useState(false);
 
   const { stateManager, boardModifiers, view } = useContext(KanbanContext);

@@ -43,6 +43,7 @@ export function useItemMenu({
       const coordinates = { x: e.clientX, y: e.clientY };
       const hasDate = !!item.data.metadata.date;
       const hasTime = !!item.data.metadata.time;
+      const teamMembers: string[] = stateManager.getSetting('teamMembers') || [];
 
       const menu = new Menu().addItem((i) => {
         i.setIcon('lucide-edit')
@@ -265,15 +266,78 @@ export function useItemMenu({
 
       menu.addSeparator();
 
+      menu.addItem((menuItem) => {
+        menuItem.setTitle(t('Assign Member') || 'Assign Member').setIcon('lucide-users');
+
+        if (teamMembers.length === 0) {
+          menuItem.setEnabled(false);
+          return;
+        }
+
+        const subMenu = menuItem.setSubmenu();
+        const cardAssignedMembers = item.data.assignedMembers || [];
+
+        teamMembers.forEach((member) => {
+          if (typeof member === 'string' && member.trim() !== '') {
+            const isAssigned = cardAssignedMembers.includes(member);
+            subMenu.addItem((subMenuItem) => {
+              subMenuItem
+                .setTitle(member)
+                .setChecked(isAssigned)
+                .onClick(async () => {
+                  let newAssignedMembers = [...cardAssignedMembers];
+                  let newTitleRaw = item.data.titleRaw;
+                  const memberTag = `@@${member}`;
+                  const escapedMemberTagForRegex = `@@${escapeRegExpStr(member)}`;
+
+                  if (isAssigned) {
+                    newAssignedMembers = newAssignedMembers.filter((m) => m !== member);
+                    let titleAfterRemoval = newTitleRaw.replace(
+                      ` ${escapedMemberTagForRegex}`,
+                      ' '
+                    );
+                    if (titleAfterRemoval === newTitleRaw) {
+                      titleAfterRemoval = newTitleRaw.replace(escapedMemberTagForRegex, '');
+                    }
+                    newTitleRaw = titleAfterRemoval.replace(/\s\s+/g, ' ').trim();
+                  } else {
+                    newAssignedMembers.push(member);
+                    if (newTitleRaw.trim() === '') {
+                      newTitleRaw = memberTag;
+                    } else {
+                      newTitleRaw = `${newTitleRaw.trim()} ${memberTag}`.trim();
+                    }
+                  }
+
+                  const tempUpdatedItemData = { ...item.data, assignedMembers: newAssignedMembers };
+                  const tempUpdatedItem = { ...item, data: tempUpdatedItemData };
+
+                  boardModifiers.updateItem(
+                    path,
+                    stateManager.updateItemContent(tempUpdatedItem, newTitleRaw)
+                  );
+                });
+            });
+          } else {
+            console.warn(
+              '[Kanban Plugin] ItemMenu: Invalid or empty team member found in settings and was skipped:',
+              member
+            );
+          }
+        });
+      });
+
       const addMoveToOptions = (menu: Menu) => {
         const lanes = stateManager.state.children;
         if (lanes.length <= 1) return;
         for (let i = 0, len = lanes.length; i < len; i++) {
+          const laneTitle =
+            typeof lanes[i].data.title === 'string' ? lanes[i].data.title : 'Unnamed Lane';
           menu.addItem((item) =>
             item
               .setIcon('lucide-square-kanban')
               .setChecked(path[0] === i)
-              .setTitle(lanes[i].data.title)
+              .setTitle(laneTitle)
               .onClick(() => {
                 if (path[0] === i) return;
                 stateManager.setState((boardData) => {
@@ -289,7 +353,7 @@ export function useItemMenu({
       } else {
         menu.addItem((item) => {
           const submenu = (item as any)
-            .setTitle(t('Move to list'))
+            .setTitle(t('Move to list') || 'Move to list')
             .setIcon('lucide-square-kanban')
             .setSubmenu();
 
@@ -297,7 +361,7 @@ export function useItemMenu({
         });
       }
 
-      menu.showAtPosition(coordinates);
+      menu.showAtMouseEvent(e);
     },
     [setEditState, item, path, boardModifiers, stateManager]
   );

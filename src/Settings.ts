@@ -61,6 +61,12 @@ export interface SavedWorkspaceView {
   id: string;
   name: string;
   tags: string[];
+  members?: string[];
+}
+
+export interface TeamMemberColorConfig {
+  background: string;
+  text: string;
 }
 
 export interface KanbanSettings {
@@ -119,6 +125,8 @@ export interface KanbanSettings {
   lastSelectedWorkspaceViewId?: string;
   clickOutsideCardToSaveEdit?: boolean;
   hideHashForTagsWithoutSymbols?: boolean;
+  teamMembers?: string[];
+  teamMemberColors?: Record<string, TeamMemberColorConfig>;
 }
 
 export interface KanbanViewSettings {
@@ -127,6 +135,8 @@ export interface KanbanViewSettings {
   'tag-symbols': TagSymbolSetting[];
   savedWorkspaceViews: SavedWorkspaceView[];
   hideHashForTagsWithoutSymbols: boolean;
+  teamMembers: string[];
+  teamMemberColors: Record<string, TeamMemberColorConfig>;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -173,6 +183,8 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'tag-symbols',
   'clickOutsideCardToSaveEdit',
   'hideHashForTagsWithoutSymbols',
+  'teamMembers',
+  'teamMemberColors',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -1728,11 +1740,150 @@ export class KanbanSettingsTab extends PluginSettingTab {
 
   display() {
     const { containerEl } = this;
-
     containerEl.empty();
-    containerEl.addClass(c('board-settings-modal'));
 
-    this.settingsManager.constructUI(containerEl, t('Kanban Plugin'), false);
+    this.settingsManager.constructUI(containerEl, t('Kanban board settings'), false);
+    this.renderTeamMembersSetting(containerEl);
+    this.renderDateColorSettings(containerEl);
+    this.renderTagColorSettings(containerEl);
+    this.renderTagSymbolSettings(containerEl);
+    this.renderMetadataSettings(containerEl);
+    this.renderTagSortSettings(containerEl);
+  }
+
+  renderTeamMembersSetting(containerEl: HTMLElement) {
+    containerEl.createEl('h4', { text: t('Team Members') });
+
+    const membersSettingsEl = containerEl.createDiv();
+
+    let memberNameInput: HTMLInputElement;
+    new Setting(membersSettingsEl)
+      .setName(t('Add team member'))
+      .addText((text) => {
+        memberNameInput = text.inputEl;
+        text.setPlaceholder(t('Enter member name')).onChange(async (value) => {
+          // Optional: live validation or feedback
+        });
+      })
+      .addButton((button) =>
+        button.setButtonText(t('Add')).onClick(async () => {
+          const name = memberNameInput.value.trim();
+          if (name && !this.plugin.settings.teamMembers?.includes(name)) {
+            this.plugin.settings.teamMembers = [...(this.plugin.settings.teamMembers || []), name];
+            const currentColors = this.plugin.settings.teamMemberColors || {};
+            if (!currentColors[name]) {
+              currentColors[name] = { background: '', text: '' };
+              this.plugin.settings.teamMemberColors = currentColors;
+            }
+            await this.plugin.saveSettings();
+            memberNameInput.value = ''; // Clear input
+            renderMembersWithColors();
+          }
+        })
+      );
+
+    const memberColorSettingContainer = containerEl.createDiv();
+
+    const renderMembersWithColors = () => {
+      memberColorSettingContainer.innerHTML = ''; // Clear existing members and their color pickers
+
+      const members = this.plugin.settings.teamMembers || [];
+      let memberColors = this.plugin.settings.teamMemberColors || {};
+
+      if (members.length === 0) {
+        new Setting(memberColorSettingContainer).setDesc(
+          'No team members added yet. Add members above first.'
+        );
+        return;
+      }
+
+      members.forEach((member) => {
+        if (
+          !memberColors[member] ||
+          typeof memberColors[member].background === 'undefined' ||
+          typeof memberColors[member].text === 'undefined'
+        ) {
+          memberColors[member] = { background: '', text: '' };
+        }
+        const currentMemberConfig = memberColors[member];
+
+        const memberSetting = new Setting(memberColorSettingContainer)
+          .setName(member)
+          .setDesc('Background & Text Colors');
+
+        memberSetting.controlEl.addClass('kanban-member-color-controls');
+
+        // Background Color Picker
+        memberSetting.addColorPicker((picker) => {
+          picker
+            .setValue(currentMemberConfig.background || '#00000000') // Use transparent if empty
+            .onChange(async (value) => {
+              const freshMemberColors = { ...(this.plugin.settings.teamMemberColors || {}) };
+              freshMemberColors[member] = {
+                ...(freshMemberColors[member] || { text: '' }),
+                background: value,
+              };
+              this.plugin.settings.teamMemberColors = freshMemberColors;
+              await this.plugin.saveSettings();
+            });
+        });
+
+        // Text Color Picker
+        memberSetting.addColorPicker((picker) => {
+          picker
+            .setValue(currentMemberConfig.text || '#000000') // Default to black if empty
+            .onChange(async (value) => {
+              const freshMemberColors = { ...(this.plugin.settings.teamMemberColors || {}) };
+              freshMemberColors[member] = {
+                ...(freshMemberColors[member] || { background: '' }),
+                text: value,
+              };
+              this.plugin.settings.teamMemberColors = freshMemberColors;
+              await this.plugin.saveSettings();
+            });
+        });
+
+        // Remove Member Button for each member
+        memberSetting.addButton((button) =>
+          button
+            .setIcon('trash')
+            .setTooltip(t('Remove member'))
+            .onClick(async () => {
+              this.plugin.settings.teamMembers = (this.plugin.settings.teamMembers || []).filter(
+                (m) => m !== member
+              );
+              const currentColors = this.plugin.settings.teamMemberColors || {};
+              delete currentColors[member];
+              this.plugin.settings.teamMemberColors = currentColors;
+              await this.plugin.saveSettings();
+              renderMembersWithColors(); // Re-render the updated list
+            })
+        );
+      });
+    };
+
+    // Initial render of the members list with color pickers
+    renderMembersWithColors();
+  }
+
+  renderDateColorSettings(containerEl: HTMLElement) {
+    // Implementation of renderDateColorSettings method
+  }
+
+  renderTagColorSettings(containerEl: HTMLElement) {
+    // Implementation of renderTagColorSettings method
+  }
+
+  renderTagSymbolSettings(containerEl: HTMLElement) {
+    // Implementation of renderTagSymbolSettings method
+  }
+
+  renderMetadataSettings(containerEl: HTMLElement) {
+    // Implementation of renderMetadataSettings method
+  }
+
+  renderTagSortSettings(containerEl: HTMLElement) {
+    // Implementation of renderTagSortSettings method
   }
 }
 
@@ -1792,6 +1943,8 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   lastSelectedWorkspaceViewId: undefined,
   clickOutsideCardToSaveEdit: true,
   hideHashForTagsWithoutSymbols: false,
+  teamMembers: [],
+  teamMemberColors: {},
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {

@@ -16,7 +16,14 @@ import { frontmatterKey } from 'src/parsers/common';
 
 import { KanbanContext, SearchContext } from '../context';
 import { c } from '../helpers';
-import { EditState, EditingState, Item, isEditing } from '../types';
+import {
+  EditState,
+  EditingProcessState,
+  Item,
+  isCardEditingState,
+  isEditCoordinates,
+  isEditingActive,
+} from '../types';
 import { ItemCheckbox } from './ItemCheckbox';
 import { ItemContent } from './ItemContent';
 import { useItemMenu } from './ItemMenu';
@@ -53,7 +60,7 @@ const ItemInner = memo(function ItemInner({
   cancelEditCounter,
 }: ItemInnerProps) {
   const { stateManager, boardModifiers } = useContext(KanbanContext);
-  const [editState, setEditState] = useState<EditState>(EditingState.cancel);
+  const [editState, setEditState] = useState<EditState>(EditingProcessState.cancel);
   const itemInnerRef = useRef<HTMLDivElement>(null);
   const prevCancelEditCounterRef = useRef<number>(cancelEditCounter);
 
@@ -61,7 +68,7 @@ const ItemInner = memo(function ItemInner({
 
   useEffect(() => {
     const handler = () => {
-      if (isEditing(editState)) setEditState(EditingState.cancel);
+      if (isEditingActive(editState)) setEditState(EditingProcessState.cancel);
     };
 
     dndManager.dragManager.emitter.on('dragStart', handler);
@@ -78,13 +85,13 @@ const ItemInner = memo(function ItemInner({
 
   useEffect(() => {
     if (prevCancelEditCounterRef.current !== cancelEditCounter) {
-      if (isEditing(editState)) {
+      if (isEditingActive(editState)) {
         console.log(
           `[ItemInner item ${item.id}] cancelEditCounter changed to ${cancelEditCounter}. Was ${prevCancelEditCounterRef.current}. EditState:`,
           editState,
           '-> complete'
         );
-        setEditState(EditingState.complete);
+        setEditState(EditingProcessState.complete);
       }
     }
     prevCancelEditCounterRef.current = cancelEditCounter;
@@ -157,7 +164,7 @@ const ItemInner = memo(function ItemInner({
 
   const onContextMenu: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
     (e) => {
-      if (isEditing(editState)) return;
+      if (isEditingActive(editState)) return;
       if (
         e.targetNode.instanceOf(HTMLAnchorElement) &&
         (e.targetNode.hasClass('internal-link') || e.targetNode.hasClass('external-link'))
@@ -170,12 +177,16 @@ const ItemInner = memo(function ItemInner({
   );
 
   const onDoubleClick: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
-    (e) => setEditState({ x: e.clientX, y: e.clientY }),
-    [setEditState]
+    (e) => {
+      if (isStatic || !stateManager.userSetting('editable')) return;
+      setEditState({ x: e.clientX, y: e.clientY });
+      e.stopPropagation();
+    },
+    [setEditState, isStatic, stateManager]
   );
 
   const ignoreAttr = useMemo(() => {
-    if (isEditing(editState)) {
+    if (isEditingActive(editState)) {
       return {
         'data-ignore-drag': true,
       };

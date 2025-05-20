@@ -106,6 +106,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
       fileMetadata: undefined,
       fileMetadataOrder: undefined,
     },
+    assignedMembers: [],
     checked: item.checked,
     checkChar: item.checked ? item.checkChar || ' ' : ' ',
     position: {
@@ -196,6 +197,46 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
       return true;
     }
   });
+
+  // Parse @@MemberName for assigned members from the potentially modified 'title'
+  const memberRegex = /(?:^|\s)(@@[a-zA-Z0-9_-]+)/g;
+  let match;
+  const memberRangesToMark: { start: number; end: number }[] = [];
+
+  // Use the 'title' string, which may have been modified by tag/date removal
+  // The regex exec method maintains state with lastIndex, so we operate on a stable string for finding matches.
+  const titleForMemberParsing = title;
+
+  while ((match = memberRegex.exec(titleForMemberParsing)) !== null) {
+    const fullMatchString = match[0]; // e.g., " @@Alice" or "@@Alice"
+    const memberTagString = match[1]; // e.g., "@@Alice"
+    const memberName = memberTagString.substring(2); // "Alice"
+
+    if (itemData.assignedMembers && !itemData.assignedMembers.includes(memberName)) {
+      itemData.assignedMembers.push(memberName);
+    }
+
+    // Calculate the start index of the "@@Name" part (e.g., "@@Alice")
+    // match.index is the start of fullMatchString (" @@Alice")
+    // memberTagString is "@@Alice"
+    // The difference in their lengths gives the length of the prefix (e.g., the leading space)
+    const prefixLength = fullMatchString.length - memberTagString.length;
+    const memberTagStartIndex = match.index + prefixLength;
+
+    memberRangesToMark.push({
+      start: memberTagStartIndex,
+      end: memberTagStartIndex + memberTagString.length,
+    });
+  }
+
+  // Sort ranges in reverse order to mark for deletion without affecting subsequent indices
+  memberRangesToMark.sort((a, b) => b.start - a.start);
+
+  for (const range of memberRangesToMark) {
+    // Here, 'title' is updated iteratively. Each call to markRangeForDeletion
+    // returns a new string with the deletion markers.
+    title = markRangeForDeletion(title, range);
+  }
 
   itemData.title = preprocessTitle(stateManager, dedentNewLines(executeDeletion(title)));
 

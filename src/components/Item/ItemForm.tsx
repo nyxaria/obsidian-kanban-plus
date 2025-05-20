@@ -7,7 +7,7 @@ import { MarkdownEditor, allowNewLine } from '../Editor/MarkdownEditor';
 import { getDropAction } from '../Editor/helpers';
 import { KanbanContext } from '../context';
 import { c } from '../helpers';
-import { EditState, EditingState, Item, isEditing } from '../types';
+import { EditState, EditingProcessState, Item, isEditCoordinates } from '../types';
 
 interface ItemFormProps {
   addItems: (items: Item[]) => void;
@@ -17,11 +17,17 @@ interface ItemFormProps {
   laneName?: string;
 }
 
-export function ItemForm({ addItems, editState, setEditState, hideButton, laneName }: ItemFormProps) {
+export function ItemForm({
+  addItems,
+  editState,
+  setEditState,
+  hideButton,
+  laneName,
+}: ItemFormProps) {
   const { stateManager } = useContext(KanbanContext);
   const editorRef = useRef<EditorView>();
 
-  const clear = () => setEditState(EditingState.cancel);
+  const clear = () => setEditState(EditingProcessState.cancel);
   const clickOutsideRef = useOnclickOutside(clear, {
     ignoreClass: [c('ignore-click-outside'), 'mobile-toolbar', 'suggestion-container'],
   });
@@ -40,7 +46,7 @@ export function ItemForm({ addItems, editState, setEditState, hideButton, laneNa
     }
   };
 
-  if (isEditing(editState)) {
+  if (isEditCoordinates(editState)) {
     return (
       <div className={c('item-form')} ref={clickOutsideRef}>
         <div className={c('item-input-wrapper')}>

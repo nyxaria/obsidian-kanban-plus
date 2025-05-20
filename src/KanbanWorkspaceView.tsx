@@ -12,7 +12,7 @@ import { KanbanView } from './KanbanView';
 import { DEFAULT_SETTINGS, KanbanSettings, SavedWorkspaceView } from './Settings';
 import { StateManager } from './StateManager';
 import { getTagColorFn, getTagSymbolFn } from './components/helpers';
-import { ItemData, TagColor, TagSymbolSetting } from './components/types';
+import { ItemData, TagColor, TagSymbolSetting, TeamMemberColorConfig } from './components/types';
 import { hasFrontmatterKey } from './helpers';
 import KanbanPlugin from './main';
 import { listItemToItemData } from './parsers/formats/list';
@@ -27,6 +27,7 @@ interface WorkspaceCard {
   sourceBoardPath: string;
   laneTitle: string;
   blockId?: string;
+  assignedMembers?: string[];
 }
 
 export const KANBAN_WORKSPACE_VIEW_TYPE = 'kanban-workspace';
@@ -54,6 +55,8 @@ function getHeadingText(node: MdastHeading): string {
 function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
   const [currentTagInput, setCurrentTagInput] = useState('');
   const [activeFilterTags, setActiveFilterTags] = useState<string[]>([]);
+  const [selectedMemberForFilter, setSelectedMemberForFilter] = useState('');
+  const [activeFilterMembers, setActiveFilterMembers] = useState<string[]>([]);
   const [filteredCards, setFilteredCards] = useState<WorkspaceCard[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +77,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       const viewToLoad = loadedSavedViews.find((v) => v.id === lastViewId);
       if (viewToLoad) {
         setActiveFilterTags([...viewToLoad.tags]);
-        setSelectedViewId(viewToLoad.id); // Update dropdown to reflect loaded view
+        setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
+        setSelectedViewId(viewToLoad.id);
       }
     }
   }, [
@@ -109,9 +113,23 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
     setActiveFilterTags((prevTags) => prevTags.filter((tag) => tag !== tagToRemove));
   }, []);
 
+  // New handlers for member filters
+  const handleAddMemberFilter = useCallback(() => {
+    const newMember = selectedMemberForFilter;
+    if (newMember && !activeFilterMembers.includes(newMember)) {
+      setActiveFilterMembers((prevMembers) => [...prevMembers, newMember]);
+    }
+    setSelectedMemberForFilter('');
+  }, [selectedMemberForFilter, activeFilterMembers]);
+
+  const handleRemoveMemberFilter = useCallback((memberToRemove: string) => {
+    setActiveFilterMembers((prevMembers) =>
+      prevMembers.filter((member) => member !== memberToRemove)
+    );
+  }, []);
+
   const handleScanDirectory = useCallback(
-    async (tagsToFilterBy: string[]) => {
-      // console.log('[WorkspaceView] handleScanDirectory called with tags:', tagsToFilterBy);
+    async (tagsToFilterBy: string[], membersToFilterBy: string[]) => {
       setIsLoading(true);
       setError(null);
       setFilteredCards([]);
@@ -176,7 +194,15 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                         tagsToFilterBy.length === 0 ||
                         tagsToFilterBy.every((reqTag) => cardTags.includes(reqTag));
 
-                      if (hasAllRequiredTags) {
+                      // Member filtering logic - case-sensitive
+                      const cardAssignedMembers = itemData.assignedMembers || []; // Already string[] from parser
+                      const hasAllRequiredMembers =
+                        membersToFilterBy.length === 0 ||
+                        membersToFilterBy.every((reqMember) =>
+                          cardAssignedMembers.includes(reqMember)
+                        );
+
+                      if (hasAllRequiredTags && hasAllRequiredMembers) {
                         allCards.push({
                           id:
                             itemData.blockId ||
@@ -185,6 +211,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                           tags: (itemData.metadata?.tags || []).map((t) =>
                             t.startsWith('#') ? t : `#${t}`
                           ),
+                          assignedMembers: itemData.assignedMembers || [],
                           sourceBoardName: mdFile.basename,
                           sourceBoardPath: mdFile.path,
                           laneTitle: currentLaneTitle,
@@ -215,12 +242,12 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       }
       setIsLoading(false);
     },
-    [props.plugin]
+    [props.plugin, setIsLoading, setError, setFilteredCards]
   );
 
   useEffect(() => {
-    handleScanDirectory(activeFilterTags);
-  }, [activeFilterTags, handleScanDirectory]);
+    handleScanDirectory(activeFilterTags, activeFilterMembers);
+  }, [activeFilterTags, activeFilterMembers, handleScanDirectory]);
 
   const handleRowClick = useCallback(
     async (card: WorkspaceCard) => {
@@ -392,7 +419,6 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
 
   const handleSaveView = useCallback(async () => {
     if (!newViewName.trim()) {
-      // Optionally, show an error message to the user
       console.warn('[WorkspaceView] Cannot save view: name is empty.');
       return;
     }
@@ -400,36 +426,41 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
     const newSavedView: SavedWorkspaceView = {
       id: newId,
       name: newViewName.trim(),
-      tags: [...activeFilterTags], // Save a copy of current tags
+      tags: [...activeFilterTags],
+      members: [...activeFilterMembers], // Save active member filters
     };
 
     const currentSavedViews = props.plugin.settings.savedWorkspaceViews || [];
     const updatedViews = [...currentSavedViews, newSavedView];
 
     props.plugin.settings.savedWorkspaceViews = updatedViews;
-    props.plugin.settings.lastSelectedWorkspaceViewId = newSavedView.id; // Set as last selected
+    props.plugin.settings.lastSelectedWorkspaceViewId = newSavedView.id;
     await props.plugin.saveSettings();
 
-    // Immediately update local state to reflect the save and select the new view
     setSavedViews(updatedViews);
     setSelectedViewId(newSavedView.id);
-    // setActiveFilterTags([...newSavedView.tags]); // Redundant due to useEffect on selectedViewId or activeFilterTags already reacting if view is truly loaded by handleLoadView logic
-
-    setNewViewName(''); // Clear input
-  }, [newViewName, activeFilterTags, props.plugin]);
+    // No need to set activeFilterTags/Members here, as useEffect on selectedViewId or handleScanDirectory will react
+    setNewViewName('');
+  }, [
+    newViewName,
+    activeFilterTags,
+    activeFilterMembers,
+    props.plugin,
+    setSavedViews,
+    setSelectedViewId,
+    setNewViewName,
+  ]); // Added activeFilterMembers and setters to deps
 
   const handleDeleteView = useCallback(async () => {
     if (!selectedViewId) {
       console.warn('[WorkspaceView] Cannot delete view: no view selected.');
       return;
     }
-
     const viewToDelete = savedViews.find((v) => v.id === selectedViewId);
     if (!viewToDelete) {
       console.warn('[WorkspaceView] Cannot delete view: selected view not found.');
       return;
     }
-
     if (!confirm(`Are you sure you want to delete the view "${viewToDelete.name}"?`)) {
       return;
     }
@@ -439,17 +470,33 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
 
     if (props.plugin.settings.lastSelectedWorkspaceViewId === selectedViewId) {
       props.plugin.settings.lastSelectedWorkspaceViewId = undefined;
+      // Clear filters if the deleted view was the last selected active one
+      setActiveFilterTags([]);
+      setActiveFilterMembers([]);
     }
 
     await props.plugin.saveSettings();
-    setSavedViews(updatedViews); // Immediately update the local state for the dropdown
-    setSelectedViewId(null); // Clear the selection
-    setActiveFilterTags([]); // Optionally clear active tags, or load the new selectedViewId's tags if one was auto-selected
-  }, [selectedViewId, savedViews, props.plugin, setActiveFilterTags]); // Added setActiveFilterTags to dependencies
+    setSavedViews(updatedViews);
+    setSelectedViewId(null);
+    // If another view becomes selected (e.g., first in list), its filters would be loaded by dropdown onChange or useEffect.
+    // If no view is selected, filters are already cleared (or should be if last selected was deleted).
+  }, [
+    selectedViewId,
+    savedViews,
+    props.plugin,
+    setActiveFilterTags,
+    setActiveFilterMembers,
+    setSavedViews,
+    setSelectedViewId,
+  ]); // Added setters to deps
+
+  const availableTeamMembers = useMemo(() => {
+    return props.plugin.settings.teamMembers || [];
+  }, [props.plugin.settings.teamMembers]);
 
   return (
     <div style={{ padding: '10px' }}>
-      <h2>Kanban Workspace - Tag Filter</h2>
+      <h2>Kanban Workspace - Filters</h2>
 
       {/* Combined Save/Load Section - MOVED HERE */}
       <div
@@ -500,6 +547,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                   const viewToLoad = savedViews.find((v) => v.id === newId);
                   if (viewToLoad) {
                     setActiveFilterTags([...viewToLoad.tags]);
+                    setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
                     props.plugin.settings.lastSelectedWorkspaceViewId = viewToLoad.id;
                     await props.plugin.saveSettings();
                   }
@@ -532,32 +580,66 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
         )}
       </div>
 
-      {/* Add Tag Section */}
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px' }}>
-        <label htmlFor="workspace-tag-input" style={{ marginRight: '5px' }}>
-          Add Tag:{' '}
-        </label>
-        <input
-          type="text"
-          id="workspace-tag-input"
-          value={currentTagInput}
-          onInput={(e) => setCurrentTagInput((e.target as HTMLInputElement).value)}
-          onKeyPress={(e) => {
-            if (e.key === 'Enter') {
-              handleAddTag();
-              e.preventDefault();
-            }
-          }}
-          style={{ marginRight: '5px' }}
-          placeholder="e.g. mechanics"
-        />
-        <button onClick={handleAddTag} disabled={!currentTagInput.trim()}>
-          +
-        </button>
+      {/* Combined Filter Input Sections */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '20px',
+          marginTop: '20px',
+          marginBottom: '10px',
+        }}
+      >
+        {/* Add Tag Section */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <label htmlFor="workspace-tag-input" style={{ marginRight: '5px' }}>
+            Filter by Tag:{' '}
+          </label>
+          <input
+            type="text"
+            id="workspace-tag-input"
+            value={currentTagInput}
+            onInput={(e) => setCurrentTagInput((e.target as HTMLInputElement).value)}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                handleAddTag();
+                e.preventDefault();
+              }
+            }}
+            style={{ marginRight: '0px' }}
+            placeholder="e.g. mechanics"
+          />
+          <button onClick={handleAddTag} disabled={!currentTagInput.trim()}>
+            +
+          </button>
+        </div>
+
+        {/* Add Member Filter Section */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <label htmlFor="workspace-member-select" style={{ marginRight: '5px' }}>
+            Filter by Member:{' '}
+          </label>
+          <select
+            id="workspace-member-select"
+            value={selectedMemberForFilter}
+            onChange={(e) => setSelectedMemberForFilter((e.target as HTMLSelectElement).value)}
+            style={{ marginRight: '0px', minWidth: '150px', padding: '5px' }}
+          >
+            <option value="">Select a member...</option>
+            {availableTeamMembers.map((member) => (
+              <option key={member} value={member}>
+                {member}
+              </option>
+            ))}
+          </select>
+          <button onClick={handleAddMemberFilter} disabled={!selectedMemberForFilter.trim()}>
+            +
+          </button>
+        </div>
       </div>
 
       {/* Active tags display - REMAINS BELOW ADD TAG */}
-      {activeFilterTags.length > 0 && (
+      {/* {activeFilterTags.length > 0 && (
         <div style={{ marginBottom: '10px', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
           {activeFilterTags.map((tag) => {
             const tagWithHashForLookup = `#${tag}`;
@@ -621,6 +703,128 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
             );
           })}
         </div>
+      )} */}
+
+      {/* Active Member Filters Display */}
+      {(activeFilterTags.length > 0 || activeFilterMembers.length > 0) && (
+        <div
+          style={{
+            marginBottom: '20px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '8px', // Increased gap for better separation
+            padding: '8px',
+            borderRadius: '4px',
+          }}
+        >
+          {/* Display Active Member Filters First */}
+          {activeFilterMembers.map((member) => {
+            const memberConfig = props.plugin.settings.teamMemberColors?.[member] as
+              | TeamMemberColorConfig
+              | undefined;
+            const backgroundColor = memberConfig?.background || 'var(--background-modifier-hover)';
+            const textColor =
+              memberConfig?.text ||
+              (memberConfig?.background ? 'var(--text-on-accent)' : 'var(--text-normal)');
+            return (
+              <span
+                key={`member-filter-${member}`}
+                style={{
+                  backgroundColor: backgroundColor,
+                  color: textColor,
+                  padding: '0px 9px',
+                  borderRadius: '4px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  fontSize: '0.9em',
+                  fontWeight: '500',
+                }}
+              >
+                {member}
+                <button
+                  onClick={() => handleRemoveMemberFilter(member)}
+                  style={{
+                    marginLeft: '6px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '0 3px',
+                    fontSize: '1.1em',
+                    lineHeight: '1',
+                    opacity: 0.7,
+                  }}
+                  title={`Remove member filter: ${member}`}
+                  onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                  onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
+                >
+                  &times;
+                </button>
+              </span>
+            );
+          })}
+          {/* Display Active Tag Filters */}
+          {activeFilterTags.map((tag) => {
+            const tagWithHashForLookup = `#${tag}`;
+            const colorSetting = getTagColor(tagWithHashForLookup);
+            const symbolInfo = getTagEmoji(tagWithHashForLookup);
+            const colorValue = colorSetting ? colorSetting.color : undefined;
+            const bgColor = colorSetting ? colorSetting.backgroundColor : undefined;
+
+            let displayContent = null;
+            if (symbolInfo) {
+              displayContent = (
+                <>
+                  {symbolInfo.symbol}
+                  {!symbolInfo.hideTag && <span style={{ marginLeft: '4px' }}>{tag}</span>}
+                </>
+              );
+            } else {
+              if (hideHashForTagsWithoutSymbols) {
+                displayContent = tag;
+              } else {
+                displayContent = `#${tag}`;
+              }
+            }
+
+            return (
+              <span
+                key={`tag-filter-${tag}`}
+                style={{
+                  color: colorValue,
+                  backgroundColor: bgColor,
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  fontSize: '0.9em',
+                  border: bgColor ? 'none' : '1px solid var(--background-modifier-border)',
+                }}
+              >
+                {displayContent}
+                <button
+                  onClick={() => handleRemoveTag(tag)}
+                  style={{
+                    marginLeft: '6px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: colorValue || 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '0 3px',
+                    fontSize: '1.1em',
+                    lineHeight: '1',
+                    opacity: 0.7,
+                  }}
+                  title={`Remove tag ${tag}`}
+                  onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                  onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
+                >
+                  &times;
+                </button>
+              </span>
+            );
+          })}
+        </div>
       )}
 
       {/* Error and Table display - REMAINS AT THE BOTTOM */}
@@ -633,17 +837,17 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       >
         {isLoading && (
           <p>
-            <i>Loading cards...</i>
+            <i> Loading cards...</i>
           </p>
         )}
         {!isLoading && filteredCards.length === 0 && !error && activeFilterTags.length > 0 && (
           <p>
-            <i>No cards found matching the selected tags in this directory.</i>
+            <i> No cards found matching the selected tags in this directory.</i>
           </p>
         )}
         {!isLoading && filteredCards.length === 0 && !error && activeFilterTags.length === 0 && (
           <p>
-            <i>No cards found in the current scan scope.</i>
+            <i> No cards found in the current scan scope.</i>
           </p>
         )}
         {!isLoading && filteredCards.length > 0 && (
@@ -731,8 +935,43 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                       border: '1px solid var(--background-modifier-border)',
                       padding: '4px',
                       textAlign: 'center',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '4px',
+                      justifyContent: 'center',
                     }}
                   >
+                    {card.assignedMembers &&
+                      card.assignedMembers.length > 0 &&
+                      card.assignedMembers.map((member) => {
+                        const memberConfig = props.plugin.settings.teamMemberColors?.[member] as
+                          | TeamMemberColorConfig
+                          | undefined;
+                        const backgroundColor =
+                          memberConfig?.background || 'var(--background-modifier-accent-hover)';
+                        const textColor =
+                          memberConfig?.text ||
+                          (memberConfig?.background
+                            ? 'var(--text-on-accent)'
+                            : 'var(--text-normal)');
+                        return (
+                          <span
+                            key={`${card.id}-member-${member}`}
+                            style={{
+                              backgroundColor: backgroundColor,
+                              color: textColor,
+                              padding: '2px 6px',
+                              borderRadius: '3px',
+                              fontSize: '0.85em',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                            }}
+                            title={`Assigned: ${member}`}
+                          >
+                            {member}
+                          </span>
+                        );
+                      })}
                     {card.tags.map((tagWithHash) => {
                       const colorSetting = getTagColor(tagWithHash);
                       const symbolInfo = getTagEmoji(tagWithHash);
@@ -764,7 +1003,6 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                           style={{
                             color: colorValue,
                             backgroundColor: bgColor,
-                            marginRight: '6px',
                             padding: '2px 4px',
                             borderRadius: '3px',
                             display: 'inline-flex',

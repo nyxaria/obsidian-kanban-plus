@@ -7,7 +7,7 @@ import { MarkdownEditor, allowNewLine } from '../Editor/MarkdownEditor';
 import { MarkdownRenderer } from '../MarkdownRenderer/MarkdownRenderer';
 import { KanbanContext } from '../context';
 import { c } from '../helpers';
-import { EditState, EditingState, isEditing } from '../types';
+import { EditState, EditingProcessState, isEditCoordinates } from '../types';
 
 export interface LaneTitleProps {
   title: string;
@@ -30,7 +30,7 @@ export function LaneLimitCounter({
   const { stateManager } = useContext(KanbanContext);
   const hideCount = stateManager.getSetting('hide-card-count');
 
-  if (hideCount || isEditing(editState)) return null;
+  if (hideCount || isEditCoordinates(editState)) return null;
 
   return (
     <div
@@ -57,10 +57,10 @@ export function LaneTitle({ maxItems, editState, setEditState, title, onChange }
   const titleRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (editState === EditingState.complete) {
+    if (editState === EditingProcessState.complete) {
       if (titleRef.current !== null) onChange(titleRef.current);
       titleRef.current = null;
-    } else if (editState === EditingState.cancel && titleRef.current !== null) {
+    } else if (editState === EditingProcessState.cancel && titleRef.current !== null) {
       titleRef.current = null;
     }
   }, [editState]);
@@ -73,18 +73,18 @@ export function LaneTitle({ maxItems, editState, setEditState, title, onChange }
   const onEnter = useCallback(
     (cm: EditorView, mod: boolean, shift: boolean) => {
       if (!allowNewLine(stateManager, mod, shift)) {
-        setEditState(EditingState.complete);
+        setEditState(EditingProcessState.complete);
         return true;
       }
     },
     [setEditState, stateManager]
   );
-  const onSubmit = useCallback(() => setEditState(EditingState.complete), [setEditState]);
-  const onEscape = useCallback(() => setEditState(EditingState.cancel), [setEditState]);
+  const onSubmit = useCallback(() => setEditState(EditingProcessState.complete), [setEditState]);
+  const onEscape = useCallback(() => setEditState(EditingProcessState.cancel), [setEditState]);
 
   return (
     <div className={c('lane-title')}>
-      {isEditing(editState) ? (
+      {isEditCoordinates(editState) ? (
         <MarkdownEditor
           editState={editState}
           className={c('lane-input')}

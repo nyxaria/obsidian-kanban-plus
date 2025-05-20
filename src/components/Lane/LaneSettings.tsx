@@ -5,7 +5,7 @@ import { t } from 'src/lang/helpers';
 
 import { KanbanContext } from '../context';
 import { c } from '../helpers';
-import { EditState, Lane, isEditing } from '../types';
+import { EditState, Lane, isEditCoordinates } from '../types';
 
 export interface LaneSettingsProps {
   lane: Lane;
@@ -16,7 +16,7 @@ export interface LaneSettingsProps {
 export function LaneSettings({ lane, lanePath, editState }: LaneSettingsProps) {
   const { boardModifiers } = useContext(KanbanContext);
 
-  if (!isEditing(editState)) return null;
+  if (!isEditCoordinates(editState)) return null;
 
   return (
     <div className={c('lane-setting-wrapper')}>
