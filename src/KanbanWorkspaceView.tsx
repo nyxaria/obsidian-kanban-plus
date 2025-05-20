@@ -346,7 +346,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
           // ... (similar modification for the fallback cast) ...
           const stateForExistingLeafFallback = {
             file: card.sourceBoardPath,
-             eState: {
+            eState: {
               filePath: card.sourceBoardPath,
               blockId: card.blockId,
               cardTitle: !card.blockId ? card.title : undefined,
@@ -378,7 +378,10 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
         if (card.blockId) {
           linkPath = `${card.sourceBoardPath}#^${card.blockId}`;
         }
-        console.log(`[WorkspaceView] Opening link: '${linkPath}' with state:`, navigationStateForNewLeaf);
+        console.log(
+          `[WorkspaceView] Opening link: '${linkPath}' with state:`,
+          navigationStateForNewLeaf
+        );
         await app.workspace.openLinkText(linkPath, card.sourceBoardPath, false, {
           state: navigationStateForNewLeaf, // Pass the state for new leaf
         });
@@ -388,9 +391,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
   );
 
   const handleSaveView = useCallback(async () => {
-    if (!newViewName.trim() || activeFilterTags.length === 0) {
+    if (!newViewName.trim()) {
       // Optionally, show an error message to the user
-      console.warn('[WorkspaceView] Cannot save view: name is empty or no active tags.');
+      console.warn('[WorkspaceView] Cannot save view: name is empty.');
       return;
     }
     const newId = Date.now().toString();
@@ -404,22 +407,45 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
     const updatedViews = [...currentSavedViews, newSavedView];
 
     props.plugin.settings.savedWorkspaceViews = updatedViews;
+    props.plugin.settings.lastSelectedWorkspaceViewId = newSavedView.id; // Set as last selected
     await props.plugin.saveSettings();
-    // No need to call setSavedViews here as the useEffect listening to props.plugin.settings will update it.
+
+    // Immediately update local state to reflect the save and select the new view
+    setSavedViews(updatedViews);
+    setSelectedViewId(newSavedView.id);
+    // setActiveFilterTags([...newSavedView.tags]); // Redundant due to useEffect on selectedViewId or activeFilterTags already reacting if view is truly loaded by handleLoadView logic
+
     setNewViewName(''); // Clear input
-    alert(`View "${newSavedView.name}" saved!`); // Simple feedback
   }, [newViewName, activeFilterTags, props.plugin]);
 
-  const handleLoadView = useCallback(async () => {
-    if (!selectedViewId) return;
-    const viewToLoad = savedViews.find((v) => v.id === selectedViewId);
-    if (viewToLoad) {
-      setActiveFilterTags([...viewToLoad.tags]); // Set active tags, which will trigger re-scan
-      // Save the loaded view ID as the last selected
-      props.plugin.settings.lastSelectedWorkspaceViewId = viewToLoad.id;
-      await props.plugin.saveSettings();
+  const handleDeleteView = useCallback(async () => {
+    if (!selectedViewId) {
+      console.warn('[WorkspaceView] Cannot delete view: no view selected.');
+      return;
     }
-  }, [selectedViewId, savedViews, props.plugin]);
+
+    const viewToDelete = savedViews.find((v) => v.id === selectedViewId);
+    if (!viewToDelete) {
+      console.warn('[WorkspaceView] Cannot delete view: selected view not found.');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete the view "${viewToDelete.name}"?`)) {
+      return;
+    }
+
+    const updatedViews = savedViews.filter((v) => v.id !== selectedViewId);
+    props.plugin.settings.savedWorkspaceViews = updatedViews;
+
+    if (props.plugin.settings.lastSelectedWorkspaceViewId === selectedViewId) {
+      props.plugin.settings.lastSelectedWorkspaceViewId = undefined;
+    }
+
+    await props.plugin.saveSettings();
+    setSavedViews(updatedViews); // Immediately update the local state for the dropdown
+    setSelectedViewId(null); // Clear the selection
+    setActiveFilterTags([]); // Optionally clear active tags, or load the new selectedViewId's tags if one was auto-selected
+  }, [selectedViewId, savedViews, props.plugin, setActiveFilterTags]); // Added setActiveFilterTags to dependencies
 
   return (
     <div style={{ padding: '10px' }}>
@@ -433,7 +459,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
           padding: '10px',
           border: '1px solid var(--background-modifier-border-hover)',
           borderRadius: '4px',
-          maxWidth: '420px',
+          maxWidth: '320px',
         }}
       >
         {/* Save View Controls */}
@@ -454,10 +480,10 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
           />
           <button
             onClick={handleSaveView}
-            disabled={!newViewName.trim() || activeFilterTags.length === 0}
-            style={{ minWidth: '150px' }}
+            disabled={!newViewName.trim()}
+            style={{ minWidth: '65px' }}
           >
-            Save Current View
+            Save
           </button>
         </div>
 
@@ -466,7 +492,19 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <select
               value={selectedViewId || ''}
-              onChange={(e) => setSelectedViewId((e.target as HTMLSelectElement).value)}
+              onChange={async (e) => {
+                // Make onChange async
+                const newId = (e.target as HTMLSelectElement).value;
+                setSelectedViewId(newId);
+                if (newId) {
+                  const viewToLoad = savedViews.find((v) => v.id === newId);
+                  if (viewToLoad) {
+                    setActiveFilterTags([...viewToLoad.tags]);
+                    props.plugin.settings.lastSelectedWorkspaceViewId = viewToLoad.id;
+                    await props.plugin.saveSettings();
+                  }
+                }
+              }}
               style={{ flexGrow: 1, padding: '5px' }}
             >
               <option value="" disabled>
@@ -479,11 +517,16 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
               ))}
             </select>
             <button
-              onClick={handleLoadView}
+              onClick={handleDeleteView}
               disabled={!selectedViewId}
-              style={{ minWidth: '150px' }}
+              style={{
+                minWidth: '65px',
+                backgroundColor: 'var(--background-modifier-error)',
+                color: 'var(--text-on-accent)',
+              }} // Adjusted width and added styling
+              title="Delete selected view"
             >
-              Load Selected View
+              Delete
             </button>
           </div>
         )}
