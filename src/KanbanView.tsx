@@ -10,6 +10,7 @@ import {
   ViewStateResult,
   WorkspaceLeaf,
   debounce,
+  normalizePath,
 } from 'obsidian';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
@@ -42,6 +43,14 @@ import { frontmatterKey } from './parsers/common';
 export const kanbanViewType = 'kanban';
 export const kanbanIcon = 'lucide-trello';
 
+// Added TargetHighlightLocation interface definition
+interface TargetHighlightLocation {
+  blockId?: string;
+  cardTitle?: string;
+  listName?: string;
+  match?: any; // Added for search results
+}
+
 export class KanbanView extends TextFileView implements HoverParent {
   plugin: KanbanPlugin;
   hoverPopover: HoverPopover | null;
@@ -59,6 +68,9 @@ export class KanbanView extends TextFileView implements HoverParent {
   private _reactState: any = {};
   private currentSearchMatch: any = null;
   private _isPendingInitialRender: boolean = false;
+  private _reactHasRenderedOnceInThisInstance = false;
+  private _initialRenderTimeoutId: number | null = null;
+  private scrollTimeoutId: number | null = null;
 
   get isPrimary(): boolean {
     return this.plugin.getStateManager(this.file)?.getAView() === this;
@@ -160,16 +172,22 @@ export class KanbanView extends TextFileView implements HoverParent {
       return null;
     }
     const stateManager = this.plugin.stateManagers.get(this.file);
+    console.log(
+      `[KanbanView] getBoard: For file ${this.file.path}. StateManager found: ${!!stateManager}.`
+    );
     if (!stateManager) {
       console.warn(`[KanbanView] getBoard: StateManager not found for file: ${this.file.path}`);
       return null;
     }
     if (!stateManager.state) {
       console.warn(
-        `[KanbanView] getBoard: StateManager found for ${this.file.path}, but stateManager.state is null/undefined.`
+        `[KanbanView] getBoard: StateManager found for ${this.file.path}, but stateManager.state is null/undefined. Current StateManager file prop: ${stateManager.file?.path}`
       );
       return null;
     }
+    console.log(
+      `[KanbanView] getBoard: Returning state for ${this.file.path}. Board ID from SM: ${stateManager.state.id}, SM file prop: ${stateManager.file?.path}`
+    );
     return stateManager.state;
   }
 
@@ -300,12 +318,12 @@ export class KanbanView extends TextFileView implements HoverParent {
     return this.data;
   }
 
-  setViewData(data: string, clear?: boolean) {
+  async setViewData(data: string, clear?: boolean) {
     if (!hasFrontmatterKeyRaw(data)) {
       this.plugin.kanbanFileModes[(this.leaf as any).id || this.file.path] = 'markdown';
       this.plugin.removeView(this);
+      // Do not await setMarkdownView if it's not critical path before returning
       this.plugin.setMarkdownView(this.leaf, false);
-
       return;
     }
 
@@ -318,173 +336,124 @@ export class KanbanView extends TextFileView implements HoverParent {
       this.actionButtons = {};
     }
 
-    this.plugin.addView(this, data, this.isPrimary);
+    // Await the addView process to ensure StateManager is fully ready
     console.log(
-      `[KanbanView] setViewData: Called plugin.addView with data (length: ${data?.length}), clear: ${clear}, passed isPrimary: ${this.isPrimary}`
+      `[KanbanView] setViewData: About to call await this.plugin.addView for ${this.file?.path}`
     );
+    await this.plugin.addView(this, data, this.isPrimary);
+    console.log(
+      `[KanbanView] setViewData: Call to plugin.addView completed for ${this.file?.path}. Data length: ${data?.length}, clear: ${clear}, isPrimary: ${this.isPrimary}`
+    );
+
+    // Ensure React component is rendered/updated AFTER StateManager is fully initialized by the awaited addView
+    this.setReactState({});
   }
 
-  async setState(state: any, result: ViewStateResult): Promise<void> {
-    console.log(this.getViewType(), 'setState called with state:', state, 'and result:', result);
+  async setState(state: any, result: ViewStateResult) {
+    console.log('[KanbanView] setState called with state:', state, 'and result:', result);
 
-    let dataChangedDueToSearch = false;
-    if (state.activeDocument?.content && this.data !== state.activeDocument.content) {
-      console.log(
-        '[KanbanView] setState: activeDocument.content received from search, updating this.data.'
-      );
-      this.data = state.activeDocument.content; // Update internal data cache
-      dataChangedDueToSearch = true;
+    this.currentSearchMatch = null;
+    this.targetHighlightLocation = null;
+
+    if (state?.eState) {
+      if (state.eState.blockId || state.eState.cardTitle || state.eState.listName) {
+        this.targetHighlightLocation = {
+          blockId: state.eState.blockId,
+          cardTitle: state.eState.cardTitle,
+          listName: state.eState.listName,
+        };
+        console.log(
+          '[KanbanView] setState: Determined targetHighlightLocation from eState (blockId/cardTitle/listName):',
+          this.targetHighlightLocation
+        );
+      } else if (state.eState.match) {
+        this.targetHighlightLocation = { match: state.eState.match };
+        console.log(
+          '[KanbanView] setState: Determined targetHighlightLocation from eState.match:',
+          this.targetHighlightLocation
+        );
+      }
     }
 
-    this.pendingHighlightScroll = null;
-    let highlightForYellowBorder: {
-      blockId?: string;
-      cardTitle?: string;
-      listName?: string;
-    } | null = null;
-    let searchMatchProcessedInThisCall = false;
-
-    // Determine yellow border highlight first
-    if (state.eState?.blockId || (state.eState?.cardTitle && state.eState?.listName)) {
-      highlightForYellowBorder = {
-        blockId: state.eState.blockId,
-        cardTitle: state.eState.cardTitle,
-        listName: state.eState.listName,
-      };
+    if (!this.targetHighlightLocation && state?.targetHighlightLocation) {
+      this.targetHighlightLocation = state.targetHighlightLocation;
       console.log(
-        '[KanbanView] setState: Determined BORDER highlight from eState:',
-        highlightForYellowBorder
-      );
-    } else if (
-      state.targetHighlightLocation &&
-      (state.targetHighlightLocation.blockId || state.targetHighlightLocation.cardTitle)
-    ) {
-      highlightForYellowBorder = state.targetHighlightLocation;
-      console.log(
-        '[KanbanView] setState: Determined BORDER highlight from persisted state.targetHighlightLocation:',
-        highlightForYellowBorder
+        '[KanbanView] setState: Used targetHighlightLocation from persisted state:',
+        this.targetHighlightLocation
       );
     }
 
-    if (highlightForYellowBorder) {
-      this.setTargetHighlightLocation(highlightForYellowBorder);
-      this.pendingHighlightScroll = highlightForYellowBorder;
-      state.targetHighlightLocation = highlightForYellowBorder; // For persistence
-
-      // Consume the eState properties related to border highlighting to prevent re-triggering
-      // if this state object is re-used by Obsidian for subsequent setState calls.
-      if (state.eState) {
-        console.log(
-          '[KanbanView] setState: Consuming eState properties (blockId, cardTitle, listName) after processing for border highlight.',
-          'Original eState was:',
-          state.eState
-        );
-        state.eState.blockId = undefined;
-        state.eState.cardTitle = undefined;
-        state.eState.listName = undefined;
-        console.log(
-          '[KanbanView] setState: eState after consumption of border highlight fields is now:',
-          state.eState
-        );
-      }
-    } else {
-      if (this.targetHighlightLocation) {
-        this.setTargetHighlightLocation(null);
-      }
-      if (
-        state.targetHighlightLocation &&
-        (state.targetHighlightLocation.blockId || state.targetHighlightLocation.cardTitle)
-      ) {
-        state.targetHighlightLocation = null;
-      }
+    if (!this.targetHighlightLocation) {
       console.log(
-        '[KanbanView] setState: No BORDER highlight determined. Cleared active local border highlight if any.'
+        '[KanbanView] setState: No specific highlight determined or persisted. targetHighlightLocation remains null.'
       );
     }
 
-    // Handle currentSearchMatch based on eState
-    if (state.eState) {
-      if (state.eState.match) {
-        this.currentSearchMatch = state.eState.match;
-        searchMatchProcessedInThisCall = true;
-        console.log(
-          '[KanbanView] setState: Stored currentSearchMatch from eState.match:',
-          this.currentSearchMatch
-        );
-      } else {
-        if (this.currentSearchMatch !== null) {
-          console.log(
-            '[KanbanView] setState: Clearing currentSearchMatch as eState exists but has no match. Was:',
-            this.currentSearchMatch
-          );
-          this.currentSearchMatch = null;
-          searchMatchProcessedInThisCall = true; // Clearing is also a processing action
-        }
-      }
+    const previousFilePath = this.file?.path;
+
+    console.log(
+      '[KanbanView] setState: Calling super.setState. Current this.targetHighlightLocation:',
+      this.targetHighlightLocation,
+      'Current this.currentSearchMatch:',
+      this.currentSearchMatch
+    );
+    const stateForSuper = {
+      ...state,
+      targetHighlightLocation: this.targetHighlightLocation,
+    };
+    await super.setState(stateForSuper, result);
+    console.log('[KanbanView] setState: super.setState completed.');
+
+    const incomingFilePath = state?.file;
+
+    let fileHasEffectivelyChanged = false;
+    if (incomingFilePath && previousFilePath) {
+      fileHasEffectivelyChanged =
+        normalizePath(incomingFilePath) !== normalizePath(previousFilePath);
+    } else if (incomingFilePath && !previousFilePath) {
+      fileHasEffectivelyChanged = true;
+    } else if (!incomingFilePath && previousFilePath) {
+      fileHasEffectivelyChanged = true;
     }
 
     console.log(
-      this.getViewType(),
-      'setState: Calling super.setState with state.targetHighlightLocation:',
-      state.targetHighlightLocation,
-      'currentSearchMatch:',
-      this.currentSearchMatch
+      `[KanbanView] setState: File change check: previous='${previousFilePath}', incoming='${incomingFilePath}', fileHasEffectivelyChanged=${fileHasEffectivelyChanged}`
     );
-    await super.setState(state, result);
-    console.log(this.getViewType(), 'setState: super.setState completed.');
 
-    let shouldCallSetViewData = false;
-    let reasonForSetViewData = '';
-    let dataToSet = this.data;
+    const shouldProcessViewData = state?.eState && !state.eState.preventSetViewData;
 
-    if (state.eState?.match) {
-      shouldCallSetViewData = true;
-      reasonForSetViewData = 'Global search match detected.';
-      if (state.eState.match.content) {
-        if (this.data !== state.eState.match.content) {
-          console.log(
-            '[KanbanView] setState: Updating this.data with eState.match.content for search consistency.'
-          );
-          this.data = state.eState.match.content;
-          dataToSet = this.data;
-        } else {
-          console.log('[KanbanView] setState: this.data already matches eState.match.content.');
-        }
-      } else if (state.activeDocument?.content && this.data !== state.activeDocument.content) {
+    if (fileHasEffectivelyChanged || shouldProcessViewData) {
+      if (this.file) {
         console.log(
-          '[KanbanView] setState: eState.match.content missing, updating this.data with activeDocument.content.'
+          `[KanbanView] setState: File effectively changed to ${this.file.path} or eState received. Resetting _isPendingInitialRender and _reactState. Will call setViewData.`
         );
-        this.data = state.activeDocument.content;
-        dataToSet = this.data;
+        if (fileHasEffectivelyChanged) {
+          this._reactHasRenderedOnceInThisInstance = false;
+          console.log(
+            '[KanbanView] setState: File changed, so _reactHasRenderedOnceInThisInstance is reset to false for a clean render.'
+          );
+        }
+        this._isPendingInitialRender = true;
+        this._reactState = {};
+
+        const fileContent = await this.app.vault.cachedRead(this.file);
+        await this.setViewData(fileContent, true);
       } else {
         console.log(
-          '[KanbanView] setState: Neither eState.match.content nor new activeDocument.content provided for search. Using existing this.data for setViewData.'
+          '[KanbanView] setState: File effectively changed or eState processing, but this.file is not (or no longer) set. Clearing view.'
         );
+        if (fileHasEffectivelyChanged) {
+          this._reactHasRenderedOnceInThisInstance = false;
+        }
+        this.clear();
+        this._isPendingInitialRender = true;
+        this._reactState = {};
       }
-    } else if (highlightForYellowBorder) {
-      shouldCallSetViewData = true;
-      reasonForSetViewData = 'Border highlight navigation detected (not a global search match).';
-    } else if (dataChangedDueToSearch) {
-      shouldCallSetViewData = true;
-      reasonForSetViewData = 'Data changed (not via search match or border highlight nav).';
-    }
-
-    if (shouldCallSetViewData) {
-      console.log(`[KanbanView] setState: Triggering setViewData. Reason: ${reasonForSetViewData}`);
-      this.setViewData(dataToSet, true);
-      // Ensure React component is rendered/updated after setViewData potentially re-initializes StateManager link
-      console.log('[KanbanView] setState: Calling setReactState({}) after setViewData.');
-      this.setReactState({});
-    } else if (searchMatchProcessedInThisCall) {
+    } else if (this.file && this.targetHighlightLocation) {
       console.log(
-        '[KanbanView] setState: Search related state change (e.g. cleared without data/border change), calling setReactState.'
+        '[KanbanView] setState: File did NOT change, but targetHighlightLocation is set. Calling setReactState for highlight.'
       );
-      this.setReactState({});
-    } else if (this.pendingHighlightScroll) {
-      console.log(
-        '[KanbanView] setState: Fallback for this.pendingHighlightScroll. Calling setReactState.'
-      );
-      this.setReactState({});
+      this.setReactState({ targetHighlight: this.targetHighlightLocation, forceRerender: true });
     } else {
       console.log(
         '[KanbanView] setState: No specific action taken to call setViewData or setReactState after super.setState. This may be normal if no relevant state changed.'
@@ -550,7 +519,42 @@ export class KanbanView extends TextFileView implements HoverParent {
       );
       return <div style={{ padding: '20px', textAlign: 'center' }}>Loading Kanban board...</div>;
     }
-    return <Kanban stateManager={stateManager} view={this} reactState={this._reactState || {}} />;
+    // Ensure this.file is available, similar to setReactState guard
+    if (!this.file) {
+      console.warn('[KanbanView] getPortal: this.file is null. Cannot render portal content.');
+      return (
+        <div style={{ padding: '20px', textAlign: 'center' }}>
+          File not available for Kanban board.
+        </div>
+      );
+    }
+
+    return (
+      <Kanban
+        // Props as passed in setReactState for consistency
+        plugin={this.plugin}
+        view={this}
+        settings={this.viewSettings}
+        board={this.getBoard()} // Already present and correct
+        app={this.app}
+        archivedCount={this.plugin.archive?.getArchive?.(this.file)?.length ?? 0} // Ensure number
+        file={this.file} // Already implicitly used by stateManager, but good to be explicit if Kanban needs it
+        reactState={this._reactState || {}} // Already present
+        setReactState={this.setReactState.bind(this)}
+        emitter={this.emitter}
+        dispatch={this.plugin.dispatch}
+        stateManager={stateManager} // Already present and correct
+        onwardsNavigate={(path: string, payload: any) => {
+          const targetFile = this.app.vault.getAbstractFileByPath(path) as TFile;
+          if (targetFile) {
+            const leaf = this.app.workspace.getLeaf(false);
+            leaf.openFile(targetFile, payload);
+          } else {
+            console.warn(`[KanbanView] getPortal onwardsNavigate: File not found at path ${path}`);
+          }
+        }}
+      />
+    );
   }
 
   getBoardSettings() {
@@ -743,255 +747,136 @@ export class KanbanView extends TextFileView implements HoverParent {
   };
 
   clear() {
-    // this.contentEl.empty(); // Original line, keep if necessary
+    ReactDOM.unmountComponentAtNode(this.contentEl);
   }
 
-  setReactState(newState: { targetHighlight?: any }) {
-    console.log(
-      '[KanbanView] setReactState: ENTRY (via StateManager or direct call). newState:',
-      newState,
-      'currentSearchMatch:',
-      this.currentSearchMatch,
-      'targetHighlightLocation (border):',
-      this.targetHighlightLocation,
-      'pendingHighlightScroll (at entry):',
-      this.pendingHighlightScroll ? { ...this.pendingHighlightScroll } : null // Log value at entry
-    );
+  handleDrop(dragEntity: any, dropEntity: any) {
+    console.log('[KanbanView] handleDrop called', dragEntity, dropEntity);
+    // Actual drop logic will go here
+  }
 
-    let shouldProcessPendingScroll = false;
-    let capturedTargetForScroll: TargetHighlightLocation | null = null;
+  setReactState(newState: { targetHighlight?: any; forceRerender?: boolean }) {
+    const stateManager = this.plugin.stateManagers.get(this.file);
 
-    // Detect if this call is primarily to handle a pending scroll initiated by Kanban.useEffect
-    if (this.pendingHighlightScroll && newState && Object.keys(newState).length === 0) {
-      console.log(
-        '[KanbanView] setReactState: Call is likely for pending scroll. Capturing target and preparing to clear pendingHighlightScroll early.'
-      );
-      shouldProcessPendingScroll = true;
-      capturedTargetForScroll = this.targetHighlightLocation
-        ? { ...this.targetHighlightLocation }
-        : null;
-      // Clear the flag immediately to prevent useEffect loop. The captured value will be used for scroll logic.
-      this.pendingHighlightScroll = null;
-      console.log(
-        '[KanbanView] setReactState: this.pendingHighlightScroll immediately set to null.'
-      );
-    }
-
-    const oldReactTargetHighlight = this._reactState?.targetHighlight;
-    let newReactTargetHighlightVal: any = null;
-
-    if (newState && Object.prototype.hasOwnProperty.call(newState, 'targetHighlight')) {
-      newReactTargetHighlightVal = newState.targetHighlight;
-      console.log(
-        '[KanbanView] setReactState (Priority 1): Using newReactTargetHighlightVal from explicit newState:',
-        newReactTargetHighlightVal
-      );
-    } else if (this.currentSearchMatch) {
-      newReactTargetHighlightVal = this.currentSearchMatch;
-      console.log(
-        '[KanbanView] setReactState (Priority 2): Using newReactTargetHighlightVal from this.currentSearchMatch:',
-        newReactTargetHighlightVal
-      );
-    } else if (this.pendingHighlightScroll && this.targetHighlightLocation) {
-      newReactTargetHighlightVal = this.targetHighlightLocation;
-      console.log(
-        '[KanbanView] setReactState (Priority 3): Using newReactTargetHighlightVal from this.targetHighlightLocation (pending scroll for border):',
-        newReactTargetHighlightVal
-      );
-    } else if (this.targetHighlightLocation) {
-      newReactTargetHighlightVal = this.targetHighlightLocation;
-      console.log(
-        '[KanbanView] setReactState (Priority 4): Using newReactTargetHighlightVal from persisted this.targetHighlightLocation (no search/pending scroll):',
-        newReactTargetHighlightVal
-      );
+    // Use type assertion to inform the linter about headerEl from TextFileView
+    const headerEl = (this as TextFileView).headerEl;
+    if (headerEl) {
+      if (!this.plugin.settings['show-board-settings']) {
+        headerEl.hide();
+      } else {
+        headerEl.show();
+      }
     } else {
-      newReactTargetHighlightVal = null;
-      console.log(
-        '[KanbanView] setReactState (Priority 5): Defaulting newReactTargetHighlightVal to null. Prev was:',
-        oldReactTargetHighlight
-      );
-    }
-    this._reactState = update(this._reactState ?? {}, {
-      targetHighlight: { $set: newReactTargetHighlightVal },
-    });
-
-    // Check if the relevant part of the state actually changed to prevent loops
-    if (
-      newReactTargetHighlightVal === oldReactTargetHighlight &&
-      newState &&
-      Object.keys(newState).length === 0 &&
-      !shouldProcessPendingScroll && // If we are processing a scroll, don't bail, even if highlight value is same initially
-      !this.pendingHighlightScroll // This check might now be redundant if cleared above, but keep for safety
-    ) {
-      console.log(
-        '[KanbanView] setReactState: targetHighlight unchanged, no other new state, and no pending scroll. Bailing out.'
-      );
-      return;
+      // This case should ideally not be reached if the view is properly constructed
+      console.warn('[KanbanView] setReactState: headerEl (from TextFileView) is not available.');
     }
 
-    console.log(
-      '[KanbanView] setReactState: Final _reactState.targetHighlight for React component:',
-      this._reactState.targetHighlight
-    );
-
-    if (!this.file || !this.contentEl.isShown()) {
-      console.log(
-        '[KanbanView] setReactState: File not available or contentEl not shown. Aborting render.'
-      );
-      return;
-    }
-
-    const board = this.getBoard();
-    if (!board) {
-      console.warn('[KanbanView] setReactState: Board data not available. Aborting render.');
-      this._isPendingInitialRender = true;
-      if (this.file) {
-        console.log(
-          '[KanbanView] setReactState: Board data null, attempting to trigger data load via stateManager.'
-        );
+    if (stateManager) {
+      if (newState) {
+        this._reactState = update(this._reactState, { $merge: newState });
       }
-      return;
-    }
-    this._isPendingInitialRender = false;
 
-    const settings = board.data?.settings; // Settings are on board.data.settings
+      const win = this.getWindow();
 
-    const archived = this.plugin.archive?.getArchive?.(this.file) ?? []; // Safer access for archive
-
-    console.log(
-      '[KanbanView] setReactState: About to call ReactDOM.render. DOM contentEl.isShown():',
-      this.contentEl.isShown(),
-      'File:',
-      this.file?.path
-    ); // Log before render
-
-    const stateManagerForKanbanComponent = this.plugin.stateManagers.get(this.file);
-    if (!stateManagerForKanbanComponent) {
-      console.error(
-        '[KanbanView] setReactState: CRITICAL - StateManager instance from plugin.stateManagers.get(this.file) is null/undefined just before rendering Kanban component. Aborting render. File:',
-        this.file?.path
-      );
-      this._isPendingInitialRender = true;
-      // Attempt to log the state of the stateManagers map
-      if (this.plugin.stateManagers) {
-        console.log(
-          '[KanbanView] setReactState: Current keys in plugin.stateManagers map:',
-          Array.from(this.plugin.stateManagers.keys()).map((f) => f.path)
-        );
+      // Ensure that the initial render (or re-render) happens after a slight delay
+      // This is to prevent blocking the UI thread, especially during initial load or
+      // when rapidly switching between files. It also gives Obsidian's layout
+      // engine a chance to settle if the view is being resized or moved.
+      if (this._initialRenderTimeoutId) {
+        win.clearTimeout(this._initialRenderTimeoutId);
       }
-      return; // Abort rendering if StateManager is not found
-    }
 
-    try {
-      ReactDOM.render(
-        React.createElement(
-          DndContext,
-          {
-            win: this.getWindow(),
-            onDrop: (dragEntity: any, dropEntity: any) => {
-              console.log('[KanbanView] DndContext onDrop:', { dragEntity, dropEntity });
-              // Placeholder - actual drop handling logic to be implemented
-              // This might involve calling something like this.plugin.handleDrop if it exists
-              // or directly manipulating board state via this.stateManager.
-            },
-          },
-          React.createElement(Kanban, {
-            key: this.file.path,
-            plugin: this.plugin,
-            view: this,
-            settings,
-            board,
-            app: this.app,
-            archivedCount: archived.length,
-            file: this.file,
-            reactState: this._reactState,
-            setReactState: this.setReactState.bind(this),
-            emitter: this.emitter,
-            dispatch: this.plugin.dispatch,
-            stateManager: stateManagerForKanbanComponent,
-            onwardsNavigate: (path: string, payload: any) => {
-              const leaf = this.app.workspace.getLeaf(false);
-              leaf.openFile(this.app.vault.getAbstractFileByPath(path) as TFile, payload);
-            },
-          })
-        ),
-        this.contentEl.children[0]
-      );
-      console.log(this.getViewType(), 'setReactState: React component rendered/updated.');
+      this._isPendingInitialRender = true;
 
-      // Use the captured values if this call was intended to process a pending scroll
-      const actualPendingScrollTarget = shouldProcessPendingScroll
-        ? capturedTargetForScroll
-        : this.targetHighlightLocation; // Fallback to current if not an early-cleared scroll
-
-      const scrollIsStillPendingThisExecution =
-        shouldProcessPendingScroll || (this.pendingHighlightScroll && this.targetHighlightLocation);
-
-      console.log(
-        '[KanbanView] setReactState: About to check scroll processing. shouldProcessPendingScroll:',
-        shouldProcessPendingScroll,
-        'this.pendingHighlightScroll (after potential early clear):',
-        this.pendingHighlightScroll ? { ...this.pendingHighlightScroll } : null,
-        'actualPendingScrollTarget:',
-        actualPendingScrollTarget
-      );
-
-      if (scrollIsStillPendingThisExecution && actualPendingScrollTarget) {
-        const intendedLocation = { ...actualPendingScrollTarget }; // Capture current value
-        // const pendingScrollFlagOriginalValue = this.pendingHighlightScroll; // This log might be misleading if flag was cleared early
-
-        // If pendingHighlightScroll was not cleared early (e.g. direct call to setReactState with highlight)
-        // ensure it's cleared now.
-        if (this.pendingHighlightScroll) {
-          console.log(
-            '[KanbanView] setReactState: Clearing this.pendingHighlightScroll inside the if block (should be rare now).'
+      const renderBoard = () => {
+        const board = this.getBoard();
+        if (!board) {
+          console.warn(
+            `[KanbanView] renderBoard: getBoard() returned null for file ${this.file?.path}. Cannot render board.`
           );
-          this.pendingHighlightScroll = null;
+          this.contentEl.empty();
+          this.contentEl.createDiv({ text: 'Error: Kanban data not available for rendering.' });
+          this._isPendingInitialRender = false;
+          return;
         }
 
-        console.log(
-          '[KanbanView] setReactState: Queued BORDER/SCROLL for:',
-          JSON.stringify(intendedLocation)
-          // 'pendingScrollFlag was:',
-          // pendingScrollFlagOriginalValue // This log might be misleading if flag was cleared early
-        );
-
-        setTimeout(() => {
+        if (!this.contentEl || (this.leaf as any).detached) {
           console.log(
-            '[KanbanView] setReactState (setTimeout ENTRY): current this.targetHighlightLocation:',
-            JSON.stringify(this.targetHighlightLocation), // This is the view's current live T.H.L.
-            'intendedLocation for this scroll op was:',
-            JSON.stringify(intendedLocation) // This was captured when scroll was initiated
+            '[KanbanView] setReactState: Content element not available or leaf detached. Skipping render.'
           );
-          // Check this.targetHighlightLocation against the *intendedLocation* for this specific scroll operation
-          if (
-            this.targetHighlightLocation && // Ensure current T.H.L. is not null (e.g. user clicked elsewhere)
-            intendedLocation &&
-            (this.targetHighlightLocation.blockId === intendedLocation.blockId ||
-              (!this.targetHighlightLocation.blockId && !intendedLocation.blockId)) &&
-            this.targetHighlightLocation.cardTitle === intendedLocation.cardTitle &&
-            this.targetHighlightLocation.listName === intendedLocation.listName
-          ) {
-            console.log(
-              '[KanbanView] setReactState (setTimeout): Applying BORDER highlight and SCROLL for target:',
-              JSON.stringify(this.targetHighlightLocation) // Apply to current T.H.L.
-            );
-            this.applyHighlight();
-            this.scrollToCard(this.targetHighlightLocation);
-          } else {
-            console.log(
-              '[KanbanView] setReactState (setTimeout): BORDER target changed, cleared, or was invalid. Current T.H.L:',
-              JSON.stringify(this.targetHighlightLocation),
-              'Intended for this scroll op was:',
-              JSON.stringify(intendedLocation)
-            );
-          }
-        }, 50); // 50ms delay
+          this._isPendingInitialRender = false;
+          return;
+        }
+
+        if (!this._reactHasRenderedOnceInThisInstance) {
+          console.log(
+            `[KanbanView] setReactState: First render attempt for this view instance (${this.file?.path}). Clearing contentEl.innerHTML.`
+          );
+          this.contentEl.innerHTML = ''; // Clear only on the very first render of this view instance
+          this._reactHasRenderedOnceInThisInstance = true;
+        } else {
+          // For subsequent renders, unmounting is generally safer to avoid Preact/React issues
+          // if the root component type changes or if there are state inconsistencies.
+          // However, if the root component (Kanban) is stable, this might be too aggressive.
+          // Consider if simply re-rendering (ReactDOM.render) is sufficient.
+          // ReactDOM.unmountComponentAtNode(this.contentEl);
+        }
+
+        ReactDOM.render(
+          React.createElement(
+            DndContext,
+            { win: this.getWindow(), onDrop: this.handleDrop.bind(this) },
+            React.createElement(Kanban, {
+              key: `${this.file?.path}-${board?.data?.frontmatter?.['kanban-plugin']}`,
+              plugin: this.plugin,
+              view: this,
+              stateManager: stateManager,
+              settings: this.viewSettings,
+              board: board,
+              app: this.app,
+              file: this.file,
+              reactState: this._reactState,
+              setReactState: (s) => this.setReactState(s),
+              emitter: this.emitter,
+              dispatch: (...args: any) => this.plugin.onDbChange(this.file, ...args),
+              onwardsNavigate: this.plugin.onwardsNavigate,
+              archivedCount: board?.data?.archive?.length || 0,
+            })
+          ),
+          this.contentEl
+        );
+        console.log('[KanbanView] setReactState: React component rendered/updated.');
+        this._isPendingInitialRender = false;
+        this.pendingHighlightScroll = null; // Clear pending scroll after render
+
+        // After rendering, if there was a pending highlight scroll, apply it.
+        if (this.targetHighlightLocation) {
+          // console.log("[KanbanView] setReactState: Re-applying highlight after render:", this.targetHighlightLocation);
+          // this.applyHighlight(); // This might be too early, DOM might not be fully ready for scroll
+        }
+      };
+
+      // For the very first render in the view's lifecycle, or if forced.
+      if (!this._reactHasRenderedOnceInThisInstance) {
+        this._initialRenderTimeoutId = win.setTimeout(renderBoard, 0);
+      } else {
+        // For subsequent updates, render immediately if not already pending
+        // This helps with responsiveness for things like search updates
+        if (!this._isPendingInitialRender || newState?.forceRerender) {
+          renderBoard();
+        } else {
+          // If a render is already pending, ensure it runs, but don't stack them.
+          // This scenario might be rare if logic is correct.
+          if (this._initialRenderTimeoutId) win.clearTimeout(this._initialRenderTimeoutId);
+          this._initialRenderTimeoutId = win.setTimeout(renderBoard, 0);
+        }
       }
-    } catch (err) {
-      const error = err as Error;
-      console.error('[KanbanView] setReactState render error:', error.message, error.stack);
-      this.plugin.stateManagers.get(this.file)?.setError(error);
+    } else {
+      console.warn(
+        `[KanbanView] setReactState: StateManager not found for file ${this.file?.path}. Cannot render board.`
+      );
+      this.contentEl.empty();
+      this.contentEl.createDiv({ text: 'Error: Kanban data manager not found for this file.' });
     }
   }
 
@@ -1162,21 +1047,24 @@ export class KanbanView extends TextFileView implements HoverParent {
           }
           console.log(
             `[KanbanView] applyHighlight: Item ${index} in lane, .kanban-plugin__item-content-wrapper not found.`
-          );
+          ); // Closing parenthesis for console.log
           return false;
-        });
+        }); // Closing parenthesis for items.find
 
         if (targetItem) {
+          // Check if targetItem was found
           console.log(
             '[KanbanView] applyHighlight: Found target item by title in lane:',
             targetItem
-          ); // Added log
+          );
+          // The element to highlight is the content wrapper
           targetItemElement = targetItem.querySelector(
             '.kanban-plugin__item-content-wrapper'
           ) as HTMLElement;
         }
       } else {
-        console.log('[KanbanView] applyHighlight: Target lane NOT found by title.'); // Added log
+        // if (!targetLane)
+        console.log('[KanbanView] applyHighlight: Target lane NOT found by title.');
       }
       console.log(
         `[KanbanView] applyHighlight: Result of title/list lookup for item '${this.targetHighlightLocation.cardTitle}' in list '${this.targetHighlightLocation.listName}':`,
@@ -1195,6 +1083,7 @@ export class KanbanView extends TextFileView implements HoverParent {
     }
   }
 
+  // Restored scrollToCard method
   public scrollToCard(location: TargetHighlightLocation | null) {
     console.log('[KanbanView] scrollToCard called. Target:', location);
     if (!location) return;
@@ -1214,7 +1103,7 @@ export class KanbanView extends TextFileView implements HoverParent {
     if (!targetItemElement && location.cardTitle && location.listName) {
       console.log(
         `[KanbanView] scrollToCard: Attempting title/list lookup. Title: '${location.cardTitle}', List: '${location.listName}'`
-      ); // Added log
+      );
       const lanes = Array.from(this.contentEl.querySelectorAll('.kanban-plugin__lane'));
       const targetLane = lanes.find((lane) => {
         const laneTitleEl = lane.querySelector('.kanban-plugin__lane-title');
@@ -1222,21 +1111,19 @@ export class KanbanView extends TextFileView implements HoverParent {
       });
 
       if (targetLane) {
-        console.log('[KanbanView] scrollToCard: Found target lane by title:', targetLane); // Added log
+        console.log('[KanbanView] scrollToCard: Found target lane by title:', targetLane);
         const items = Array.from(targetLane.querySelectorAll('.kanban-plugin__item'));
         console.log(
           `[KanbanView] scrollToCard: Found ${items.length} items in lane '${location.listName}'. Checking titles:`
-        ); // Added log
+        );
 
         const targetItem = items.find((item, index) => {
-          // Try to find the content wrapper first
           const contentWrapperEl = item.querySelector('.kanban-plugin__item-content-wrapper');
           if (contentWrapperEl) {
             const currentItemTitle = contentWrapperEl.textContent?.trim();
             console.log(
               `[KanbanView] scrollToCard: Item ${index} in lane, Title from .kanban-plugin__item-content-wrapper: "'${currentItemTitle}'", Target Title: "'${location.cardTitle}'"`
             );
-            // Use startsWith for a more flexible match
             return currentItemTitle?.startsWith(location.cardTitle ?? '');
           }
           console.log(
@@ -1245,11 +1132,11 @@ export class KanbanView extends TextFileView implements HoverParent {
           return false;
         });
         if (targetItem) {
-          console.log('[KanbanView] scrollToCard: Found target item by title in lane:', targetItem); // Added log
+          console.log('[KanbanView] scrollToCard: Found target item by title in lane:', targetItem);
           targetItemElement = targetItem as HTMLElement;
         }
       } else {
-        console.log('[KanbanView] scrollToCard: Target lane NOT found by title.'); // Added log
+        console.log('[KanbanView] scrollToCard: Target lane NOT found by title.');
       }
       console.log(
         `[KanbanView] scrollToCard: Result of title/list lookup for item '${location.cardTitle}' in list '${location.listName}':`,
@@ -1264,11 +1151,26 @@ export class KanbanView extends TextFileView implements HoverParent {
       console.log('[KanbanView] scrollToCard: No target item element found for scrolling.');
     }
   }
-}
 
-interface TargetHighlightLocation {
-  blockId?: string;
-  cardTitle?: string;
-  listName?: string;
-  match?: any; // Added for search results
+  async onClose() {
+    console.log(`[KanbanView] onClose: ${this.file?.path}`);
+    // Clear any pending timeouts that might try to use this view
+    if (this.scrollTimeoutId) {
+      clearTimeout(this.scrollTimeoutId);
+      this.scrollTimeoutId = null;
+    }
+    if (this._initialRenderTimeoutId) {
+      clearTimeout(this._initialRenderTimeoutId);
+      this._initialRenderTimeoutId = null;
+    }
+
+    this.emitter.removeAllListeners(); // Remove listeners before React unmount
+    this.previewQueue.clear();
+    this.previewCache.clear();
+    this.emitter.emit('queueEmpty');
+
+    this.plugin.removeView(this);
+    this.activeEditor = null;
+    this.actionButtons = {};
+  }
 }
