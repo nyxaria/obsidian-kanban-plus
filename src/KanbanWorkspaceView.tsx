@@ -117,13 +117,6 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       setFilteredCards([]);
       const app = props.plugin.app;
 
-      if (tagsToFilterBy.length === 0) {
-        setError('Please add at least one tag to filter by.');
-        setIsLoading(false);
-        setFilteredCards([]);
-        return;
-      }
-
       const currentFile = app.workspace.getActiveFile();
       let targetFolder: TFolder | null = null;
       if (currentFile && currentFile.parent) {
@@ -178,7 +171,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
               let currentLaneTitle = 'Unknown Lane';
               for (const astNode of ast.children) {
                 if (astNode.type === 'heading') {
-                  currentLaneTitle = getHeadingText(astNode as MdastHeading) || 'Unnamed Lane';
+                  const rawLaneTitle = getHeadingText(astNode as MdastHeading) || 'Unnamed Lane';
+                  currentLaneTitle = rawLaneTitle.replace(/\s*\(\d+\)$/, '').trim();
                 } else if (astNode.type === 'list') {
                   for (const listItemNode of (astNode as MdastList).children) {
                     if (listItemNode.type === 'listItem') {
@@ -190,9 +184,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                       const cardTags = (itemData.metadata?.tags || []).map((t) =>
                         t.replace(/^#/, '').toLowerCase()
                       );
-                      const hasAllRequiredTags = tagsToFilterBy.every((reqTag) =>
-                        cardTags.includes(reqTag)
-                      );
+                      const hasAllRequiredTags =
+                        tagsToFilterBy.length === 0 ||
+                        tagsToFilterBy.every((reqTag) => cardTags.includes(reqTag));
 
                       if (hasAllRequiredTags) {
                         allCards.push({
@@ -237,12 +231,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
   );
 
   useEffect(() => {
-    if (activeFilterTags.length > 0) {
-      handleScanDirectory(activeFilterTags);
-    } else {
-      setFilteredCards([]);
-      setError(null);
-    }
+    handleScanDirectory(activeFilterTags);
   }, [activeFilterTags, handleScanDirectory]);
 
   const handleRowClick = useCallback(
@@ -602,7 +591,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
         )}
         {!isLoading && filteredCards.length === 0 && !error && activeFilterTags.length === 0 && (
           <p>
-            <i>Add one or more tags above to automatically find cards.</i>
+            <i>No cards found in the current scan scope.</i>
           </p>
         )}
         {!isLoading && filteredCards.length > 0 && (
