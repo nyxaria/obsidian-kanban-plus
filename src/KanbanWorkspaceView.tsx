@@ -310,6 +310,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       );
 
       const navigationState = {
+        // Ensure the file path is part of the state for existing views
+        file: card.sourceBoardPath,
         eState: {
           filePath: card.sourceBoardPath, // Use original path for state consistency
           blockId: card.blockId,
