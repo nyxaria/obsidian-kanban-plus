@@ -40,6 +40,11 @@ export interface TagSort {
   tag: string;
 }
 
+export interface DueDateFilterConfig {
+  value: number;
+  unit: 'days' | 'weeks' | 'months';
+}
+
 export type TagSymbol = '#' | '🏷️' | string;
 
 export interface DateColor {
@@ -229,6 +234,13 @@ export function isEditingActive(state: EditState): state is EditCoordinates | Ca
 
 export interface KanbanSettings extends GlobalSettings {
   [key: string]: any;
+  completedCountStyle?: string;
+  tagColors?: TagColor[];
+  tagSort?: TagSort[];
+  useBuiltinRenderer?: boolean;
+  customCheckboxTrackers?: CustomCheckboxTracker[];
+  enableTimeTracking?: boolean;
+  timeFormat?: string;
 }
 
 export type FilterDisplayMode = 'popover' | 'inline';
@@ -236,4 +248,16 @@ export type DateDisplayFormat = 'relative' | 'absolute' | string;
 
 export interface CellLocation {
   // ... existing code ...
+}
+
+export interface GlobalSettings {
+  // ... existing code ...
+}
+
+export interface SavedWorkspaceView {
+  id: string;
+  name: string;
+  tags: string[];
+  members?: string[];
+  dueDateFilter?: DueDateFilterConfig;
 }

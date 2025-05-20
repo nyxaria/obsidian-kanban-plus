@@ -21,6 +21,7 @@ import {
   DateColorSetting,
   DateColorSettingTemplate,
   DateDisplayFormat,
+  DueDateFilterConfig,
   FilterDisplayMode,
   MetadataSetting,
   MetadataSettingTemplate,
@@ -62,6 +63,9 @@ export interface SavedWorkspaceView {
   name: string;
   tags: string[];
   members?: string[];
+  dueDateFilter?: DueDateFilterConfig;
+  excludeArchive?: boolean;
+  excludeDone?: boolean;
 }
 
 export interface TeamMemberColorConfig {
@@ -1791,7 +1795,7 @@ export class KanbanSettingsTab extends PluginSettingTab {
       memberColorSettingContainer.innerHTML = ''; // Clear existing members and their color pickers
 
       const members = this.plugin.settings.teamMembers || [];
-      let memberColors = this.plugin.settings.teamMemberColors || {};
+      const memberColors = this.plugin.settings.teamMemberColors || {};
 
       if (members.length === 0) {
         new Setting(memberColorSettingContainer).setDesc(
@@ -1812,14 +1816,18 @@ export class KanbanSettingsTab extends PluginSettingTab {
 
         const memberSetting = new Setting(memberColorSettingContainer)
           .setName(member)
-          .setDesc('Background & Text Colors');
+          .setDesc('Set background and text colors for this member.');
 
         memberSetting.controlEl.addClass('kanban-member-color-controls');
 
         // Background Color Picker
+        memberSetting.controlEl.createEl('span', {
+          text: 'Background:',
+          cls: 'kanban-color-picker-label',
+        });
         memberSetting.addColorPicker((picker) => {
           picker
-            .setValue(currentMemberConfig.background || '#00000000') // Use transparent if empty
+            .setValue(currentMemberConfig.background || '#FFFFFF') // Use white if empty
             .onChange(async (value) => {
               const freshMemberColors = { ...(this.plugin.settings.teamMemberColors || {}) };
               freshMemberColors[member] = {
@@ -1832,6 +1840,11 @@ export class KanbanSettingsTab extends PluginSettingTab {
         });
 
         // Text Color Picker
+        const textLabel = memberSetting.controlEl.createEl('span', {
+          text: 'Text:',
+          cls: 'kanban-color-picker-label',
+        });
+        textLabel.style.marginLeft = '10px'; // Add some space before the text color picker
         memberSetting.addColorPicker((picker) => {
           picker
             .setValue(currentMemberConfig.text || '#000000') // Default to black if empty

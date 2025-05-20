@@ -240,6 +240,7 @@ export function AssignedMembers({
   style,
 }: AssignedMembersProps) {
   const { stateManager } = useContext(KanbanContext);
+  const search = useContext(SearchContext);
   const shouldShow = stateManager.useSetting('move-tags');
 
   if (!assignedMembers || !assignedMembers.length || !shouldShow) {
@@ -267,8 +268,24 @@ export function AssignedMembers({
           memberConfig?.text ||
           (memberConfig?.background ? 'var(--text-on-accent)' : 'var(--text-normal)');
 
+        const handleMemberClick = (e: MouseEvent) => {
+          e.preventDefault();
+          const memberAction = stateManager.getSetting('tag-action');
+          const searchQueryTerm = `@@${member}`;
+
+          if (search && memberAction === 'kanban') {
+            search.search(searchQueryTerm, true);
+            return;
+          }
+
+          (stateManager.app as any).internalPlugins
+            .getPluginById('global-search')
+            .instance.openGlobalSearch(searchQueryTerm);
+        };
+
         return (
           <span
+            onClick={handleMemberClick}
             key={i}
             className={`${c('item-assigned-member')} ${
               searchQuery && member.toLocaleLowerCase().contains(searchQuery)
@@ -276,7 +293,7 @@ export function AssignedMembers({
                 : ''
             }`}
             style={{
-              cursor: 'default',
+              cursor: 'pointer',
               backgroundColor: backgroundColor,
               color: textColor,
               padding: '1px 5px',
