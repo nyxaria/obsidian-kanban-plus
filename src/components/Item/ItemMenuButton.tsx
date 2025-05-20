@@ -4,7 +4,7 @@ import { t } from 'src/lang/helpers';
 
 import { Icon } from '../Icon/Icon';
 import { c } from '../helpers';
-import { EditState, EditingState, isEditing } from '../types';
+import { EditState, EditingProcessState, isEditingActive } from '../types';
 
 interface ItemMenuButtonProps {
   editState: EditState;
@@ -29,11 +29,11 @@ export const ItemMenuButton = Preact.memo(function ItemMenuButton({
 
   return (
     <div {...ignoreAttr} className={c('item-postfix-button-wrapper')}>
-      {isEditing(editState) ? (
+      {isEditingActive(editState) ? (
         <a
           data-ignore-drag={true}
           onPointerDown={(e) => e.preventDefault()}
-          onClick={() => setEditState(EditingState.cancel)}
+          onClick={() => setEditState(EditingProcessState.cancel)}
           className={`${c('item-postfix-button')} is-enabled clickable-icon`}
           aria-label={t('Cancel')}
         >

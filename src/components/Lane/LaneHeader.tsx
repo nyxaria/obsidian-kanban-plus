@@ -11,7 +11,7 @@ import { GripIcon } from '../Icon/GripIcon';
 import { Icon } from '../Icon/Icon';
 import { KanbanContext } from '../context';
 import { c } from '../helpers';
-import { EditState, EditingState, Lane, isEditing } from '../types';
+import { EditState, EditingProcessState, Lane, isEditCoordinates } from '../types';
 import { ConfirmAction, useSettingsMenu } from './LaneMenu';
 import { LaneSettings } from './LaneSettings';
 import { LaneLimitCounter, LaneTitle } from './LaneTitle';
@@ -41,9 +41,9 @@ function LaneButtons({
   const { stateManager } = useContext(KanbanContext);
   return (
     <div className={c('lane-settings-button-wrapper')}>
-      {isEditing(editState) ? (
+      {isEditCoordinates(editState) ? (
         <a
-          onClick={() => setEditState(null)}
+          onClick={() => setEditState(EditingProcessState.cancel)}
           aria-label={t('Close')}
           className={`${c('lane-settings-button')} is-enabled clickable-icon`}
         >
@@ -88,7 +88,7 @@ export const LaneHeader = memo(function LaneHeader({
   isCollapsed,
   toggleIsCollapsed,
 }: LaneHeaderProps) {
-  const [editState, setEditState] = useState<EditState>(EditingState.cancel);
+  const [editState, setEditState] = useState<EditState>(EditingProcessState.cancel);
   const lanePath = useNestedEntityPath(laneIndex);
 
   const { boardModifiers } = useContext(KanbanContext);
@@ -100,7 +100,7 @@ export const LaneHeader = memo(function LaneHeader({
 
   useEffect(() => {
     if (lane.data.forceEditMode) {
-      setEditState(null);
+      setEditState({ x: 0, y: 0 });
     }
   }, [lane.data.forceEditMode]);
 

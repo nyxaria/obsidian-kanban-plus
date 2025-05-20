@@ -10,7 +10,7 @@ import { t } from 'src/lang/helpers';
 
 import { KanbanContext } from '../context';
 import { c, noop } from '../helpers';
-import { EditState, isEditing } from '../types';
+import { EditState, isEditCoordinates } from '../types';
 import { datePlugins, stateManagerField } from './dateWidget';
 import { matchDateTrigger, matchTimeTrigger } from './suggest';
 
@@ -227,11 +227,11 @@ export function MarkdownEditor({
 
     controller.editMode = editor;
     editor.set(value || '');
-    if (isEditing(editState)) {
-      cm.dispatch({
-        userEvent: 'select.pointer',
-        selection: EditorSelection.single(cm.posAtCoords(editState, false)),
-      });
+    if (isEditCoordinates(editState)) {
+      const editor = internalRef.current;
+      if (editor && !editor.hasFocus) {
+        editor.focus();
+      }
 
       cm.dom.win.setTimeout(() => {
         setInsertMode(cm);

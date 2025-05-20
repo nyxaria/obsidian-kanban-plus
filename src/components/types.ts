@@ -52,6 +52,11 @@ export interface DateColor {
   backgroundColor?: string;
 }
 
+export interface TeamMemberColorConfig {
+  background: string;
+  text: string;
+}
+
 export type PageDataValue =
   | string
   | number
@@ -93,6 +98,7 @@ export interface ItemData {
     start: { line: number; column: number; offset: number };
     end: { line: number; column: number; offset: number };
   };
+  assignedMembers?: string[];
 }
 
 export interface ErrorReport {
@@ -183,21 +189,45 @@ export interface EditCoordinates {
   y: number;
 }
 
-export enum EditingState {
+export enum EditingProcessState {
   cancel,
   complete,
 }
 
-export type EditState = EditCoordinates | EditingState;
+export interface CardEditingState {
+  editing: true;
+  id: string;
+}
 
-export function isEditing(state: EditState): state is EditCoordinates {
-  if (state === null) return false;
-  if (typeof state === 'number') return false;
+export type EditState = CardEditingState | EditCoordinates | EditingProcessState | false;
+
+export function isCardEditingState(state: EditState): state is CardEditingState {
+  return !!(
+    state &&
+    typeof state === 'object' &&
+    'editing' in state &&
+    state.editing === true &&
+    'id' in state
+  );
+}
+
+export function isEditCoordinates(state: EditState): state is EditCoordinates {
+  return !!(
+    state &&
+    typeof state === 'object' &&
+    'x' in state &&
+    'y' in state &&
+    !('editing' in state)
+  );
+}
+
+export function isEditingActive(state: EditState): state is EditCoordinates | CardEditingState {
+  if (state === false || typeof state === 'number') return false;
   return true;
 }
 
 export interface KanbanSettings extends GlobalSettings {
-  [key: string]: any; // Allow for dynamic keys, though try to define known ones
+  [key: string]: any;
 }
 
 export type FilterDisplayMode = 'popover' | 'inline';
