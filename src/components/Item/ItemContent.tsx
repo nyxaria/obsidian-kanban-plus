@@ -138,6 +138,7 @@ export function Tags({
   const getTagSymbol = useGetTagSymbolFn(stateManager);
   const search = useContext(SearchContext);
   const shouldShow = stateManager.useSetting('move-tags') || alwaysShow;
+  const hideHashForTagsWithoutSymbols = stateManager.useSetting('hideHashForTagsWithoutSymbols');
 
   if (!tags || !tags.length || !shouldShow) {
     return null;
@@ -147,7 +148,25 @@ export function Tags({
     <div className={c('item-tags')}>
       {tags.map((originalTag, i) => {
         const tagColor = getTagColor(originalTag);
-        const specificSymbol = getTagSymbol(originalTag);
+        const symbolInfo = getTagSymbol(originalTag);
+
+        let tagContent;
+        if (symbolInfo) {
+          tagContent = (
+            <>
+              <span>{symbolInfo.symbol}</span>
+              {!symbolInfo.hideTag && originalTag.length > 1 && (
+                <span style={{ marginLeft: '0.2em' }}>{originalTag.slice(1)}</span>
+              )}
+            </>
+          );
+        } else {
+          if (hideHashForTagsWithoutSymbols) {
+            tagContent = originalTag.length > 1 ? originalTag.slice(1) : originalTag;
+          } else {
+            tagContent = originalTag;
+          }
+        }
 
         return (
           <span
@@ -178,14 +197,7 @@ export function Tags({
               }),
             }}
           >
-            {specificSymbol ? (
-              <>
-                <span>{specificSymbol} </span>
-                {originalTag.slice(1)}
-              </>
-            ) : (
-              originalTag
-            )}
+            {tagContent}
           </span>
         );
       })}

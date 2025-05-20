@@ -140,6 +140,9 @@ const en = {
   'Tag symbols': 'Tag symbols',
   'Set colors for tags displayed in cards.': 'Set colors for tags displayed in cards.',
   'Set symbols for tags displayed in cards.': 'Set symbols for tags displayed in cards.',
+  'Hide # for tags without symbols': 'Hide # for tags without symbols',
+  'If enabled, tags that do not have a custom symbol will be displayed without a leading "#". If disabled (the default), they will be shown with it.':
+    'If enabled, tags that do not have a custom symbol will be displayed without a leading "#". If disabled (the default), they will be shown with it.',
   'Linked Page Metadata': 'Linked Page Metadata',
   'Inline Metadata': 'Inline Metadata',
   'Display metadata for the first note linked within a card. Specify which metadata keys to display below. An optional label can be provided, and labels can be hidden altogether.':

@@ -93,6 +93,10 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
     return getTagSymbolFn(props.plugin.settings['tag-symbols'] || []);
   }, [props.plugin.settings]);
 
+  const hideHashForTagsWithoutSymbols =
+    props.plugin.settings.hideHashForTagsWithoutSymbols ??
+    DEFAULT_SETTINGS.hideHashForTagsWithoutSymbols;
+
   const handleAddTag = useCallback(() => {
     const newTag = currentTagInput.trim().toLowerCase().replace(/^#/, '');
     if (newTag && !activeFilterTags.includes(newTag)) {
@@ -517,10 +521,25 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
           {activeFilterTags.map((tag) => {
             const tagWithHashForLookup = `#${tag}`;
             const colorSetting = getTagColor(tagWithHashForLookup);
-            const emoji = getTagEmoji(tagWithHashForLookup);
+            const symbolInfo = getTagEmoji(tagWithHashForLookup);
             const colorValue = colorSetting ? colorSetting.color : undefined;
             const bgColor = colorSetting ? colorSetting.backgroundColor : undefined;
-            const displayTag = emoji ? `${emoji} ${tag}` : tag;
+
+            let displayContent = null;
+            if (symbolInfo) {
+              displayContent = (
+                <>
+                  {symbolInfo.symbol}
+                  {!symbolInfo.hideTag && <span style={{ marginLeft: '4px' }}>{tag}</span>}
+                </>
+              );
+            } else {
+              if (hideHashForTagsWithoutSymbols) {
+                displayContent = tag;
+              } else {
+                displayContent = `#${tag}`;
+              }
+            }
 
             return (
               <span
@@ -537,7 +556,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                   border: bgColor ? 'none' : '1px solid var(--background-modifier-border)',
                 }}
               >
-                {displayTag}
+                {displayContent}
                 <button
                   onClick={() => handleRemoveTag(tag)}
                   style={{
@@ -675,13 +694,28 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                   >
                     {card.tags.map((tagWithHash) => {
                       const colorSetting = getTagColor(tagWithHash);
-                      const emoji = getTagEmoji(tagWithHash);
+                      const symbolInfo = getTagEmoji(tagWithHash);
                       const colorValue = colorSetting ? colorSetting.color : undefined;
                       const bgColor = colorSetting ? colorSetting.backgroundColor : undefined;
                       const tagNameForDisplay = tagWithHash.substring(1);
-                      const displayTag = emoji
-                        ? `${emoji} ${tagNameForDisplay}`
-                        : tagNameForDisplay;
+
+                      let displayContent = null;
+                      if (symbolInfo) {
+                        displayContent = (
+                          <>
+                            {symbolInfo.symbol}
+                            {!symbolInfo.hideTag && (
+                              <span style={{ marginLeft: '4px' }}>{tagNameForDisplay}</span>
+                            )}
+                          </>
+                        );
+                      } else {
+                        if (hideHashForTagsWithoutSymbols) {
+                          displayContent = tagNameForDisplay;
+                        } else {
+                          displayContent = tagWithHash;
+                        }
+                      }
 
                       return (
                         <span
@@ -692,9 +726,11 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                             marginRight: '6px',
                             padding: '2px 4px',
                             borderRadius: '3px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
                           }}
                         >
-                          {displayTag}
+                          {displayContent}
                         </span>
                       );
                     })}

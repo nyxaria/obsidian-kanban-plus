@@ -118,6 +118,7 @@ export interface KanbanSettings {
   savedWorkspaceViews: SavedWorkspaceView[];
   lastSelectedWorkspaceViewId?: string;
   clickOutsideCardToSaveEdit?: boolean;
+  hideHashForTagsWithoutSymbols?: boolean;
 }
 
 export interface KanbanViewSettings {
@@ -125,6 +126,7 @@ export interface KanbanViewSettings {
   'list-collapse'?: boolean[];
   'tag-symbols': TagSymbolSetting[];
   savedWorkspaceViews: SavedWorkspaceView[];
+  hideHashForTagsWithoutSymbols: boolean;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -170,6 +172,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'time-trigger',
   'tag-symbols',
   'clickOutsideCardToSaveEdit',
+  'hideHashForTagsWithoutSymbols',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -679,6 +682,24 @@ export class SettingsManager {
         if (setting.settingEl) unmountTagSymbolSettings(setting.settingEl);
       });
     });
+
+    this.settingElements.push(
+      new Setting(contentEl)
+        .setName(t('Hide # for tags without symbols'))
+        .setDesc(
+          t(
+            'If enabled, tags that do not have a custom symbol will be displayed without a leading "#". If disabled (the default), they will be shown with it.'
+          )
+        )
+        .addToggle((cb) => {
+          const [val] = this.getSetting('hideHashForTagsWithoutSymbols', local);
+          cb.setValue((val as boolean) ?? DEFAULT_SETTINGS.hideHashForTagsWithoutSymbols).onChange(
+            (value) => {
+              this.applySettingsUpdate({ hideHashForTagsWithoutSymbols: { $set: value } });
+            }
+          );
+        })
+    );
 
     contentEl.createEl('h4', { text: t('Date & Time') });
 
@@ -1770,4 +1791,9 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   savedWorkspaceViews: [],
   lastSelectedWorkspaceViewId: undefined,
   clickOutsideCardToSaveEdit: true,
+  hideHashForTagsWithoutSymbols: false,
+};
+
+export const kanbanBoardProcessor = (settings: KanbanSettings) => {
+  // ... existing code ...
 };
