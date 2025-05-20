@@ -127,6 +127,7 @@ export interface KanbanSettings {
   hideHashForTagsWithoutSymbols?: boolean;
   teamMembers?: string[];
   teamMemberColors?: Record<string, TeamMemberColorConfig>;
+  editable?: boolean;
 }
 
 export interface KanbanViewSettings {
@@ -137,6 +138,7 @@ export interface KanbanViewSettings {
   hideHashForTagsWithoutSymbols: boolean;
   teamMembers: string[];
   teamMemberColors: Record<string, TeamMemberColorConfig>;
+  editable: boolean;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -185,6 +187,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'hideHashForTagsWithoutSymbols',
   'teamMembers',
   'teamMemberColors',
+  'editable',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -1945,6 +1948,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   hideHashForTagsWithoutSymbols: false,
   teamMembers: [],
   teamMemberColors: {},
+  editable: true,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {

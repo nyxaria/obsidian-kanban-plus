@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
 } from 'preact/hooks';
+import useOnclickOutside from 'react-cool-onclickoutside';
 import { StateManager } from 'src/StateManager';
 import { useNestedEntityPath } from 'src/dnd/components/Droppable';
 import { Path } from 'src/dnd/types';
@@ -288,10 +289,20 @@ export const ItemContent = memo(function ItemContent({
   const teamMemberColors: Record<string, TeamMemberColorConfig> =
     view.plugin.settings.teamMemberColors || {};
 
-  const isEditingCard = isCardEditingState(editState) && editState.id === item.id;
-
   const titleRef = useRef<string | null>(null);
   const path = useNestedEntityPath();
+
+  const editorWrapperRef = useOnclickOutside(
+    () => {
+      if (showCardTitleEditor && stateManager.getSetting('clickOutsideCardToSaveEdit')) {
+        setEditState(EditingProcessState.complete);
+      }
+    },
+    {
+      // Options for useOnclickOutside, e.g., ignore specific classes if needed
+      // For now, default options should be fine. Can add ignoreClass later if conflicts arise.
+    }
+  );
 
   useEffect(() => {
     if (editState === EditingProcessState.complete) {
@@ -352,37 +363,32 @@ export const ItemContent = memo(function ItemContent({
     [stateManager, item, boardModifiers, path, isStatic]
   );
 
-  const onBlur = useCallback(() => {
-    if (stateManager.getSetting('clickOutsideCardToSaveEdit')) {
-      if (isCardEditingState(editState) && editState.id === item.id) {
-        setEditState(EditingProcessState.complete);
-      }
-    }
-  }, [stateManager, editState, item.id, setEditState]);
-
   const editCoordinates = isEditCoordinates(editState) ? editState : undefined;
 
-  const showCardTitleEditor = isCardEditingState(editState) && editState.id === item.id;
+  const showCardTitleEditor = !!editCoordinates;
 
   if (showCardTitleEditor) {
     return (
-      <div className={c('item-content-wrapper')} style={isStatic ? { cursor: 'default' } : {}}>
-        <MarkdownEditor
-          editState={editCoordinates}
-          className={c('item-input')}
-          value={item.data.titleRaw}
-          onChange={(update) => {
-            if (update.docChanged) {
-              titleRef.current = update.state.doc.toString();
-            }
-          }}
-          onBlur={onBlur}
-          onEnter={onEnter}
-          onEscape={onEscape}
-          onSubmit={onSubmit}
-          autoFocus
-          compact={false}
-        />
+      <div
+        ref={editorWrapperRef}
+        className={c('item-content-editor-wrapper')}
+        style={{ width: '100%' }}
+      >
+        <div className={c('item-content-wrapper')} style={isStatic ? { cursor: 'default' } : {}}>
+          <MarkdownEditor
+            editState={editCoordinates}
+            className={c('item-input')}
+            value={item.data.titleRaw}
+            onChange={(update) => {
+              if (update.docChanged) {
+                titleRef.current = update.state.doc.toString();
+              }
+            }}
+            onEnter={onEnter}
+            onEscape={onEscape}
+            onSubmit={onSubmit}
+          />
+        </div>
       </div>
     );
   }
