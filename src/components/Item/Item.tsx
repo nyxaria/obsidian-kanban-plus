@@ -236,7 +236,11 @@ export const DraggableItem = memo(function DraggableItem(props: DraggableItemPro
       }}
       className={c('item-wrapper')}
     >
-      <div ref={elementRef} className={classcat([c('item'), ...classModifiers])}>
+      <div
+        ref={elementRef}
+        className={classcat([c('item'), ...classModifiers])}
+        data-id={props.item.id}
+      >
         {props.isStatic ? (
           <ItemInner
             {...innerProps}

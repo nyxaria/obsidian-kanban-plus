@@ -108,6 +108,18 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     },
     checked: item.checked,
     checkChar: item.checked ? item.checkChar || ' ' : ' ',
+    position: {
+      start: {
+        line: item.position.start.line,
+        column: item.position.start.column,
+        offset: item.position.start.offset ?? -1,
+      },
+      end: {
+        line: item.position.end.line,
+        column: item.position.end.column,
+        offset: item.position.end.offset ?? -1,
+      },
+    },
   };
 
   visit(item, (node, i, parent) => {

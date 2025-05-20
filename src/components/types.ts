@@ -89,6 +89,10 @@ export interface ItemData {
   titleSearchRaw: string;
   metadata: ItemMetadata;
   forceEditMode?: boolean;
+  position?: {
+    start: { line: number; column: number; offset: number };
+    end: { line: number; column: number; offset: number };
+  };
 }
 
 export interface ErrorReport {
