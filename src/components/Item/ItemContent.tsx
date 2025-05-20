@@ -297,6 +297,7 @@ export function AssignedMembers({
               backgroundColor: backgroundColor,
               color: textColor,
               padding: '1px 5px',
+              marginLeft: '0.2em',
               borderRadius: '3px',
               fontSize: '0.9em',
               display: 'inline-flex',

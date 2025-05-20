@@ -287,6 +287,19 @@ const en = {
 
   // components/Editor/MarkdownEditor.tsx
   Submit: 'Submit',
+
+  'Remove member': 'Remove member',
+  'Team Member Colors': 'Team Member Colors',
+  'Assign a color to each team member for better visual distinction in the workspace view.':
+    'Assign a color to each team member for better visual distinction in the workspace view.',
+  'Background Color': 'Background Color',
+  'Text Color': 'Text Color',
+  'Member Assignment Prefix': 'Member Assignment Prefix',
+  'The prefix used to identify member assignments in card text (e.g., @@User)':
+    'The prefix used to identify member assignments in card text (e.g., @@User)',
+
+  // Workspace View Specific
+  'Kanban Workspace': 'Kanban Workspace',
 };
 
 export type Lang = typeof en;

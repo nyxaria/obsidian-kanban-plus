@@ -132,6 +132,7 @@ export interface KanbanSettings {
   teamMembers?: string[];
   teamMemberColors?: Record<string, TeamMemberColorConfig>;
   editable?: boolean;
+  memberAssignmentPrefix?: string;
 }
 
 export interface KanbanViewSettings {
@@ -192,6 +193,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'teamMembers',
   'teamMemberColors',
   'editable',
+  'memberAssignmentPrefix',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -1962,6 +1964,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   teamMembers: [],
   teamMemberColors: {},
   editable: true,
+  memberAssignmentPrefix: '@@',
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {
