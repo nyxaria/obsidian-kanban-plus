@@ -124,9 +124,10 @@ export function DateAndTime({
         fontSize: '0.9em',
         display: 'inline-flex',
         alignItems: 'center',
-        backgroundColor: dateColor?.backgroundColor || 'var(--background-modifier-hover)',
+        backgroundColor: dateColor?.backgroundColor || 'rgba(0,0,0,0)',
         color:
           dateColor?.text ||
+          dateColor?.color ||
           (dateColor?.backgroundColor ? 'var(--text-on-accent)' : 'var(--text-normal)'),
         ...style,
       }}
