@@ -1,4 +1,4 @@
-import Preact from 'preact/compat';
+import Preact, { JSX } from 'preact/compat';
 import { Dispatch, StateUpdater } from 'preact/hooks';
 import { t } from 'src/lang/helpers';
 
@@ -10,12 +10,14 @@ interface ItemMenuButtonProps {
   editState: EditState;
   setEditState: Dispatch<StateUpdater<EditState>>;
   showMenu: (e: MouseEvent, internalLinkPath?: string) => void;
+  style?: JSX.CSSProperties;
 }
 
 export const ItemMenuButton = Preact.memo(function ItemMenuButton({
   editState,
   setEditState,
   showMenu,
+  style,
 }: ItemMenuButtonProps) {
   const ignoreAttr = Preact.useMemo(() => {
     if (editState) {
@@ -28,7 +30,7 @@ export const ItemMenuButton = Preact.memo(function ItemMenuButton({
   }, [editState]);
 
   return (
-    <div {...ignoreAttr} className={c('item-postfix-button-wrapper')}>
+    <div {...ignoreAttr} className={c('item-postfix-button-wrapper')} style={style}>
       {isEditingActive(editState) ? (
         <a
           data-ignore-drag={true}

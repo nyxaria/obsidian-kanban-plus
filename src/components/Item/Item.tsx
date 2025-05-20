@@ -25,7 +25,7 @@ import {
   isEditingActive,
 } from '../types';
 import { ItemCheckbox } from './ItemCheckbox';
-import { ItemContent } from './ItemContent';
+import { ItemContent, Tags } from './ItemContent';
 import { useItemMenu } from './ItemMenu';
 import { ItemMenuButton } from './ItemMenuButton';
 import { ItemMetadata } from './MetadataTable';
@@ -208,7 +208,41 @@ const ItemInner = memo(function ItemInner({
       className={c('item-content-wrapper')}
       {...ignoreAttr}
     >
-      <div className={c('item-title-wrapper')} {...ignoreAttr}>
+      {!isCardEditingState(editState) && !isStatic && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: '4px',
+          }}
+        >
+          <Tags
+            tags={item.data.metadata?.tags}
+            searchQuery={isMatch ? searchQuery : undefined}
+            alwaysShow={true}
+            style={{
+              flexGrow: 1,
+              marginRight: '8px',
+              marginLeft: '8px',
+              marginTop: '4px',
+              minWidth: 0,
+            }}
+          />
+          <ItemMenuButton
+            editState={editState}
+            setEditState={setEditState}
+            showMenu={showItemMenu}
+            style={{ flexShrink: 0, marginRight: '8px', marginTop: '4px' }}
+          />
+        </div>
+      )}
+
+      <div
+        className={c('item-title-wrapper')}
+        {...ignoreAttr}
+        style={{ display: 'flex', alignItems: 'flex-start' }}
+      >
         <ItemCheckbox
           boardModifiers={boardModifiers}
           item={item}
@@ -223,8 +257,8 @@ const ItemInner = memo(function ItemInner({
           editState={editState}
           isStatic={isStatic}
           targetHighlight={targetHighlight}
+          style={{ flexGrow: 1, marginLeft: '8px' }}
         />
-        <ItemMenuButton editState={editState} setEditState={setEditState} showMenu={showItemMenu} />
       </div>
       <ItemMetadata searchQuery={isMatch ? searchQuery : undefined} item={item} />
     </div>
