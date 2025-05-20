@@ -31,6 +31,7 @@ export interface DraggableLaneProps {
   collapseDir: 'horizontal' | 'vertical';
   isCollapsed?: boolean;
   targetHighlight?: any;
+  cancelEditCounter: number;
 }
 
 function DraggableLaneRaw({
@@ -40,6 +41,7 @@ function DraggableLaneRaw({
   collapseDir,
   isCollapsed = false,
   targetHighlight,
+  cancelEditCounter,
 }: DraggableLaneProps) {
   const [editState, setEditState] = useState<EditState>(EditingState.cancel);
   const [isSorting, setIsSorting] = useState(false);
@@ -199,6 +201,7 @@ function DraggableLaneRaw({
                       isStatic={isStatic}
                       shouldMarkItemsComplete={shouldMarkItemsComplete}
                       targetHighlight={targetHighlight}
+                      cancelEditCounter={cancelEditCounter}
                     />
                     <SortPlaceholder
                       accepts={laneAccepts}
@@ -231,9 +234,10 @@ export interface LanesProps {
   lanes: Lane[];
   collapseDir: 'horizontal' | 'vertical';
   targetHighlight?: any;
+  cancelEditCounter: number;
 }
 
-function LanesRaw({ lanes, collapseDir, targetHighlight }: LanesProps) {
+function LanesRaw({ lanes, collapseDir, targetHighlight, cancelEditCounter }: LanesProps) {
   const search = useContext(SearchContext);
   const { view } = useContext(KanbanContext);
   const boardView = view.useViewState(frontmatterKey) || 'board';
@@ -250,6 +254,7 @@ function LanesRaw({ lanes, collapseDir, targetHighlight }: LanesProps) {
             lane={lane}
             laneIndex={i}
             targetHighlight={targetHighlight}
+            cancelEditCounter={cancelEditCounter}
           />
         );
       })}

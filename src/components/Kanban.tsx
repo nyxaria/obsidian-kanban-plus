@@ -1,7 +1,7 @@
 import animateScrollTo from 'animated-scroll-to';
 import classcat from 'classcat';
 import update from 'immutability-helper';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/compat';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { KanbanView } from 'src/KanbanView';
 import { StateManager } from 'src/StateManager';
 import { useIsAnythingDragging } from 'src/dnd/components/DragOverlay';
@@ -59,6 +59,7 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
   const [isLaneFormVisible, setIsLaneFormVisible] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [cancelEditCounter, setCancelEditCounter] = useState(0);
 
   const filePath = stateManager.file.path;
   const dateColors = dateColorsFromHook || [];
@@ -123,6 +124,17 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
       view.setReactState({});
     }
   }, [boardData, view, view.pendingHighlightScroll, view.currentSearchMatch]);
+
+  useEffect(() => {
+    const handleCancelEdits = () => {
+      console.log('[Kanban Component] Received "cancelAllCardEdits" event. Incrementing counter.');
+      setCancelEditCounter((c) => c + 1);
+    };
+    view.emitter.on('cancelAllCardEdits', handleCancelEdits);
+    return () => {
+      view.emitter.off('cancelAllCardEdits', handleCancelEdits);
+    };
+  }, [view.emitter]);
 
   useEffect(() => {
     view.emitter.on('showLaneForm', showLaneForm);
@@ -275,6 +287,7 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
                       lanes={boardData.children}
                       collapseDir={axis}
                       targetHighlight={reactState?.targetHighlight ?? null}
+                      cancelEditCounter={cancelEditCounter}
                     />
                     <SortPlaceholder
                       accepts={boardAccepts}

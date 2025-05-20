@@ -117,13 +117,14 @@ export interface KanbanSettings {
   'inline-time-format'?: TimeFormat;
   savedWorkspaceViews: SavedWorkspaceView[];
   lastSelectedWorkspaceViewId?: string;
+  clickOutsideCardToSaveEdit?: boolean;
 }
 
 export interface KanbanViewSettings {
   [frontmatterKey]?: KanbanFormat;
   'list-collapse'?: boolean[];
-  'tag-symbols': [];
-  savedWorkspaceViews: [];
+  'tag-symbols': TagSymbolSetting[];
+  savedWorkspaceViews: SavedWorkspaceView[];
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -168,6 +169,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'time-format',
   'time-trigger',
   'tag-symbols',
+  'clickOutsideCardToSaveEdit',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -507,6 +509,44 @@ export class SettingsManager {
           manager: this,
         })
       );
+
+    new Setting(contentEl)
+      .setName(t('Click outside note to save edit'))
+      .setDesc(
+        t(
+          'When enabled, clicking anywhere outside an editing note will save the changes and close the editor.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+            const [value, globalValue] = this.getSetting('clickOutsideCardToSaveEdit', local);
+            const currentActualValue =
+              value !== undefined ? value : globalValue !== undefined ? globalValue : true;
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                clickOutsideCardToSaveEdit: { $set: newValue },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('clickOutsideCardToSaveEdit', local);
+                const defaultValue = globalValue !== undefined ? globalValue : true;
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['clickOutsideCardToSaveEdit'],
+                });
+              });
+          });
+      });
 
     contentEl.createEl('h4', { text: t('Tags') });
 
@@ -1584,18 +1624,6 @@ export class SettingsManager {
 
     this.tagColorSettingsEl = contentEl.createDiv({ cls: c('tag-color-setting-wrapper') });
     this.tagSymbolSettingsEl = contentEl.createDiv({ cls: c('tag-symbol-setting-wrapper') });
-
-    this.settingElements.push(
-      new Setting(this.tagColorSettingsEl)
-        .setName(t('Tag colors'))
-        .setDesc(t('Set colors for tags displayed in cards.'))
-    );
-
-    this.settingElements.push(
-      new Setting(this.tagSymbolSettingsEl)
-        .setName(t('Tag Symbols'))
-        .setDesc(t('Set symbols for tags displayed in cards.'))
-    );
   }
 
   cleanUp() {
@@ -1741,4 +1769,5 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'inline-time-format': 'h:mm A',
   savedWorkspaceViews: [],
   lastSelectedWorkspaceViewId: undefined,
+  clickOutsideCardToSaveEdit: true,
 };
