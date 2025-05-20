@@ -30,6 +30,7 @@ export interface DraggableItemProps {
   isStatic?: boolean;
   shouldMarkItemsComplete?: boolean;
   targetHighlight?: any;
+  cancelEditCounter: number;
 }
 
 export interface ItemInnerProps {
@@ -39,6 +40,7 @@ export interface ItemInnerProps {
   isMatch?: boolean;
   searchQuery?: string;
   targetHighlight?: any;
+  cancelEditCounter: number;
 }
 
 const ItemInner = memo(function ItemInner({
@@ -48,10 +50,12 @@ const ItemInner = memo(function ItemInner({
   searchQuery,
   isStatic,
   targetHighlight,
+  cancelEditCounter,
 }: ItemInnerProps) {
   const { stateManager, boardModifiers } = useContext(KanbanContext);
   const [editState, setEditState] = useState<EditState>(EditingState.cancel);
   const itemInnerRef = useRef<HTMLDivElement>(null);
+  const prevCancelEditCounterRef = useRef<number>(cancelEditCounter);
 
   const dndManager = useContext(DndManagerContext);
 
@@ -71,6 +75,20 @@ const ItemInner = memo(function ItemInner({
       setEditState({ x: 0, y: 0 });
     }
   }, [item.data.forceEditMode]);
+
+  useEffect(() => {
+    if (prevCancelEditCounterRef.current !== cancelEditCounter) {
+      if (isEditing(editState)) {
+        console.log(
+          `[ItemInner item ${item.id}] cancelEditCounter changed to ${cancelEditCounter}. Was ${prevCancelEditCounterRef.current}. EditState:`,
+          editState,
+          '-> complete'
+        );
+        setEditState(EditingState.complete);
+      }
+    }
+    prevCancelEditCounterRef.current = cancelEditCounter;
+  }, [cancelEditCounter, editState, item.id, setEditState]);
 
   useEffect(() => {
     let shouldApplyYellowBorder = false;
@@ -253,6 +271,7 @@ interface ItemsProps {
   items: Item[];
   shouldMarkItemsComplete: boolean;
   targetHighlight?: any;
+  cancelEditCounter: number;
 }
 
 export const Items = memo(function Items({
@@ -260,6 +279,7 @@ export const Items = memo(function Items({
   items,
   shouldMarkItemsComplete,
   targetHighlight,
+  cancelEditCounter,
 }: ItemsProps) {
   const search = useContext(SearchContext);
   const { view } = useContext(KanbanContext);
@@ -276,6 +296,7 @@ export const Items = memo(function Items({
             shouldMarkItemsComplete={shouldMarkItemsComplete}
             isStatic={isStatic}
             targetHighlight={targetHighlight}
+            cancelEditCounter={cancelEditCounter}
           />
         );
       })}

@@ -277,6 +277,11 @@ const en = {
   'Unable to find': 'Unable to find',
   'Open in default app': 'Open in default app',
 
+  // Click to stop editing
+  'Click outside note to save edit': 'Click outside note to save edit',
+  'When enabled, clicking anywhere outside an editing note will save the changes and close the editor.':
+    'When enabled, clicking anywhere outside an editing note will save the changes and close the editor.',
+
   // components/Editor/MarkdownEditor.tsx
   Submit: 'Submit',
 };

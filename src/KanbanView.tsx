@@ -1017,7 +1017,8 @@ export class KanbanView extends TextFileView implements HoverParent {
       targetElement.tagName === 'TEXTAREA' ||
       targetElement.tagName === 'SELECT' ||
       (targetElement.hasAttribute('contenteditable') &&
-        targetElement.getAttribute('contenteditable') === 'true')
+        targetElement.getAttribute('contenteditable') === 'true') ||
+      targetElement.closest('.setting-item') // Ignore clicks within settings items in a modal for example
     ) {
       return;
     }
@@ -1034,6 +1035,18 @@ export class KanbanView extends TextFileView implements HoverParent {
     } else {
       console.log(
         '[KanbanView] handleBoardClickToClearHighlight: No currentSearchMatch to clear for global search highlight.'
+      );
+    }
+
+    // Emit event to cancel any active card edits, if the setting is enabled
+    if (this.plugin.settings.clickOutsideCardToSaveEdit) {
+      console.log(
+        '[KanbanView] handleBoardClickToClearHighlight: Emitting "cancelAllCardEdits" (setting enabled)'
+      );
+      this.emitter.emit('cancelAllCardEdits');
+    } else {
+      console.log(
+        '[KanbanView] handleBoardClickToClearHighlight: "clickOutsideCardToSaveEdit" setting disabled. Not emitting event.'
       );
     }
   };
