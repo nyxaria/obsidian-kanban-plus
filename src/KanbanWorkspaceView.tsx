@@ -7,6 +7,7 @@ import {
 import moment from 'moment';
 import {
   App,
+  Events, // Import Events
   FileView,
   ItemView,
   Menu,
@@ -130,7 +131,7 @@ class DateInputModal extends Modal {
 // --- End Date Input Modal ---
 
 // Basic React component for the workspace view
-function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
+function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents: Events }) {
   const [currentTagInput, setCurrentTagInput] = useState('');
   const [activeFilterTags, setActiveFilterTags] = useState<string[]>([]);
   const [selectedMemberForFilter, setSelectedMemberForFilter] = useState('');
@@ -482,17 +483,163 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
 
   // Effect to re-scan when filters change
   useEffect(() => {
-    // Pass copies of the filter arrays to avoid issues with useCallback dependencies if the arrays themselves are modified elsewhere
     handleScanDirectory([...activeFilterTags], [...activeFilterMembers]);
   }, [
     activeFilterTags,
     activeFilterMembers,
     dueDateFilterValue,
     dueDateFilterUnit,
-    excludeArchive, // Add to dependency array
-    excludeDone, // Add to dependency array
+    excludeArchive,
+    excludeDone,
     handleScanDirectory,
-  ]); // Added dueDate filters to dependency array
+  ]);
+
+  // Effect to listen for refresh events from the parent ItemView
+  useEffect(() => {
+    const refresher = () => {
+      console.log(
+        "[KanbanWorkspaceViewComponent] 'refresh-data' event received. Calling handleScanDirectory."
+      );
+      // Ensure we use the latest filter states when refreshing
+      handleScanDirectory([...activeFilterTags], [...activeFilterMembers]);
+    };
+
+    if (props.viewEvents) {
+      props.viewEvents.on('refresh-data', refresher);
+    }
+
+    return () => {
+      if (props.viewEvents) {
+        props.viewEvents.off('refresh-data', refresher);
+      }
+    };
+  }, [props.viewEvents, handleScanDirectory, activeFilterTags, activeFilterMembers]); // Add dependencies
+
+  const handleToggleCardDoneStatus = useCallback(
+    async (card: WorkspaceCard, newCheckedStatus: boolean) => {
+      const originalCheckedStatus = card.checked || false;
+      // 1. Optimistically update local state for immediate UI feedback
+      setFilteredCards((prevCards) =>
+        prevCards.map((c) => (c.id === card.id ? { ...c, checked: newCheckedStatus } : c))
+      );
+
+      // 2. Update source file
+      const targetFile = props.plugin.app.vault.getAbstractFileByPath(
+        card.sourceBoardPath
+      ) as TFile;
+
+      if (!targetFile || !(targetFile instanceof TFile)) {
+        new Notice(
+          `Error: Could not find file ${card.sourceBoardPath} or it is a folder to update done status.`
+        );
+        // Revert local state if file not found
+        setFilteredCards((prevCards) =>
+          prevCards.map((c) => (c.id === card.id ? { ...c, checked: originalCheckedStatus } : c))
+        );
+        return;
+      }
+
+      try {
+        let fileContent = await props.plugin.app.vault.cachedRead(targetFile);
+        const lines = fileContent.split('\n');
+        let foundAndReplaced = false;
+        const taskRegex = /^(\s*)- \[(\s*|x|X|-|\/|>)\](.*)/; // Matches task prefix
+
+        const updateLineCheckedStatus = (line: string): string => {
+          const match = line.match(taskRegex);
+          if (match) {
+            const prefix = match[1];
+            const restOfLine = match[3];
+            const newMarker = newCheckedStatus ? 'x' : ' ';
+            return `${prefix}- [${newMarker}]${restOfLine.startsWith(' ') ? restOfLine : ` ${restOfLine.trimStart()}`}`.trimEnd();
+          }
+          return line;
+        };
+
+        if (card.blockId) {
+          const blockIdSuffix = `^${card.blockId}`;
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].endsWith(blockIdSuffix)) {
+              if (taskRegex.test(lines[i])) {
+                lines[i] = updateLineCheckedStatus(lines[i]);
+                foundAndReplaced = true;
+              } else {
+                new Notice(
+                  `Line with block ID ${card.blockId} is not a task. Cannot mark as done/undone.`
+                );
+              }
+              break;
+            }
+          }
+        } else if (card.sourceStartLine) {
+          const targetLineIndex = card.sourceStartLine - 1;
+          if (targetLineIndex >= 0 && targetLineIndex < lines.length) {
+            const lineToUpdate = lines[targetLineIndex];
+            const titleSnippet = card.title.length > 20 ? card.title.substring(0, 20) : card.title;
+            if (lineToUpdate.toLowerCase().includes(titleSnippet.toLowerCase())) {
+              if (taskRegex.test(lineToUpdate)) {
+                lines[targetLineIndex] = updateLineCheckedStatus(lineToUpdate);
+                foundAndReplaced = true;
+              } else {
+                new Notice(
+                  `Line ${card.sourceStartLine} is not a task. Cannot mark as done/undone.`
+                );
+              }
+            } else {
+              new Notice(
+                `Line content at ${card.sourceStartLine} seems to have changed for "${card.title}". Done status updated in view only (file not changed).`
+              );
+              // Do not revert local state here as the file wasn't touched, but also don't proceed to save.
+              return; // Exit before attempting to save
+            }
+          }
+        }
+
+        if (foundAndReplaced) {
+          fileContent = lines.join('\n');
+          await props.plugin.app.vault.modify(targetFile, fileContent);
+          new Notice(
+            `"${card.title}" marked as ${newCheckedStatus ? 'Done' : 'Undone'} in ${targetFile.basename}.`
+          );
+          handleScanDirectory([...activeFilterTags], [...activeFilterMembers]); // Refresh list
+        } else if (!card.blockId && !card.sourceStartLine) {
+          new Notice(
+            `Cannot update done status for "${card.title}": No block ID or source line. Updated in view only (file not changed).`
+          );
+        } else if (card.blockId && !foundAndReplaced) {
+          if (!lines.find((line) => line.endsWith(`^${card.blockId}`))) {
+            new Notice(
+              `Could not find block ID ${card.blockId} for "${card.title}" to update done status. Updated in view only (file not changed).`
+            );
+          }
+        } else if (card.sourceStartLine && !foundAndReplaced) {
+          if (
+            !lines[card.sourceStartLine - 1]
+              ?.toLowerCase()
+              .includes(
+                (card.title.length > 20 ? card.title.substring(0, 20) : card.title).toLowerCase()
+              )
+          ) {
+            // Already handled by specific notice, file not changed
+          } else if (!taskRegex.test(lines[card.sourceStartLine - 1])) {
+            // Already handled by specific notice, file not changed
+          }
+        } else {
+          new Notice(
+            `Could not update done status for "${card.title}" in source file. Updated in view only (file not changed).`
+          );
+        }
+      } catch (e) {
+        console.error('Error updating card done status in source file:', e);
+        new Notice('Error updating done status. See console.');
+        // Revert local state on error
+        setFilteredCards((prevCards) =>
+          prevCards.map((c) => (c.id === card.id ? { ...c, checked: originalCheckedStatus } : c))
+        );
+      }
+    },
+    [props.plugin, setFilteredCards, activeFilterTags, activeFilterMembers, handleScanDirectory]
+  );
 
   const handleRowClick = useCallback(
     async (card: WorkspaceCard) => {
@@ -766,6 +913,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                       fileContent = lines.join('\n');
                       await props.plugin.app.vault.modify(targetFile, fileContent);
                       new Notice(`Due date for "${card.title}" updated in ${targetFile.basename}.`);
+                      handleScanDirectory([...activeFilterTags], [...activeFilterMembers]); // Refresh list
                     } else {
                       new Notice(
                         `Could not find block ID ${card.blockId} to update date. Date updated in this view only.`
@@ -812,6 +960,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                       new Notice(
                         `Due date for "${card.title}" updated by line number in ${targetFile.basename}.`
                       );
+                      handleScanDirectory([...activeFilterTags], [...activeFilterMembers]); // Refresh list
                     } else {
                       new Notice(
                         `Invalid source line number (${card.sourceStartLine}). Date updated in this view only.`
@@ -960,6 +1109,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                       fileContent = lines.join('\n');
                       await props.plugin.app.vault.modify(targetFile, fileContent);
                       new Notice(`Members for "${card.title}" updated in ${targetFile.basename}.`);
+                      handleScanDirectory([...activeFilterTags], [...activeFilterMembers]); // Refresh list
                     } else if (!card.blockId && !card.sourceStartLine) {
                       new Notice(
                         `Cannot update members for "${card.title}": No block ID or source line. Updated in view only.`
@@ -1004,138 +1154,23 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
         const isDone = card.checked || false;
         item
           .setTitle(isDone ? 'Mark as Undone' : 'Mark as Done')
-          .setIcon(isDone ? 'check-square' : 'square') // Consider using 'check' and 'square' or similar
+          .setIcon(isDone ? 'check-square' : 'square')
           .onClick(async () => {
-            const newCheckedStatus = !isDone;
-
-            // 1. Update local state
-            setFilteredCards((prevCards) =>
-              prevCards.map((c) => (c.id === card.id ? { ...c, checked: newCheckedStatus } : c))
-            );
-
-            // 2. Update source file
-            const targetFile = props.plugin.app.vault.getAbstractFileByPath(
-              card.sourceBoardPath
-            ) as TFile;
-            if (!targetFile || !(targetFile instanceof TFile)) {
-              new Notice(`Error: Could not find file ${card.sourceBoardPath} or it is a folder.`);
-              // Revert local state if file not found? For now, local state is kept.
-              return;
-            }
-
-            try {
-              let fileContent = await props.plugin.app.vault.cachedRead(targetFile);
-              const lines = fileContent.split('\n');
-              let foundAndReplaced = false;
-
-              const taskRegex = /^(\s*)- \[(\s*|x|X|-|\/|>)\](.*)/; // Matches task prefix
-
-              const updateLineCheckedStatus = (line: string): string => {
-                const match = line.match(taskRegex);
-                if (match) {
-                  const prefix = match[1]; // Leading whitespace
-                  const currentMarker = match[2];
-                  const restOfLine = match[3];
-                  const newMarker = newCheckedStatus ? 'x' : ' ';
-                  // Ensure there's always a space after the checkbox marker if restOfLine isn't empty
-                  return `${prefix}- [${newMarker}]${restOfLine.startsWith(' ') ? restOfLine : ` ${restOfLine.trimStart()}`}`.trimEnd();
-                }
-                return line; // Should not happen if we found it via blockId/line correctly
-              };
-
-              if (card.blockId) {
-                const blockIdSuffix = `^${card.blockId}`;
-                for (let i = 0; i < lines.length; i++) {
-                  if (lines[i].endsWith(blockIdSuffix)) {
-                    if (taskRegex.test(lines[i])) {
-                      lines[i] = updateLineCheckedStatus(lines[i]);
-                      foundAndReplaced = true;
-                    } else {
-                      new Notice(
-                        `Line with block ID ${card.blockId} is not a task. Cannot mark as done/undone.`
-                      );
-                    }
-                    break;
-                  }
-                }
-              } else if (card.sourceStartLine) {
-                const targetLineIndex = card.sourceStartLine - 1;
-                if (targetLineIndex >= 0 && targetLineIndex < lines.length) {
-                  const lineToUpdate = lines[targetLineIndex];
-                  const titleSnippet =
-                    card.title.length > 20 ? card.title.substring(0, 20) : card.title;
-                  if (lineToUpdate.toLowerCase().includes(titleSnippet.toLowerCase())) {
-                    if (taskRegex.test(lineToUpdate)) {
-                      lines[targetLineIndex] = updateLineCheckedStatus(lineToUpdate);
-                      foundAndReplaced = true;
-                    } else {
-                      new Notice(
-                        `Line ${card.sourceStartLine} is not a task. Cannot mark as done/undone.`
-                      );
-                    }
-                  } else {
-                    new Notice(
-                      `Line content at ${card.sourceStartLine} seems to have changed for "${card.title}". Done status updated in view only.`
-                    );
-                  }
-                }
-              }
-
-              if (foundAndReplaced) {
-                fileContent = lines.join('\n');
-                await props.plugin.app.vault.modify(targetFile, fileContent);
-                new Notice(
-                  `"${card.title}" marked as ${newCheckedStatus ? 'Done' : 'Undone'} in ${targetFile.basename}.`
-                );
-              } else if (!card.blockId && !card.sourceStartLine) {
-                new Notice(
-                  `Cannot update done status for "${card.title}": No block ID or source line. Updated in view only.`
-                );
-              } else if (card.blockId && !foundAndReplaced) {
-                // This case is handled by the specific notice if line is not a task
-                if (!lines.find((line) => line.endsWith(`^${card.blockId}`))) {
-                  new Notice(
-                    `Could not find block ID ${card.blockId} for "${card.title}" to update done status. Updated in view only.`
-                  );
-                }
-              } else if (card.sourceStartLine && !foundAndReplaced) {
-                // This case is also handled by specific notices (line changed or not a task)
-                if (
-                  !lines[card.sourceStartLine - 1]
-                    ?.toLowerCase()
-                    .includes(
-                      (card.title.length > 20
-                        ? card.title.substring(0, 20)
-                        : card.title
-                      ).toLowerCase()
-                    )
-                ) {
-                  // Already handled by specific notice
-                } else if (!taskRegex.test(lines[card.sourceStartLine - 1])) {
-                  // Already handled by specific notice
-                }
-              } else {
-                new Notice(
-                  `Could not update done status for "${card.title}" in source file. Updated in view only.`
-                );
-              }
-            } catch (e) {
-              console.error('Error updating card done status in source file:', e);
-              new Notice('Error updating done status. See console.');
-              // Optionally revert local state here too
-              setFilteredCards((prevCards) =>
-                prevCards.map(
-                  (c) => (c.id === card.id ? { ...c, checked: isDone } : c) // Revert to original status
-                )
-              );
-            }
+            await handleToggleCardDoneStatus(card, !isDone); // Call the helper function
           });
       });
       // --- End Mark as Done/Undone ---
 
       menu.showAtMouseEvent(event);
     },
-    [props.plugin, setFilteredCards]
+    [
+      props.plugin,
+      setFilteredCards,
+      activeFilterTags,
+      activeFilterMembers,
+      handleScanDirectory,
+      handleToggleCardDoneStatus,
+    ] // Added handleToggleCardDoneStatus to dependencies
   );
 
   const handleSaveView = useCallback(async () => {
@@ -1795,6 +1830,16 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
+                <th /* Checkbox column header */
+                  style={{
+                    border: '1px solid var(--background-modifier-border)',
+                    padding: '4px',
+                    width: '40px', // Fixed width for checkbox column
+                    textAlign: 'center',
+                  }}
+                >
+                  {/* Optionally, an icon or empty for cleaner look */}
+                </th>
                 <th
                   style={{
                     border: '1px solid var(--background-modifier-border)',
@@ -1898,6 +1943,28 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                     }
                     onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                   >
+                    {/* Checkbox Cell */}
+                    <td
+                      style={{
+                        border: '1px solid var(--background-modifier-border)',
+                        padding: '4px',
+                        textAlign: 'center',
+                      }}
+                      onClick={(e) => e.stopPropagation()} // Stop propagation here
+                    >
+                      <input
+                        type="checkbox"
+                        checked={card.checked || false}
+                        onChange={async (e) => {
+                          // e.stopPropagation(); // No longer strictly needed here if stopped on td, but doesn't hurt
+                          await handleToggleCardDoneStatus(
+                            card,
+                            (e.target as HTMLInputElement).checked
+                          );
+                        }}
+                        style={{ cursor: 'pointer' }} // Make it clear it's clickable
+                      />
+                    </td>
                     {/* Ticket Cell */}
                     <td
                       style={{
@@ -2059,10 +2126,13 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
 
 export class KanbanWorkspaceView extends ItemView {
   plugin: KanbanPlugin;
+  private viewEvents = new Events();
+  private boundHandleActiveLeafChange: (leaf: WorkspaceLeaf | null) => void;
 
   constructor(leaf: WorkspaceLeaf, plugin: KanbanPlugin) {
     super(leaf);
     this.plugin = plugin;
+    this.boundHandleActiveLeafChange = this.handleActiveLeafChange.bind(this);
   }
 
   getViewType() {
@@ -2077,11 +2147,119 @@ export class KanbanWorkspaceView extends ItemView {
     return KANBAN_WORKSPACE_ICON;
   }
 
-  async onOpen() {
-    render(<KanbanWorkspaceViewComponent plugin={this.plugin} />, this.contentEl);
+  async onload() {
+    super.onload();
+    render(
+      <KanbanWorkspaceViewComponent plugin={this.plugin} viewEvents={this.viewEvents} />,
+      this.contentEl
+    );
+    this.app.workspace.on('active-leaf-change', this.boundHandleActiveLeafChange);
+
+    // Initial refresh when view is first loaded.
+    const timeoutDuration = 1000; // Centralized timeout duration
+    setTimeout(() => {
+      const currentActiveLeafPolled = this.app.workspace.activeLeaf;
+      const isActiveLeafThisViewLeaf = currentActiveLeafPolled === this.leaf;
+      const isObsidianReportingThisAsActiveView =
+        this.app.workspace.getActiveViewOfType(KanbanWorkspaceView) === this;
+
+      console.log(
+        `[KanbanWorkspaceView] onload (setTimeout ${timeoutDuration}ms): Checking initial active state. Details:`,
+        {
+          currentActiveLeafPolled: currentActiveLeafPolled
+            ? {
+                id: (currentActiveLeafPolled as any).id ?? 'N/A',
+                viewType: currentActiveLeafPolled.view?.getViewType(),
+              }
+            : null,
+          thisLeaf: { id: (this.leaf as any).id ?? 'N/A', viewType: this.getViewType() },
+          isActiveLeafThisViewLeaf: isActiveLeafThisViewLeaf,
+          isObsidianReportingThisAsActiveView: isObsidianReportingThisAsActiveView,
+          currentActiveLeafPolled_VIEW_INSTANCE_COMPARISON_this:
+            currentActiveLeafPolled?.view === this,
+        }
+      );
+
+      if (isActiveLeafThisViewLeaf || isObsidianReportingThisAsActiveView) {
+        console.log(
+          `[KanbanWorkspaceView] onload (setTimeout ${timeoutDuration}ms): View determined active on load. Triggering 'refresh-data'. Conditions: (polledActiveLeaf === this.leaf): ${isActiveLeafThisViewLeaf}, (getActiveViewOfType === this): ${isObsidianReportingThisAsActiveView}`
+        );
+        this.viewEvents.trigger('refresh-data');
+      } else {
+        console.log(
+          `[KanbanWorkspaceView] onload (setTimeout ${timeoutDuration}ms): View is NOT determined active on load.`
+        );
+      }
+    }, timeoutDuration);
   }
 
-  async onClose() {
-    unmountComponentAtNode(this.contentEl);
+  handleActiveLeafChange(eventLeaf: WorkspaceLeaf | null) {
+    const timeoutDuration = 1000; // Centralized timeout duration
+
+    if (eventLeaf === this.leaf) {
+      console.log(
+        `[KanbanWorkspaceView] handleActiveLeafChange: Event is for this.leaf. Scheduling refresh check in ${timeoutDuration}ms.`,
+        {
+          eventLeafId: (eventLeaf as any)?.id ?? 'N/A',
+          thisLeafId: (this.leaf as any)?.id ?? 'N/A',
+          eventLeafViewType: eventLeaf?.view?.getViewType(),
+          thisViewType: this.getViewType(),
+        }
+      );
+      setTimeout(() => {
+        const currentActiveLeafPolled = this.app.workspace.activeLeaf;
+        const isThisLeafStillActiveViaPolled = currentActiveLeafPolled === this.leaf;
+        const isThisViewStillActiveViaApi =
+          this.app.workspace.getActiveViewOfType(KanbanWorkspaceView) === this;
+
+        console.log(
+          `[KanbanWorkspaceView] handleActiveLeafChange (setTimeout ${timeoutDuration}ms): Post-timeout check for this.leaf. Details:`,
+          {
+            eventLeafAtEventTime: eventLeaf
+              ? { id: (eventLeaf as any)?.id ?? 'N/A', viewType: eventLeaf.view?.getViewType() }
+              : null,
+            thisLeafInstance: { id: (this.leaf as any).id ?? 'N/A', viewType: this.getViewType() },
+            currentActiveLeafPolled: currentActiveLeafPolled
+              ? {
+                  id: (currentActiveLeafPolled as any).id ?? 'N/A',
+                  viewType: currentActiveLeafPolled.view?.getViewType(),
+                }
+              : null,
+            isThisLeafStillActive_polled: isThisLeafStillActiveViaPolled,
+            isThisViewStillActive_api: isThisViewStillActiveViaApi,
+            polledActiveLeaf_VIEW_INSTANCE_COMPARISON_this: currentActiveLeafPolled?.view === this,
+          }
+        );
+
+        if (isThisLeafStillActiveViaPolled || isThisViewStillActiveViaApi) {
+          console.log(
+            `[KanbanWorkspaceView] handleActiveLeafChange (setTimeout ${timeoutDuration}ms): Confirmed active. Triggering 'refresh-data'. Conditions: (polledActiveLeaf === this.leaf): ${isThisLeafStillActiveViaPolled}, (getActiveViewOfType === this): ${isThisViewStillActiveViaApi}`
+          );
+          this.viewEvents.trigger('refresh-data');
+        } else {
+          console.log(
+            `[KanbanWorkspaceView] handleActiveLeafChange (setTimeout ${timeoutDuration}ms): View no longer considered active post-timeout.`
+          );
+        }
+      }, timeoutDuration);
+    } else {
+      console.log(
+        `[KanbanWorkspaceView] handleActiveLeafChange: Event leaf (viewType: ${eventLeaf?.view?.getViewType()}, id: ${(eventLeaf as any)?.id ?? 'N/A'}) is not this.leaf (viewType: ${this.getViewType()}, id: ${(this.leaf as any)?.id ?? 'N/A'}). Ignoring.`,
+        {
+          eventLeafPassed: eventLeaf
+            ? { id: (eventLeaf as any)?.id ?? 'N/A', viewType: eventLeaf.view?.getViewType() }
+            : null,
+          thisLeafInstance: { id: (this.leaf as any).id ?? 'N/A', viewType: this.getViewType() },
+        }
+      );
+    }
+  }
+
+  async onunload() {
+    this.app.workspace.off('active-leaf-change', this.boundHandleActiveLeafChange);
+    if (this.contentEl) {
+      unmountComponentAtNode(this.contentEl);
+    }
+    super.onunload();
   }
 }
