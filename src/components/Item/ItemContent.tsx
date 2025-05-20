@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view';
-import { memo } from 'preact/compat';
+import { JSX, memo } from 'preact/compat';
 import {
   Dispatch,
   StateUpdater,
@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from 'preact/hooks';
 import useOnclickOutside from 'react-cool-onclickoutside';
 import { StateManager } from 'src/StateManager';
@@ -21,7 +22,13 @@ import {
   MarkdownRenderer,
 } from '../MarkdownRenderer/MarkdownRenderer';
 import { KanbanContext, SearchContext } from '../context';
-import { c, useGetDateColorFn, useGetTagColorFn, useGetTagSymbolFn } from '../helpers';
+import {
+  c,
+  escapeRegExpStr,
+  useGetDateColorFn,
+  useGetTagColorFn,
+  useGetTagSymbolFn,
+} from '../helpers';
 import {
   EditState,
   EditingProcessState,
@@ -92,6 +99,7 @@ export interface ItemContentProps {
   editState: EditState;
   isStatic: boolean;
   targetHighlight?: any;
+  style?: JSX.CSSProperties;
 }
 
 function checkCheckbox(stateManager: StateManager, title: string, checkboxIndex: number) {
@@ -133,15 +141,15 @@ function checkCheckbox(stateManager: StateManager, title: string, checkboxIndex:
   return results.join('\n');
 }
 
-export function Tags({
-  tags,
-  searchQuery,
-  alwaysShow,
-}: {
+interface TagsProps {
   tags?: string[];
   searchQuery?: string;
   alwaysShow?: boolean;
-}) {
+  style?: JSX.CSSProperties;
+}
+
+export function Tags(props: TagsProps) {
+  const { tags, searchQuery, alwaysShow, style } = props;
   const { stateManager } = useContext(KanbanContext);
   const getTagColor = useGetTagColorFn(stateManager);
   const getTagSymbol = useGetTagSymbolFn(stateManager);
@@ -154,7 +162,7 @@ export function Tags({
   }
 
   return (
-    <div className={c('item-tags')}>
+    <div className={c('item-tags')} style={style}>
       {tags.map((originalTag, i) => {
         const tagColor = getTagColor(originalTag);
         const symbolInfo = getTagSymbol(originalTag);
@@ -233,7 +241,20 @@ export function AssignedMembers({
   }
 
   return (
-    <div className={c('item-assigned-members')} style={{ marginTop: '4px' }}>
+    <div
+      className={c('item-assigned-members')}
+      style={{
+        marginTop: '4px',
+        display: 'flex',
+        justifyContent: 'flex-end',
+        flexWrap: 'wrap',
+        gap: '0px',
+        paddingRight: '0px',
+        marginRight: '0px',
+        position: 'relative',
+        left: '2px',
+      }}
+    >
       {assignedMembers.map((member, i) => {
         const memberConfig = teamMemberColors?.[member];
         const backgroundColor = memberConfig?.background || 'var(--background-modifier-hover)';
@@ -255,7 +276,6 @@ export function AssignedMembers({
               color: textColor,
               padding: '1px 5px',
               borderRadius: '3px',
-              marginRight: '4px',
               fontSize: '0.9em',
               display: 'inline-flex',
               alignItems: 'center',
@@ -277,20 +297,19 @@ export const ItemContent = memo(function ItemContent({
   showMetadata = true,
   isStatic,
   targetHighlight,
+  style,
 }: ItemContentProps) {
   const { stateManager, view, boardModifiers, filePath } = useContext(KanbanContext);
   const { onEditDate, onEditTime } = useDatePickers(item);
   const getDateColor = useGetDateColorFn(stateManager);
-  const getTagColor = useGetTagColorFn(stateManager);
-  const getTagSymbol = useGetTagSymbolFn(stateManager);
-  const search = useContext(SearchContext);
-  const shouldShowTags = stateManager.useSetting('move-tags');
-  const hideHashForTagsWithoutSymbols = stateManager.useSetting('hideHashForTagsWithoutSymbols');
   const teamMemberColors: Record<string, TeamMemberColorConfig> =
     view.plugin.settings.teamMemberColors || {};
 
   const titleRef = useRef<string | null>(null);
   const path = useNestedEntityPath();
+
+  const [titleForEditor, setTitleForEditor] = useState<string>('');
+  const extractedPartsRef = useRef<{ tags: string[]; members: string[] } | null>(null);
 
   const editorWrapperRef = useOnclickOutside(
     () => {
@@ -299,16 +318,90 @@ export const ItemContent = memo(function ItemContent({
       }
     },
     {
-      // Options for useOnclickOutside, e.g., ignore specific classes if needed
-      // For now, default options should be fine. Can add ignoreClass later if conflicts arise.
+      // Options for useOnclickOutside
     }
   );
+
+  const editCoordinates = isEditCoordinates(editState) ? editState : undefined;
+  const showCardTitleEditor = !!editCoordinates;
+
+  useEffect(() => {
+    if (showCardTitleEditor) {
+      const rawTitle = item.data.titleRaw;
+      console.log('[ItemContent] Editing starts. Raw title:', JSON.stringify(rawTitle));
+
+      const originalTagsFromMetadata = item.data.metadata?.tags || [];
+      const originalMembersFromMetadata = item.data.assignedMembers || [];
+
+      const tagStringsForRemoval = originalTagsFromMetadata.map((t) => `#${t.replace(/^#/, '')}`);
+      const memberStringsForRemoval = originalMembersFromMetadata.map(
+        (m) => `@@${m.replace(/^@@/, '')}`
+      );
+
+      let cleanTitle = rawTitle;
+
+      for (const memberSyntax of memberStringsForRemoval) {
+        const memberRegex = new RegExp(
+          `(?:^|\\s)(${escapeRegExpStr(memberSyntax)})(?=\\s|$)`,
+          'gi'
+        );
+        cleanTitle = cleanTitle.replace(memberRegex, ' ');
+      }
+
+      for (const tagSyntax of tagStringsForRemoval) {
+        const tagRegex = new RegExp(`(?:^|\\s)(${escapeRegExpStr(tagSyntax)})(?=\\s|$)`, 'gi');
+        cleanTitle = cleanTitle.replace(tagRegex, ' ');
+      }
+
+      cleanTitle = cleanTitle.replace(/ {2,}/g, ' ');
+      cleanTitle = cleanTitle.trim();
+
+      console.log('[ItemContent] Cleaned title for editor:', JSON.stringify(cleanTitle));
+
+      setTitleForEditor(cleanTitle);
+      extractedPartsRef.current = { tags: tagStringsForRemoval, members: memberStringsForRemoval };
+      titleRef.current = cleanTitle;
+    }
+  }, [
+    showCardTitleEditor,
+    item.data.titleRaw,
+    item.data.metadata?.tags,
+    item.data.assignedMembers,
+  ]);
 
   useEffect(() => {
     if (editState === EditingProcessState.complete) {
       if (titleRef.current !== null) {
-        const newContent = titleRef.current.trim();
-        boardModifiers.updateItem(path, stateManager.updateItemContent(item, newContent));
+        const userEditedCleanText = titleRef.current;
+
+        const currentTags = item.data.metadata?.tags || [];
+        const currentMembers = item.data.assignedMembers || [];
+
+        let reconstructedTitle = userEditedCleanText;
+
+        const tagStrings = currentTags.map((t) => `#${t.replace(/^#/, '')}`);
+        const memberStrings = currentMembers.map((m) => `@@${m.replace(/^@@/, '')}`);
+
+        const partsToAppend: string[] = [];
+        if (tagStrings.length > 0) {
+          partsToAppend.push(tagStrings.join(' '));
+        }
+        if (memberStrings.length > 0) {
+          partsToAppend.push(memberStrings.join(' '));
+        }
+
+        if (partsToAppend.length > 0) {
+          if (reconstructedTitle.length > 0 && !/\s$/.test(reconstructedTitle)) {
+            reconstructedTitle += ' ';
+          }
+          reconstructedTitle += partsToAppend.join(' ');
+        }
+
+        reconstructedTitle = reconstructedTitle.trim();
+        reconstructedTitle = reconstructedTitle.replace(/ {2,}/g, ' ');
+
+        console.log('[ItemContent] Saving final title:', JSON.stringify(reconstructedTitle));
+        boardModifiers.updateItem(path, stateManager.updateItemContent(item, reconstructedTitle));
       }
       titleRef.current = null;
     } else if (editState === EditingProcessState.cancel) {
@@ -363,10 +456,6 @@ export const ItemContent = memo(function ItemContent({
     [stateManager, item, boardModifiers, path, isStatic]
   );
 
-  const editCoordinates = isEditCoordinates(editState) ? editState : undefined;
-
-  const showCardTitleEditor = !!editCoordinates;
-
   if (showCardTitleEditor) {
     return (
       <div
@@ -378,7 +467,7 @@ export const ItemContent = memo(function ItemContent({
           <MarkdownEditor
             editState={editCoordinates}
             className={c('item-input')}
-            value={item.data.titleRaw}
+            value={titleForEditor}
             onChange={(update) => {
               if (update.docChanged) {
                 titleRef.current = update.state.doc.toString();
@@ -394,35 +483,33 @@ export const ItemContent = memo(function ItemContent({
   }
 
   return (
-    <div onClick={onWrapperClick} className={c('item-title')}>
-      {isStatic ? (
-        <MarkdownClonedPreviewRenderer
-          entityId={item.id}
-          className={c('item-markdown')}
-          markdownString={item.data.title}
-          searchQuery={searchQuery}
-          onPointerUp={onCheckboxContainerClick}
-        />
-      ) : (
+    <div
+      ref={editorWrapperRef}
+      className={c('item-content-wrapper')}
+      style={{ ...(isStatic ? { cursor: 'default' } : {}), width: '100%', ...style }}
+    >
+      <div
+        onPointerUp={onCheckboxContainerClick}
+        className={c('item-text-wrapper')}
+        style={{ width: '100%' }}
+      >
         <MarkdownRenderer
           entityId={item.id}
           className={c('item-markdown')}
           markdownString={item.data.title}
           searchQuery={searchQuery}
-          onPointerUp={onCheckboxContainerClick}
         />
-      )}
-      {showMetadata && (
-        <div className={c('item-metadata')}>
-          <RelativeDate item={item} stateManager={stateManager} />
+      </div>
+      {!showCardTitleEditor && showMetadata && (
+        <div className={c('item-metadata')} style={{ width: '100%' }}>
+          <InlineMetadata item={item} stateManager={stateManager} />
           <DateAndTime
             item={item}
             stateManager={stateManager}
             filePath={filePath}
             getDateColor={getDateColor}
           />
-          <InlineMetadata item={item} stateManager={stateManager} />
-          <Tags tags={item.data.metadata.tags} searchQuery={searchQuery} />
+          <RelativeDate item={item} stateManager={stateManager} />
           <AssignedMembers
             assignedMembers={item.data.assignedMembers}
             searchQuery={searchQuery}

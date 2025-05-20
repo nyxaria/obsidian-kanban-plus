@@ -227,11 +227,14 @@ export function MarkdownEditor({
 
     controller.editMode = editor;
     editor.set(value || '');
+    cm.dispatch({ selection: EditorSelection.cursor((value || '').length) });
+
     if (isEditCoordinates(editState)) {
-      const editor = internalRef.current;
-      if (editor && !editor.hasFocus) {
-        editor.focus();
+      const editorInstance = internalRef.current;
+      if (editorInstance && !editorInstance.hasFocus) {
+        editorInstance.focus();
       }
+      cm.dispatch({ selection: EditorSelection.cursor((value || '').length) });
 
       cm.dom.win.setTimeout(() => {
         setInsertMode(cm);
@@ -265,6 +268,19 @@ export function MarkdownEditor({
       if (editorRef) editorRef.current = null;
     };
   }, []);
+
+  // New useEffect to handle incoming value changes AFTER initial mount
+  useEffect(() => {
+    const cm = internalRef.current;
+    if (cm && value !== undefined) {
+      if (cm.state.doc.toString() !== value) {
+        cm.dispatch({
+          changes: { from: 0, to: cm.state.doc.length, insert: value || '' },
+        });
+        cm.dispatch({ selection: EditorSelection.cursor((value || '').length) });
+      }
+    }
+  }, [value]);
 
   const cls = ['cm-table-widget'];
   if (className) cls.push(className);
