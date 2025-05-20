@@ -251,13 +251,21 @@ export function useGetTagColorFn(stateManager: StateManager): (tag: string) => T
   return useMemo(() => getTagColorFn(tagColors), [tagColors]);
 }
 
-export function getTagSymbolFn(tagSymbols: TagSymbolSetting[]): (tag: string) => string | null {
-  const tagMap = (tagSymbols || []).reduce<Record<string, string>>((total, current) => {
-    if (current && current.data && current.data.tagKey) {
-      total[current.data.tagKey] = current.data.symbol;
-    }
-    return total;
-  }, {});
+export function getTagSymbolFn(
+  tagSymbols: TagSymbolSetting[]
+): (tag: string) => { symbol: string; hideTag?: boolean } | null {
+  const tagMap = (tagSymbols || []).reduce<Record<string, { symbol: string; hideTag?: boolean }>>(
+    (total, current) => {
+      if (current && current.data && current.data.tagKey) {
+        total[current.data.tagKey] = {
+          symbol: current.data.symbol,
+          hideTag: current.data.hideTag,
+        };
+      }
+      return total;
+    },
+    {}
+  );
 
   return (tag: string) => {
     if (tagMap[tag]) return tagMap[tag];
@@ -265,7 +273,9 @@ export function getTagSymbolFn(tagSymbols: TagSymbolSetting[]): (tag: string) =>
   };
 }
 
-export function useGetTagSymbolFn(stateManager: StateManager): (tag: string) => string | null {
+export function useGetTagSymbolFn(
+  stateManager: StateManager
+): (tag: string) => { symbol: string; hideTag?: boolean } | null {
   const tagSymbols = stateManager.useSetting('tag-symbols');
   return useMemo(() => getTagSymbolFn(tagSymbols), [tagSymbols]);
 }
@@ -434,4 +444,8 @@ export function useSearchValue(
       },
     };
   }, [board, query, setSearchQuery, setDebouncedSearchQuery]);
+}
+
+export function resolveMentions(app: App, text: string) {
+  // ... existing code ...
 }
