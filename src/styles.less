@@ -27,8 +27,11 @@
 .kanban-plugin,
 .kanban-plugin__drag-container {
   a.tag {
+    --tag-padding-x: 8px;
+    --tag-padding-y: 4px;
     padding-inline: var(--tag-padding-x);
     padding-block: var(--tag-padding-y);
+    border-radius: 4px;
   }
 }
 
@@ -865,7 +868,10 @@ button.kanban-plugin__new-item-button {
   background-color: var(--tag-background, hsla(var(--interactive-accent-hsl), 0.1));
   color: var(--tag-color, var(--text-accent));
   margin-block: 3px 0;
-  margin-inline: 0 3px;
+  margin-inline: 0 5px;
+  padding-inline: var(--tag-padding-x);
+  padding-block: var(--tag-padding-y);
+  border-radius: 4px;
 }
 
 .kanban-plugin__item-tag.is-search-match,

@@ -14,7 +14,13 @@ import {
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 
-import { KanbanFormat, KanbanSettings, KanbanViewSettings, SettingsModal } from './Settings';
+import {
+  DEFAULT_SETTINGS,
+  KanbanFormat,
+  KanbanSettings,
+  KanbanViewSettings,
+  SettingsModal,
+} from './Settings';
 import { Kanban } from './components/Kanban';
 import { BasicMarkdownRenderer } from './components/MarkdownRenderer/MarkdownRenderer';
 import { c } from './components/helpers';
@@ -46,12 +52,13 @@ export class KanbanView extends TextFileView implements HoverParent {
   previewQueue: PromiseQueue;
 
   activeEditor: any;
-  viewSettings: KanbanViewSettings = {};
+  viewSettings: KanbanViewSettings;
   public initialSearchQuery?: string;
   public targetHighlightLocation: TargetHighlightLocation | null = null;
   private pendingHighlightScroll: TargetHighlightLocation | null = null;
   private _reactState: any = {};
   private currentSearchMatch: any = null;
+  private _isPendingInitialRender: boolean = false;
 
   get isPrimary(): boolean {
     return this.plugin.getStateManager(this.file)?.getAView() === this;
@@ -70,6 +77,13 @@ export class KanbanView extends TextFileView implements HoverParent {
     this.plugin = plugin;
     this.emitter = new EventEmitter();
     this.previewCache = new Map();
+    this.viewSettings = {
+      [frontmatterKey]: DEFAULT_SETTINGS[frontmatterKey],
+      'list-collapse': DEFAULT_SETTINGS['list-collapse'],
+      'tag-symbols': DEFAULT_SETTINGS['tag-symbols'] || [],
+      savedWorkspaceViews: DEFAULT_SETTINGS.savedWorkspaceViews || [],
+      hideHashForTagsWithoutSymbols: DEFAULT_SETTINGS.hideHashForTagsWithoutSymbols || false,
+    };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));
 
@@ -217,34 +231,30 @@ export class KanbanView extends TextFileView implements HoverParent {
           '[KanbanView] onload: Applied blockId from _kanbanPendingHighlightState to targetHighlightLocation.'
         );
       } else if (pendingHighlightState.match) {
-        // If no blockId, but there's a 'match' object (e.g., from search navState)
-        // Store the whole thing, ItemInner will need to know how to use it.
-        this.targetHighlightLocation = pendingHighlightState; // Store the whole match object
+        this.targetHighlightLocation = pendingHighlightState;
         console.log(
           '[KanbanView] onload: Applied full match object from _kanbanPendingHighlightState to targetHighlightLocation.'
         );
       }
-      // Clear the pending state from the leaf after consuming it
       delete (this.leaf as any)._kanbanPendingHighlightState;
       console.log('[KanbanView] onload: Cleared _kanbanPendingHighlightState from leaf.');
-
-      // If we found a pending highlight, ensure React state is updated after a short delay
-      // to allow board data to potentially load via setState/addView.
-      setTimeout(() => {
-        if (this.targetHighlightLocation) {
-          console.log(
-            '[KanbanView] onload (from pending): Delayed call to setReactState with targetHighlight:',
-            this.targetHighlightLocation
-          );
-          this.setReactState({ targetHighlight: this.targetHighlightLocation });
-        }
-      }, 150); // Slightly longer delay to be safe
     }
+
+    // Schedule initial render / React state update
+    // This ensures that even if setState doesn't trigger it due to no specific conditions being met,
+    // the React component still gets a chance to render and register with StateManager.
+    setTimeout(() => {
+      console.log('[KanbanView] onload (setTimeout): Triggering initial setReactState.');
+      this.setReactState({}); // Pass empty state to ensure it uses current view state
+    }, 50); // Small delay to allow other sync onload processes to complete
 
     this.register(
       this.containerEl.onWindowMigrated(() => {
         this.plugin.removeView(this);
         this.plugin.addView(this, this.data, this.isPrimary);
+        // Ensure React state is updated after migration as well
+        console.log('[KanbanView] onWindowMigrated: Triggering setReactState after addView.');
+        this.setReactState({});
       })
     );
 
@@ -462,6 +472,9 @@ export class KanbanView extends TextFileView implements HoverParent {
     if (shouldCallSetViewData) {
       console.log(`[KanbanView] setState: Triggering setViewData. Reason: ${reasonForSetViewData}`);
       this.setViewData(dataToSet, true);
+      // Ensure React component is rendered/updated after setViewData potentially re-initializes StateManager link
+      console.log('[KanbanView] setState: Calling setReactState({}) after setViewData.');
+      this.setReactState({});
     } else if (searchMatchProcessedInThisCall) {
       console.log(
         '[KanbanView] setState: Search related state change (e.g. cleared without data/border change), calling setReactState.'
@@ -508,13 +521,23 @@ export class KanbanView extends TextFileView implements HoverParent {
   }
 
   getViewState<K extends keyof KanbanViewSettings>(key: K) {
+    if (!this.file) return this.viewSettings[key]; // Or a more specific default if key implies one
     const stateManager = this.plugin.stateManagers.get(this.file);
+    if (!stateManager) {
+      // console.warn(`[KanbanView] getViewState: StateManager not found for file: ${this.file.path}. Returning viewSettings only for key: ${String(key)}`);
+      return this.viewSettings[key]; // Fallback to local viewSettings or undefined
+    }
     const settingVal = stateManager.getSetting(key);
     return this.viewSettings[key] ?? settingVal;
   }
 
   useViewState<K extends keyof KanbanViewSettings>(key: K) {
+    if (!this.file) return this.viewSettings[key];
     const stateManager = this.plugin.getStateManager(this.file);
+    if (!stateManager) {
+      // console.warn(`[KanbanView] useViewState: StateManager not found for file: ${this.file.path}. Returning viewSettings only for key: ${String(key)}`);
+      return this.viewSettings[key];
+    }
     const settingVal = stateManager.useSetting(key);
     return this.viewSettings[key] ?? settingVal;
   }
@@ -527,7 +550,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       );
       return <div style={{ padding: '20px', textAlign: 'center' }}>Loading Kanban board...</div>;
     }
-    return <Kanban stateManager={stateManager} view={this} />;
+    return <Kanban stateManager={stateManager} view={this} reactState={this._reactState || {}} />;
   }
 
   getBoardSettings() {
@@ -821,6 +844,7 @@ export class KanbanView extends TextFileView implements HoverParent {
     const board = this.getBoard();
     if (!board) {
       console.warn('[KanbanView] setReactState: Board data not available. Aborting render.');
+      this._isPendingInitialRender = true;
       if (this.file) {
         console.log(
           '[KanbanView] setReactState: Board data null, attempting to trigger data load via stateManager.'
@@ -828,6 +852,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       }
       return;
     }
+    this._isPendingInitialRender = false;
 
     const settings = board.data?.settings; // Settings are on board.data.settings
 
@@ -846,6 +871,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         '[KanbanView] setReactState: CRITICAL - StateManager instance from plugin.stateManagers.get(this.file) is null/undefined just before rendering Kanban component. Aborting render. File:',
         this.file?.path
       );
+      this._isPendingInitialRender = true;
       // Attempt to log the state of the stateManagers map
       if (this.plugin.stateManagers) {
         console.log(
