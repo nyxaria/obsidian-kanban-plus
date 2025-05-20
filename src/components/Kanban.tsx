@@ -1,9 +1,13 @@
 import animateScrollTo from 'animated-scroll-to';
 import classcat from 'classcat';
+import EventEmitter from 'eventemitter3';
 import update from 'immutability-helper';
+import { App, TFile } from 'obsidian';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { KanbanView } from 'src/KanbanView';
+import { KanbanViewSettings } from 'src/Settings';
 import { StateManager } from 'src/StateManager';
+import { Board, Item, Lane } from 'src/components/types';
 import { useIsAnythingDragging } from 'src/dnd/components/DragOverlay';
 import { ScrollContainer } from 'src/dnd/components/ScrollContainer';
 import { SortPlaceholder } from 'src/dnd/components/SortPlaceholder';
@@ -14,6 +18,7 @@ import { useDebounce } from 'use-debounce';
 
 import { DndScope } from '../dnd/components/Scope';
 import { getBoardModifiers } from '../helpers/boardModifiers';
+import KanbanPlugin from '../main';
 import { frontmatterKey } from '../parsers/common';
 import { Icon } from './Icon/Icon';
 import { Lanes } from './Lane/Lane';
@@ -30,6 +35,16 @@ interface KanbanProps {
   stateManager: StateManager;
   view: KanbanView;
   reactState: any;
+  plugin: KanbanPlugin;
+  settings: KanbanViewSettings;
+  board: Board | null;
+  app: App;
+  archivedCount: number;
+  file: TFile;
+  setReactState: (newState: any) => void;
+  emitter: EventEmitter;
+  dispatch: (...args: any[]) => void;
+  onwardsNavigate: (path: string, payload: any) => void;
 }
 
 function getCSSClass(frontmatter: Record<string, any>): string[] {
@@ -48,7 +63,21 @@ function getCSSClass(frontmatter: Record<string, any>): string[] {
   return classes;
 }
 
-export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
+export const Kanban = ({
+  view,
+  stateManager,
+  reactState,
+  plugin,
+  settings,
+  board,
+  app,
+  archivedCount,
+  file,
+  setReactState,
+  emitter,
+  dispatch,
+  onwardsNavigate,
+}: KanbanProps) => {
   if (!stateManager) {
     console.warn('[Kanban Component] StateManager is not available. Aborting render.');
     return null;
@@ -57,7 +86,7 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
   const dateColorsFromHook = stateManager.useSetting('date-colors');
   const tagColorsFromHook = stateManager.useSetting('tag-colors');
 
-  const [boardData, setBoardData] = useState<Board | null>(stateManager.state);
+  const [boardData, setBoardData] = useState<Board | null>(board);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -66,7 +95,7 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
   const searchRef = useRef<HTMLInputElement>(null);
   const [cancelEditCounter, setCancelEditCounter] = useState(0);
 
-  const filePath = stateManager.file.path;
+  const filePath = file.path;
   const dateColors = dateColorsFromHook || [];
   const tagColors = tagColorsFromHook || [];
   const boardModifiers = getBoardModifiers(view, stateManager);
@@ -97,18 +126,20 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
   }, []);
 
   const onNewLane = useCallback(
-    (data: Partial<LaneData>) => {
-      boardModifiers.addLane(
-        stateManager.parser.getDefaultLaneData(data.title, boardData.children.length)
-      );
-      closeLaneForm();
+    (data: Partial<Lane>) => {
+      if (boardData?.children) {
+        boardModifiers.addLane(
+          stateManager.parser.getDefaultLaneData(data.title, boardData.children.length)
+        );
+        closeLaneForm();
+      }
     },
-    [boardData, boardModifiers, closeLaneForm]
+    [boardData, boardModifiers, closeLaneForm, stateManager.parser]
   );
 
   useEffect(() => {
-    const handler = (state: Board) => {
-      setBoardData(state);
+    const handler = (newState: Board) => {
+      setBoardData(newState);
     };
 
     stateManager.stateReceivers.push(handler);
@@ -126,24 +157,24 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
       console.log(
         `[Kanban Component] useEffect: Relevant condition met (${reason}). Calling view.setReactState({}).`
       );
-      view.setReactState({});
+      setReactState({});
     }
-  }, [boardData, view, view.pendingHighlightScroll, view.currentSearchMatch]);
+  }, [boardData, view, view.pendingHighlightScroll, view.currentSearchMatch, setReactState]);
 
   useEffect(() => {
     const handleCancelEdits = () => {
       console.log('[Kanban Component] Received "cancelAllCardEdits" event. Incrementing counter.');
       setCancelEditCounter((c) => c + 1);
     };
-    view.emitter.on('cancelAllCardEdits', handleCancelEdits);
+    emitter.on('cancelAllCardEdits', handleCancelEdits);
     return () => {
-      view.emitter.off('cancelAllCardEdits', handleCancelEdits);
+      emitter.off('cancelAllCardEdits', handleCancelEdits);
     };
-  }, [view.emitter]);
+  }, [emitter]);
 
   useEffect(() => {
-    view.emitter.on('showLaneForm', showLaneForm);
-    view.emitter.on('hotkey', ({ commandId, data }) => {
+    emitter.on('showLaneForm', showLaneForm);
+    emitter.on('hotkey', ({ commandId, data }) => {
       switch (commandId) {
         case 'editor:open-search':
           setIsSearching(true);
@@ -160,10 +191,10 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
       }
     });
     return () => {
-      view.emitter.off('showLaneForm', showLaneForm);
-      view.emitter.off('hotkey');
+      emitter.off('showLaneForm', showLaneForm);
+      emitter.off('hotkey');
     };
-  }, [view.emitter]);
+  }, [emitter, showLaneForm]);
 
   const kanbanContext = useMemo(() => {
     return {
@@ -172,7 +203,7 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
       boardModifiers,
       filePath,
     };
-  }, [view, stateManager, boardModifiers, filePath, dateColors, tagColors]);
+  }, [view, stateManager, boardModifiers, filePath]);
 
   const html5DragHandlers = createHTMLDndHandlers(stateManager);
 
@@ -218,7 +249,7 @@ export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
       searchValue.search(view.initialSearchQuery, true);
       view.initialSearchQuery = undefined;
     }
-  }, [view, searchValue.search]); // searchValue.search dependency is important
+  }, [view, searchValue.search]);
 
   return (
     <DndScope id={view.id}>

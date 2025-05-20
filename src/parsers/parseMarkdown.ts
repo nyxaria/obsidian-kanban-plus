@@ -184,12 +184,15 @@ export function parseMarkdown(stateManager: StateManager, md: string) {
 
   stateManager.compileSettings(settings);
 
+  const extensions = [frontmatter(['yaml']), ...getExtensions(stateManager)];
+  const mdastExtensions = [frontmatterFromMarkdown(['yaml']), ...getMdastExtensions(stateManager)];
+
   return {
     settings,
     frontmatter: fileFrontmatter,
     ast: fromMarkdown(md, {
-      extensions: [frontmatter(['yaml']), ...getExtensions(stateManager)],
-      mdastExtensions: [frontmatterFromMarkdown(['yaml']), ...getMdastExtensions(stateManager)],
+      extensions: extensions,
+      mdastExtensions: mdastExtensions,
     }),
   };
 }

@@ -29,21 +29,22 @@ export class StateManager {
 
   constructor(
     app: App,
-    initialView: KanbanView,
-    initialData: string,
+    initialViewForFileContext: KanbanView,
     onEmpty: () => void,
     getGlobalSettings: () => KanbanSettings
   ) {
     this.app = app;
-    this.file = initialView.file;
+    this.file = initialViewForFileContext.file;
     this.onEmpty = onEmpty;
     this.getGlobalSettings = getGlobalSettings;
     this.parser = new ListFormat(this);
 
-    this.registerView(initialView, initialData, true);
+    console.log(
+      `[StateManager] Constructor completed for ${this.file?.path}. Initial parsing deferred to plugin.addView.`
+    );
   }
 
-  getAView(): KanbanView {
+  getAView(): KanbanView | undefined {
     return this.viewSet.values().next().value;
   }
 
@@ -59,13 +60,59 @@ export class StateManager {
     // This helps delay blocking the UI until the the loading indicator is displayed
     await new Promise((res) => activeWindow.setTimeout(res, 10));
 
-    if (shouldParseData) {
+    // If state is not initialized, we MUST parse data or create a new board,
+    // regardless of the incoming shouldParseData flag.
+    if (!this.state || shouldParseData) {
+      console.log(
+        `[StateManager] registerView: Initializing/Re-initializing board. Has existing state: ${!!this
+          .state}, shouldParseData: ${shouldParseData}`
+      );
       await this.newBoard(view, data);
     } else {
+      // This branch is taken if this.state exists AND shouldParseData is false.
+      console.log(
+        `[StateManager] registerView: Using existing board state for prerender. Board ID: ${this.state?.id}`
+      );
+      // this.state is guaranteed to be non-null here.
       await view.prerender(this.state);
     }
 
-    view.populateViewState(this.state.data.settings);
+    // Defensive check, though newBoard/setError should guarantee state and state.data.settings
+    if (!this.state) {
+      this.setError(
+        new Error('[StateManager] registerView: State is unexpectedly null after board processing.')
+      );
+    } else if (!this.state.data) {
+      this.setError(
+        new Error(
+          '[StateManager] registerView: State.data is unexpectedly null after board processing.'
+        )
+      );
+    } else if (!this.state.data.settings) {
+      // setError would have been called by newBoard if settings were missing after parsing.
+      // However, if newBoard itself had a more fundamental issue before setting error state,
+      // this provides a fallback.
+      this.setError(
+        new Error(
+          '[StateManager] registerView: State.data.settings is unexpectedly null after board processing.'
+        )
+      );
+    }
+
+    // Assuming newBoard or setError (if newBoard fails) correctly initializes this.state and this.state.data.settings
+    if (this.state && this.state.data && this.state.data.settings) {
+      view.populateViewState(this.state.data.settings);
+    } else {
+      console.error(
+        '[StateManager] registerView: Cannot populate view state because state, state.data, or state.data.settings is null. This is a critical error.'
+      );
+      // Potentially show an error to the user through the view if possible
+      if (view && typeof view.showNotice === 'function') {
+        view.showNotice(
+          'Critical error: Kanban board state could not be initialized. Please report this issue.'
+        );
+      }
+    }
   }
 
   unregisterView(view: KanbanView) {
@@ -138,10 +185,20 @@ export class StateManager {
   setState(state: Board | ((board: Board) => Board), shouldSave: boolean = true) {
     try {
       const oldSettings = this.state?.data.settings;
-      const newState = typeof state === 'function' ? state(this.state) : state;
-      const newSettings = newState?.data.settings;
+      const incomingState = typeof state === 'function' ? state(this.state) : state;
 
-      if (oldSettings && newSettings && shouldRefreshBoard(oldSettings, newSettings)) {
+      console.log(
+        `[StateManager] setState: Preparing to set state for file ID: ${this.file?.path}. Incoming board ID: ${incomingState?.id}`
+      );
+
+      const newSettings = incomingState?.data.settings;
+
+      if (
+        this.state &&
+        oldSettings &&
+        newSettings &&
+        shouldRefreshBoard(oldSettings, newSettings)
+      ) {
         this.state = update(this.state, {
           data: {
             settings: {
@@ -152,13 +209,16 @@ export class StateManager {
         this.compileSettings();
         this.state = this.parser.reparseBoard();
       } else {
-        this.state = newState;
+        this.state = incomingState;
         this.compileSettings();
       }
+      console.log(
+        `[StateManager] setState: State has been set. Current this.state.id: ${this.state?.id}, for SM file: ${this.file?.path}`
+      );
 
       this.viewSet.forEach((view) => {
         view.initHeaderButtons();
-        view.validatePreviewCache(newState);
+        view.validatePreviewCache(this.state);
       });
 
       if (shouldSave) {
@@ -346,17 +406,95 @@ export class StateManager {
     return board;
   }
 
-  setError(e: Error) {
-    this.setState(
-      update(this.state, {
+  setError(e: any) {
+    console.error('[StateManager] setError called:', e);
+    const errorToStore = {
+      description: e.message || 'Unknown error',
+      stack: e.stack || 'No stack trace available',
+      raw: e,
+    };
+
+    if (!this.state) {
+      console.warn(
+        '[StateManager] setError: this.state was null. Initializing minimal error state.'
+      );
+      this.state = {
+        id: this.file ? this.file.path : 'unknown-file',
+        children: [],
         data: {
-          errors: {
-            $push: [{ description: e.toString(), stack: e.stack }],
-          },
+          frontmatter: {},
+          settings: {},
+          errors: [errorToStore],
+          meta: {},
+          completedCounts: {},
+          filter: null,
         },
-      }),
-      false
-    );
+        type: 'board',
+      };
+    } else {
+      if (!this.state.data) {
+        console.warn(
+          '[StateManager] setError: this.state.data was null. Initializing data structure.'
+        );
+        this.state.data = {
+          frontmatter: {},
+          settings: {},
+          errors: [],
+          meta: {},
+          completedCounts: {},
+          filter: null,
+        };
+      }
+      if (!this.state.data.errors) {
+        this.state.data.errors = [];
+      }
+      // Ensure settings object exists if data object was just created or was incomplete
+      if (!this.state.data.settings) {
+        console.warn(
+          '[StateManager] setError: this.state.data.settings was null within an existing state.data. Initializing settings.'
+        );
+        this.state.data.settings = {};
+      }
+      if (this.state && this.state.data && this.state.data.errors) {
+        this.state.data.errors.push(errorToStore);
+      } else {
+        console.error(
+          '[StateManager] setError: Could not store error as state.data.errors is not available even after robust init.'
+        );
+        this.state = {
+          id: this.file ? this.file.path : 'unknown-error-state',
+          children: [],
+          data: {
+            errors: [errorToStore],
+            frontmatter: {},
+            settings: {},
+            meta: {},
+            completedCounts: {},
+            filter: null,
+          },
+          type: 'board',
+        };
+      }
+    }
+
+    try {
+      console.log(
+        '[StateManager] setError: Notifying stateReceivers about error state. Number of receivers:',
+        this.stateReceivers.length
+      );
+      this.stateReceivers.forEach((receiver) => {
+        if (typeof receiver === 'function') {
+          receiver(this.state);
+        } else {
+          console.warn('[StateManager] setError: Found non-function in stateReceivers:', receiver);
+        }
+      });
+    } catch (notificationError) {
+      console.error(
+        '[StateManager] setError: Error during stateReceiver notification:',
+        notificationError
+      );
+    }
   }
 
   onFileMetadataChange() {

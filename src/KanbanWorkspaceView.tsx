@@ -146,19 +146,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
               const fileContent = await props.plugin.app.vault.cachedRead(mdFile);
               const tempStateManager = new StateManager(
                 props.plugin.app,
-                {
-                  app: props.plugin.app,
-                  file: mdFile,
-                  getWindow: () => window,
-                  leaf: { view: {} },
-                  requestSave: () => {},
-                  onunload: () => {},
-                  prerender: async () => {},
-                  initHeaderButtons: () => {},
-                  validatePreviewCache: () => {},
-                  populateViewState: () => {},
-                } as any,
-                '',
+                { file: mdFile } as any,
                 () => {},
                 getGlobalSettingsForStateManager
               );

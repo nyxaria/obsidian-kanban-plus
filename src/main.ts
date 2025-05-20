@@ -66,6 +66,30 @@ export default class KanbanPlugin extends Plugin {
 
   isShiftPressed: boolean = false;
 
+  // Added properties
+  public archive: any = {
+    getArchive: (file: TFile) => {
+      // console.warn(`[KanbanPlugin] archive.getArchive called for ${file.path} - placeholder implementation.`);
+      return []; // Return empty array as a valid default
+    },
+  };
+  public dispatch: (...args: any[]) => void = (...args: any[]) => {
+    // console.warn('[KanbanPlugin] dispatch called - placeholder implementation.', args);
+  };
+
+  // Placeholder for onDbChange
+  public onDbChange(file: TFile, ...args: any[]) {
+    console.log(`[KanbanPlugin] onDbChange called for file: ${file?.path}`, args);
+    // Actual database change logic will go here
+  }
+
+  // Placeholder for onwardsNavigate
+  public onwardsNavigate(path: string, payload: any) {
+    console.log('[KanbanPlugin] onwardsNavigate called with path:', path, 'payload:', payload);
+    // Actual navigation logic will go here
+    // For example, using app.workspace.openLinkText or similar
+  }
+
   async loadSettings() {
     this.settings = Object.assign({}, await this.loadData());
   }
@@ -271,41 +295,87 @@ export default class KanbanPlugin extends Plugin {
     return state;
   }
 
-  addView(view: KanbanView, data: string, shouldParseData: boolean) {
+  async addView(view: KanbanView, data: string, shouldParseData: boolean) {
     const win = view.getWindow();
     const reg = this.windowRegistry.get(win);
 
-    if (!reg) return;
+    if (!reg) {
+      console.warn(`[KanbanPlugin] addView: No window registry found for window. View: ${view.id}`);
+      return; // Early exit if no window registry
+    }
     if (!reg.viewMap.has(view.id)) {
       reg.viewMap.set(view.id, view);
     }
 
     const file = view.file;
-    let stateManager = this.stateManagers.get(file);
+    if (!file) {
+      console.warn(
+        `[KanbanPlugin] addView: View ${view.id} has no file associated. Cannot get/create StateManager.`
+      );
+      return; // Early exit if no file
+    }
 
-    if (stateManager) {
-      stateManager.registerView(view, data, shouldParseData);
-    } else {
+    let stateManager = this.stateManagers.get(file);
+    let isNewStateManager = false;
+
+    if (!stateManager) {
+      console.log(`[KanbanPlugin] addView: Creating new StateManager for ${file.path}`);
       stateManager = new StateManager(
         this.app,
-        view, // Pass the primary view first
-        data,
+        view, // Pass the view for file context
+        // data, // Data is no longer passed to constructor for parsing
         () => this.stateManagers.delete(file),
         () => this.settings
       );
       this.stateManagers.set(file, stateManager);
-      // For a new StateManager, it calls registerView on itself internally for the initial view.
+      isNewStateManager = true;
+      // The new SM constructor (once fixed) won't call registerView.
+      // So, we call it here explicitly and await it.
+    } else {
+      console.log(`[KanbanPlugin] addView: Using existing StateManager for ${file.path}`);
+    }
+
+    // Always call and await registerView here to ensure state is ready.
+    // For a new SM, this is its first parsing. For an existing one, it re-registers/re-parses if needed.
+    if (stateManager) {
+      try {
+        console.log(
+          `[KanbanPlugin] addView: Calling await stateManager.registerView for ${file.path}. shouldParseData: ${shouldParseData}`
+        );
+        await stateManager.registerView(view, data, shouldParseData);
+        console.log(
+          `[KanbanPlugin] addView: stateManager.registerView completed for ${file.path}. StateManager state ID: ${stateManager.state?.id}`
+        );
+      } catch (e) {
+        console.error(
+          `[KanbanPlugin] addView: Error during stateManager.registerView for ${file.path}:`,
+          e
+        );
+        stateManager.setError(e); // Ensure error is set on SM
+      }
+    } else {
+      // This case should ideally not be reached if SM creation was successful
+      console.error(
+        `[KanbanPlugin] addView: StateManager is unexpectedly null for ${file.path} after get/create.`
+      );
+      return;
     }
 
     reg.viewStateReceivers.forEach((fn) => fn(this.getKanbanViews(win)));
 
     // Check if the view was pending an initial render because StateManager wasn't ready
+    // Now, stateManager.state should be populated (or be an error state) by the awaited registerView.
     if ((view as any)._isPendingInitialRender && stateManager?.state) {
       console.log(
-        `[KanbanPlugin] addView: View ${view.id} was pending initial render. Triggering setReactState.`
+        `[KanbanPlugin] addView: View ${view.id} was pending initial render and SM state is now available. Triggering setReactState.`
       );
       (view as any)._isPendingInitialRender = false; // Clear the flag
       view.setReactState({}); // Trigger the render
+    } else if ((view as any)._isPendingInitialRender && !stateManager?.state) {
+      console.warn(
+        `[KanbanPlugin] addView: View ${view.id} was pending initial render, but SM state is STILL null/undefined after awaited registerView. Path: ${stateManager?.file?.path}`
+      );
+      // Not clearing _isPendingInitialRender here, as SM might still be in an error state from parsing
     }
   }
 

@@ -19,7 +19,7 @@ export function DndContext({ win, children, onDrop }: DndContextProps) {
     return new DndManager(win, (dragEntity: Entity, dropEntity: Entity) => {
       return onDropRef.current(dragEntity, dropEntity);
     });
-  }, []);
+  }, [win]);
 
   useEffect(() => {
     return () => {
