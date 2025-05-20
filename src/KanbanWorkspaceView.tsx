@@ -5,7 +5,20 @@ import {
   Root as MdastRoot,
 } from 'mdast';
 import moment from 'moment';
-import { FileView, ItemView, TFile, TFolder, WorkspaceLeaf, normalizePath } from 'obsidian';
+import {
+  App,
+  FileView,
+  ItemView,
+  Menu,
+  MenuItem,
+  Modal,
+  Notice,
+  Setting,
+  TFile,
+  TFolder,
+  WorkspaceLeaf,
+  normalizePath,
+} from 'obsidian';
 import { render, unmountComponentAtNode } from 'preact/compat';
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 
@@ -30,6 +43,8 @@ interface WorkspaceCard {
   blockId?: string;
   assignedMembers?: string[];
   date?: moment.Moment;
+  sourceStartLine?: number;
+  checked?: boolean;
 }
 
 export const KANBAN_WORKSPACE_VIEW_TYPE = 'kanban-workspace';
@@ -52,6 +67,67 @@ async function recursivelyGetAllMdFilesInFolder(folder: TFolder): Promise<TFile[
 function getHeadingText(node: MdastHeading): string {
   return node.children.map((child) => ('value' in child ? child.value : '')).join('');
 }
+
+// Utility to escape strings for regex
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&'); // $& means the whole matched string
+}
+
+// --- Simple Modal for Date Input ---
+class DateInputModal extends Modal {
+  currentDate: string; // YYYY-MM-DD format
+  onSubmit: (newDate: string | null) => void;
+
+  constructor(app: App, currentDate: string, onSubmit: (newDate: string | null) => void) {
+    super(app);
+    this.currentDate = currentDate;
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl('h2', { text: 'Set/Change Due Date' });
+
+    let dateStrFromPicker: string = this.currentDate; // Store date from picker
+
+    new Setting(contentEl)
+      .setName('Due Date')
+      .setDesc('Select a date, or clear the input to remove the due date.')
+      .addMomentFormat((momentFormat) => {
+        // Configure the moment format component
+        momentFormat
+          .setPlaceholder('YYYY-MM-DD')
+          .setValue(this.currentDate) // Expects YYYY-MM-DD for initial value if set
+          .onChange((value: string) => {
+            dateStrFromPicker = value; // Update on change
+          });
+      });
+
+    new Setting(contentEl)
+      .addButton((btn) =>
+        btn
+          .setButtonText('Save')
+          .setCta()
+          .onClick(() => {
+            this.close();
+            this.onSubmit(dateStrFromPicker);
+          })
+      )
+      .addButton((btn) =>
+        btn.setButtonText('Cancel').onClick(() => {
+          this.close();
+          this.onSubmit(null); // Indicate cancellation
+        })
+      );
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+// --- End Date Input Modal ---
 
 // Basic React component for the workspace view
 function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
@@ -364,6 +440,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                           laneTitle: currentLaneTitle,
                           blockId: itemData.blockId,
                           date: itemData.metadata?.date,
+                          sourceStartLine: listItemNode.position?.start.line,
+                          checked: itemData.checked,
                         });
                       }
                     }
@@ -582,6 +660,482 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
       }
     },
     [props.plugin]
+  );
+
+  const handleRowContextMenu = useCallback(
+    async (event: MouseEvent, card: WorkspaceCard) => {
+      event.preventDefault();
+      const menu = new Menu();
+
+      menu.addItem((item) =>
+        item
+          .setTitle('Set/Change Due Date')
+          .setIcon('calendar-clock')
+          .onClick(() => {
+            // Note: Removed async here as modal handles async part
+            new DateInputModal(
+              props.plugin.app,
+              card.date ? card.date.format('DD-MM-YYYY') : moment().format('DD-MM-YYYY'),
+              async (newDateStr) => {
+                if (newDateStr === null) return; // User cancelled modal
+
+                // The dateStrFromPicker (newDateStr) from MomentFormatComponent might be in display format.
+                // We need to parse it back to YYYY-MM-DD for consistent internal handling and before re-saving.
+                // However, for this iteration, we'll assume the settings for date-format will correctly parse it if it's a valid date string.
+                // A more robust solution might involve knowing the display format used by MomentFormatComponent.
+
+                let newMomentDate: moment.Moment | undefined = undefined;
+                if (newDateStr.trim() !== '') {
+                  // Try parsing with plugin's date-format first, then with YYYY-MM-DD as a fallback for direct input.
+                  const pluginDateFormat = props.plugin.settings['date-format'] || 'DD-MM-YYYY';
+                  let parsedDate = moment(newDateStr.trim(), pluginDateFormat, true); // Strict parsing
+                  if (!parsedDate.isValid()) {
+                    parsedDate = moment(newDateStr.trim(), 'DD-MM-YYYY', true); // Fallback for direct YYYY-MM-DD input
+                  }
+
+                  if (!parsedDate.isValid()) {
+                    new Notice(
+                      'Invalid date format. Please use a valid date recognized by your settings or DD-MM-YYYY.'
+                    );
+                    return;
+                  }
+                  newMomentDate = parsedDate;
+                }
+
+                // 1. Update local state for immediate feedback
+                setFilteredCards((prevCards) =>
+                  prevCards.map((c) => (c.id === card.id ? { ...c, date: newMomentDate } : c))
+                );
+
+                // 2. Propagate change to source file (logic remains the same)
+                const targetFile = props.plugin.app.vault.getAbstractFileByPath(
+                  card.sourceBoardPath
+                ) as TFile;
+                if (!targetFile || !(targetFile instanceof TFile)) {
+                  new Notice(
+                    `Error: Could not find file ${card.sourceBoardPath} or it is a folder.`
+                  );
+                  return;
+                }
+
+                try {
+                  let fileContent = await props.plugin.app.vault.cachedRead(targetFile);
+                  const dateFormat = props.plugin.settings['date-format'] || 'DD-MM-YYYY';
+                  const dateTrigger = props.plugin.settings['date-trigger'] || '@';
+
+                  const newDateStringForMd = newMomentDate
+                    ? `${dateTrigger}{${newMomentDate.format(dateFormat)}}`
+                    : '';
+
+                  const pluginDatePattern = new RegExp(
+                    `(?:^|\\s)${escapeRegExp(dateTrigger)}\\{[^}]+\\}(?:\\s|$)`,
+                    'g'
+                  );
+                  const wikilinkDatePattern = /\s*\[\[\d{4}-\d{2}-\d{2}\]\]\s*/g;
+                  const taskPluginDatePattern = /\s*📅\s*\d{4}-\d{2}-\d{2}\s*/g;
+
+                  if (card.blockId) {
+                    let foundAndReplaced = false;
+                    const lines = fileContent.split('\n');
+                    const blockIdSuffix = `^${card.blockId}`;
+
+                    for (let i = 0; i < lines.length; i++) {
+                      if (lines[i].includes(blockIdSuffix)) {
+                        let line = lines[i];
+                        line = line
+                          .replace(pluginDatePattern, ' ')
+                          .replace(wikilinkDatePattern, ' ')
+                          .replace(taskPluginDatePattern, ' ');
+
+                        const blockIdIndex = line.lastIndexOf(blockIdSuffix);
+                        const mainContent = line.substring(0, blockIdIndex).trim();
+                        const blockIdPart = line.substring(blockIdIndex);
+
+                        if (newDateStringForMd) {
+                          lines[i] = `${mainContent} ${newDateStringForMd} ${blockIdPart}`.trim();
+                        } else {
+                          lines[i] = `${mainContent} ${blockIdPart}`.trim();
+                        }
+                        lines[i] = lines[i].replace(/\s+/g, ' ').trim();
+                        foundAndReplaced = true;
+                        break;
+                      }
+                    }
+
+                    if (foundAndReplaced) {
+                      fileContent = lines.join('\n');
+                      await props.plugin.app.vault.modify(targetFile, fileContent);
+                      new Notice(`Due date for "${card.title}" updated in ${targetFile.basename}.`);
+                    } else {
+                      new Notice(
+                        `Could not find block ID ${card.blockId} to update date. Date updated in this view only.`
+                      );
+                    }
+                  } else if (card.sourceStartLine !== undefined) {
+                    // Fallback to line number if blockId is not available
+                    new Notice(
+                      'Attempting to update by line number (no block ID). This is less reliable.'
+                    );
+                    const lines = fileContent.split('\n');
+                    const targetLineIndex = card.sourceStartLine - 1; // Adjust for 0-based array
+
+                    if (targetLineIndex >= 0 && targetLineIndex < lines.length) {
+                      let line = lines[targetLineIndex];
+
+                      // Basic verification: check if the line still roughly contains the card title.
+                      // This is a simple heuristic and might not be foolproof.
+                      const titleSnippet =
+                        card.title.length > 20 ? card.title.substring(0, 20) : card.title;
+                      if (!line.toLowerCase().includes(titleSnippet.toLowerCase())) {
+                        new Notice(
+                          `Line content at ${card.sourceStartLine} seems to have changed. Date updated in this view only.`
+                        );
+                        // Optionally, clear newMomentDate here if we decide not to update local state on verification failure
+                        // For now, local state is updated, but file isn't.
+                        return; // Abort file modification
+                      }
+
+                      line = line
+                        .replace(pluginDatePattern, ' ')
+                        .replace(wikilinkDatePattern, ' ')
+                        .replace(taskPluginDatePattern, ' ');
+
+                      if (newDateStringForMd) {
+                        lines[targetLineIndex] = `${line.trim()} ${newDateStringForMd}`.trim();
+                      } else {
+                        lines[targetLineIndex] = line.trim(); // Just the cleaned line if date is cleared
+                      }
+                      lines[targetLineIndex] = lines[targetLineIndex].replace(/\s+/g, ' ').trim();
+
+                      fileContent = lines.join('\n');
+                      await props.plugin.app.vault.modify(targetFile, fileContent);
+                      new Notice(
+                        `Due date for "${card.title}" updated by line number in ${targetFile.basename}.`
+                      );
+                    } else {
+                      new Notice(
+                        `Invalid source line number (${card.sourceStartLine}). Date updated in this view only.`
+                      );
+                    }
+                  } else {
+                    new Notice(
+                      'Date update in source file requires a block ID or a valid source line. Date updated in this view only.'
+                    );
+                  }
+                } catch (e) {
+                  console.error('Error updating card date in source file:', e);
+                  new Notice('Error updating card date. See console.');
+                }
+              }
+            ).open();
+          })
+      );
+
+      // --- Assign Members ---
+      const rawTeamMembers = props.plugin.settings.teamMembers || [];
+      console.log('[WorkspaceView] rawTeamMembers', rawTeamMembers);
+      // Filter for actual, non-empty string members
+      const validTeamMembers = rawTeamMembers.filter(
+        (member) => typeof member === 'string' && member.trim() !== ''
+      );
+
+      if (validTeamMembers.length > 0) {
+        console.log('[WorkspaceView] validTeamMembers', validTeamMembers);
+        menu.addItem((item) => {
+          item.setTitle('Assign/Unassign Members').setIcon('users');
+
+          const memberSubMenu = (item as any).setSubmenu(); // Use (item as any) to call setSubmenu and assign its result
+
+          validTeamMembers.forEach((member) => {
+            console.log('[WorkspaceView] member', member);
+            memberSubMenu.addItem((subItem: MenuItem) => {
+              // Add items to the menu returned by setSubmenu
+              console.log(
+                '[WorkspaceView] subItem',
+                subItem,
+                member,
+                card.assignedMembers?.includes(member) || false
+              );
+              subItem
+                .setTitle(member)
+                .setChecked(card.assignedMembers?.includes(member) || false)
+                .onClick(async () => {
+                  const isAssigned = card.assignedMembers?.includes(member) || false;
+                  let updatedMembers = card.assignedMembers ? [...card.assignedMembers] : [];
+
+                  if (isAssigned) {
+                    updatedMembers = updatedMembers.filter((m) => m !== member);
+                    console.log('[WorkspaceView] updatedMembers isAssigned', updatedMembers);
+                  } else {
+                    updatedMembers.push(member);
+                    console.log('[WorkspaceView] updatedMembers else', updatedMembers);
+                  }
+
+                  // 1. Update local state
+                  setFilteredCards((prevCards) =>
+                    prevCards.map((c) =>
+                      c.id === card.id ? { ...c, assignedMembers: updatedMembers } : c
+                    )
+                  );
+
+                  // 2. Update source file
+                  const targetFile = props.plugin.app.vault.getAbstractFileByPath(
+                    card.sourceBoardPath
+                  ) as TFile;
+                  if (!targetFile || !(targetFile instanceof TFile)) {
+                    new Notice(
+                      `Error: Could not find file ${card.sourceBoardPath} or it is a folder.`
+                    );
+                    return;
+                  }
+
+                  try {
+                    let fileContent = await props.plugin.app.vault.cachedRead(targetFile);
+                    const lines = fileContent.split('\n');
+                    let foundAndReplaced = false;
+
+                    const memberAssignmentPrefix =
+                      props.plugin.settings.memberAssignmentPrefix || '@@';
+
+                    const updateLineWithMembers = (
+                      line: string,
+                      currentBlockId?: string
+                    ): string => {
+                      // Remove all existing member tags (@@member)
+                      let cleanedLine = line
+                        .replace(
+                          new RegExp(`${escapeRegExp(memberAssignmentPrefix)}[^\\s^]+`, 'g'),
+                          ''
+                        )
+                        .trim();
+
+                      // Remove block ID if present to re-append it later
+                      if (currentBlockId) {
+                        cleanedLine = cleanedLine
+                          .replace(new RegExp(`\\s*^${escapeRegExp(currentBlockId)}$`), '')
+                          .trim();
+                      }
+
+                      const membersString = updatedMembers
+                        .map((m) => `${memberAssignmentPrefix}${m}`)
+                        .join(' ');
+
+                      if (currentBlockId) {
+                        return `${cleanedLine} ${membersString} ^${currentBlockId}`
+                          .replace(/\s+/g, ' ')
+                          .trim();
+                      } else {
+                        return `${cleanedLine} ${membersString}`.replace(/\s+/g, ' ').trim();
+                      }
+                    };
+
+                    if (card.blockId) {
+                      const blockIdSuffix = `^${card.blockId}`;
+                      for (let i = 0; i < lines.length; i++) {
+                        if (lines[i].endsWith(blockIdSuffix)) {
+                          lines[i] = updateLineWithMembers(lines[i], card.blockId);
+                          foundAndReplaced = true;
+                          break;
+                        }
+                      }
+                    } else if (card.sourceStartLine) {
+                      const targetLineIndex = card.sourceStartLine - 1;
+                      if (targetLineIndex >= 0 && targetLineIndex < lines.length) {
+                        const titleSnippet =
+                          card.title.length > 20 ? card.title.substring(0, 20) : card.title;
+                        if (
+                          lines[targetLineIndex].toLowerCase().includes(titleSnippet.toLowerCase())
+                        ) {
+                          lines[targetLineIndex] = updateLineWithMembers(lines[targetLineIndex]);
+                          foundAndReplaced = true;
+                        } else {
+                          new Notice(
+                            `Line content at ${card.sourceStartLine} seems to have changed for "${card.title}". Members updated in this view only.`
+                          );
+                        }
+                      }
+                    }
+
+                    if (foundAndReplaced) {
+                      fileContent = lines.join('\n');
+                      await props.plugin.app.vault.modify(targetFile, fileContent);
+                      new Notice(`Members for "${card.title}" updated in ${targetFile.basename}.`);
+                    } else if (!card.blockId && !card.sourceStartLine) {
+                      new Notice(
+                        `Cannot update members for "${card.title}": No block ID or source line. Updated in view only.`
+                      );
+                    } else if (card.blockId && !foundAndReplaced) {
+                      new Notice(
+                        `Could not find block ID ${card.blockId} for "${card.title}" to update members. Updated in view only.`
+                      );
+                    } else if (
+                      card.sourceStartLine &&
+                      !foundAndReplaced &&
+                      !lines[card.sourceStartLine - 1]
+                        ?.toLowerCase()
+                        .includes(
+                          (card.title.length > 20
+                            ? card.title.substring(0, 20)
+                            : card.title
+                          ).toLowerCase()
+                        )
+                    ) {
+                      // Already handled by the specific notice inside the sourceStartLine block
+                    } else {
+                      new Notice(
+                        `Could not update members for "${card.title}" in source file. Updated in view only.`
+                      );
+                    }
+                  } catch (e) {
+                    console.error('Error updating card members in source file:', e);
+                    new Notice('Error updating members. See console.');
+                  }
+                });
+            });
+          });
+          console.log('[WorkspaceView] memberSubMenu HERE', memberSubMenu);
+        });
+      }
+
+      // --- End Assign Members ---
+
+      // --- Mark as Done/Undone ---
+      menu.addItem((item) => {
+        const isDone = card.checked || false;
+        item
+          .setTitle(isDone ? 'Mark as Undone' : 'Mark as Done')
+          .setIcon(isDone ? 'check-square' : 'square') // Consider using 'check' and 'square' or similar
+          .onClick(async () => {
+            const newCheckedStatus = !isDone;
+
+            // 1. Update local state
+            setFilteredCards((prevCards) =>
+              prevCards.map((c) => (c.id === card.id ? { ...c, checked: newCheckedStatus } : c))
+            );
+
+            // 2. Update source file
+            const targetFile = props.plugin.app.vault.getAbstractFileByPath(
+              card.sourceBoardPath
+            ) as TFile;
+            if (!targetFile || !(targetFile instanceof TFile)) {
+              new Notice(`Error: Could not find file ${card.sourceBoardPath} or it is a folder.`);
+              // Revert local state if file not found? For now, local state is kept.
+              return;
+            }
+
+            try {
+              let fileContent = await props.plugin.app.vault.cachedRead(targetFile);
+              const lines = fileContent.split('\n');
+              let foundAndReplaced = false;
+
+              const taskRegex = /^(\s*)- \[(\s*|x|X|-|\/|>)\](.*)/; // Matches task prefix
+
+              const updateLineCheckedStatus = (line: string): string => {
+                const match = line.match(taskRegex);
+                if (match) {
+                  const prefix = match[1]; // Leading whitespace
+                  const currentMarker = match[2];
+                  const restOfLine = match[3];
+                  const newMarker = newCheckedStatus ? 'x' : ' ';
+                  // Ensure there's always a space after the checkbox marker if restOfLine isn't empty
+                  return `${prefix}- [${newMarker}]${restOfLine.startsWith(' ') ? restOfLine : ` ${restOfLine.trimStart()}`}`.trimEnd();
+                }
+                return line; // Should not happen if we found it via blockId/line correctly
+              };
+
+              if (card.blockId) {
+                const blockIdSuffix = `^${card.blockId}`;
+                for (let i = 0; i < lines.length; i++) {
+                  if (lines[i].endsWith(blockIdSuffix)) {
+                    if (taskRegex.test(lines[i])) {
+                      lines[i] = updateLineCheckedStatus(lines[i]);
+                      foundAndReplaced = true;
+                    } else {
+                      new Notice(
+                        `Line with block ID ${card.blockId} is not a task. Cannot mark as done/undone.`
+                      );
+                    }
+                    break;
+                  }
+                }
+              } else if (card.sourceStartLine) {
+                const targetLineIndex = card.sourceStartLine - 1;
+                if (targetLineIndex >= 0 && targetLineIndex < lines.length) {
+                  const lineToUpdate = lines[targetLineIndex];
+                  const titleSnippet =
+                    card.title.length > 20 ? card.title.substring(0, 20) : card.title;
+                  if (lineToUpdate.toLowerCase().includes(titleSnippet.toLowerCase())) {
+                    if (taskRegex.test(lineToUpdate)) {
+                      lines[targetLineIndex] = updateLineCheckedStatus(lineToUpdate);
+                      foundAndReplaced = true;
+                    } else {
+                      new Notice(
+                        `Line ${card.sourceStartLine} is not a task. Cannot mark as done/undone.`
+                      );
+                    }
+                  } else {
+                    new Notice(
+                      `Line content at ${card.sourceStartLine} seems to have changed for "${card.title}". Done status updated in view only.`
+                    );
+                  }
+                }
+              }
+
+              if (foundAndReplaced) {
+                fileContent = lines.join('\n');
+                await props.plugin.app.vault.modify(targetFile, fileContent);
+                new Notice(
+                  `"${card.title}" marked as ${newCheckedStatus ? 'Done' : 'Undone'} in ${targetFile.basename}.`
+                );
+              } else if (!card.blockId && !card.sourceStartLine) {
+                new Notice(
+                  `Cannot update done status for "${card.title}": No block ID or source line. Updated in view only.`
+                );
+              } else if (card.blockId && !foundAndReplaced) {
+                // This case is handled by the specific notice if line is not a task
+                if (!lines.find((line) => line.endsWith(`^${card.blockId}`))) {
+                  new Notice(
+                    `Could not find block ID ${card.blockId} for "${card.title}" to update done status. Updated in view only.`
+                  );
+                }
+              } else if (card.sourceStartLine && !foundAndReplaced) {
+                // This case is also handled by specific notices (line changed or not a task)
+                if (
+                  !lines[card.sourceStartLine - 1]
+                    ?.toLowerCase()
+                    .includes(
+                      (card.title.length > 20
+                        ? card.title.substring(0, 20)
+                        : card.title
+                      ).toLowerCase()
+                    )
+                ) {
+                  // Already handled by specific notice
+                } else if (!taskRegex.test(lines[card.sourceStartLine - 1])) {
+                  // Already handled by specific notice
+                }
+              } else {
+                new Notice(
+                  `Could not update done status for "${card.title}" in source file. Updated in view only.`
+                );
+              }
+            } catch (e) {
+              console.error('Error updating card done status in source file:', e);
+              new Notice('Error updating done status. See console.');
+              // Optionally revert local state here too
+              setFilteredCards((prevCards) =>
+                prevCards.map(
+                  (c) => (c.id === card.id ? { ...c, checked: isDone } : c) // Revert to original status
+                )
+              );
+            }
+          });
+      });
+      // --- End Mark as Done/Undone ---
+
+      menu.showAtMouseEvent(event);
+    },
+    [props.plugin, setFilteredCards]
   );
 
   const handleSaveView = useCallback(async () => {
@@ -1337,6 +1891,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                   <tr
                     key={card.id}
                     onClick={() => handleRowClick(card)}
+                    onContextMenu={(e) => handleRowContextMenu(e, card)}
                     style={{ cursor: 'pointer' }}
                     onMouseEnter={(e) =>
                       (e.currentTarget.style.backgroundColor = 'var(--background-secondary-alt)')
