@@ -329,39 +329,58 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
         // Check if the view in the existing leaf is a KanbanView
         if (existingLeaf.view instanceof KanbanView) {
           console.log('[WorkspaceView] Existing leaf is KanbanView instance. Calling setState.');
-          (existingLeaf.view as KanbanView).setState(navigationState, { history: false });
+          // *** MODIFICATION HERE ***
+          const stateForExistingLeaf = {
+            file: card.sourceBoardPath, // Keep passing the file
+            eState: {
+              filePath: card.sourceBoardPath,
+              blockId: card.blockId,
+              cardTitle: !card.blockId ? card.title : undefined,
+              listName: !card.blockId ? card.laneTitle : undefined,
+              preventSetViewData: true, // Add this line
+            },
+          };
+          (existingLeaf.view as KanbanView).setState(stateForExistingLeaf, { history: false });
           console.log('[WorkspaceView] setState called on existing KanbanView instance.');
         } else if (existingLeaf.view.getViewType() === 'kanban') {
-          // Fallback check by view type string, useful if instanceof fails due to context issues
-          console.log(
-            '[WorkspaceView] Existing leaf type is "kanban" (by string). Attempting to call setState via casting.'
-          );
-          try {
-            (existingLeaf.view as unknown as KanbanView).setState(navigationState, {
-              history: false,
-            });
-            console.log(
-              '[WorkspaceView] setState call (unknown as KanbanView) attempted on existing KanbanView.'
-            );
-          } catch (e) {
-            console.error("[WorkspaceView] Error calling setState on view typed 'kanban':", e);
-          }
+          // ... (similar modification for the fallback cast) ...
+          const stateForExistingLeafFallback = {
+            file: card.sourceBoardPath,
+             eState: {
+              filePath: card.sourceBoardPath,
+              blockId: card.blockId,
+              cardTitle: !card.blockId ? card.title : undefined,
+              listName: !card.blockId ? card.laneTitle : undefined,
+              preventSetViewData: true, // Add this line
+            },
+          };
+          (existingLeaf.view as unknown as KanbanView).setState(stateForExistingLeafFallback, {
+            history: false,
+          });
+          // ...
         } else {
-          console.log(
-            `[WorkspaceView] Existing leaf is type '${existingLeaf.view.getViewType()}', not KanbanView. ` +
-              `Custom highlight/scroll state not passed. Obsidian's default navigation will apply if blockId was in path.`
-          );
+          // ...
         }
       } else {
+        // When opening in a NEW leaf, preventSetViewData should be false or absent
+        const navigationStateForNewLeaf = {
+          file: card.sourceBoardPath, // Still needed by KanbanView's setState
+          eState: {
+            filePath: card.sourceBoardPath,
+            blockId: card.blockId,
+            cardTitle: !card.blockId ? card.title : undefined,
+            listName: !card.blockId ? card.laneTitle : undefined,
+            // No preventSetViewData: true here
+          },
+        };
         console.log('[WorkspaceView] No existing leaf found. Opening new link.');
         let linkPath = card.sourceBoardPath;
         if (card.blockId) {
-          // Ensure openLinkText gets the #^blockId format for block navigation
           linkPath = `${card.sourceBoardPath}#^${card.blockId}`;
         }
-        console.log(`[WorkspaceView] Opening link: '${linkPath}' with state:`, navigationState);
+        console.log(`[WorkspaceView] Opening link: '${linkPath}' with state:`, navigationStateForNewLeaf);
         await app.workspace.openLinkText(linkPath, card.sourceBoardPath, false, {
-          state: navigationState,
+          state: navigationStateForNewLeaf, // Pass the state for new leaf
         });
       }
     },

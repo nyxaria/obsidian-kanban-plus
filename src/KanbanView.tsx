@@ -755,20 +755,59 @@ export class KanbanView extends TextFileView implements HoverParent {
     // Actual drop logic will go here
   }
 
-  setReactState(newState: { targetHighlight?: any; forceRerender?: boolean }) {
-    const stateManager = this.plugin.stateManagers.get(this.file);
+  async setReactState(newState: { targetHighlight?: any; forceRerender?: boolean }) {
+    let stateManager = this.plugin.stateManagers.get(this.file);
 
-    // Use type assertion to inform the linter about headerEl from TextFileView
-    const headerEl = (this as TextFileView).headerEl;
-    if (headerEl) {
+    // If StateManager is not found, try to re-establish it via plugin.addView
+    // This can happen if the view was inactive and is now being updated for highlighting.
+    if (!stateManager && this.file && this.data) {
+      // Check this.data too
+      console.warn(
+        `[KanbanView] setReactState: StateManager not found for ${this.file.path}. Attempting to re-initialize with plugin.addView.`
+      );
+      try {
+        await this.plugin.addView(this, this.data, this.isPrimary);
+        stateManager = this.plugin.stateManagers.get(this.file); // Re-fetch after addView
+        if (stateManager) {
+          console.log(
+            `[KanbanView] setReactState: StateManager re-established for ${this.file.path} after plugin.addView.`
+          );
+        } else {
+          console.error(
+            `[KanbanView] setReactState: Failed to re-establish StateManager for ${this.file.path} after plugin.addView. Cannot render.`
+          );
+          this.contentEl.empty();
+          this.contentEl.createDiv({ text: 'Error: Failed to connect to Kanban data manager.' });
+          return;
+        }
+      } catch (error) {
+        console.error(
+          `[KanbanView] setReactState: Error during plugin.addView for ${this.file.path}:`,
+          error
+        );
+        this.contentEl.empty();
+        this.contentEl.createDiv({ text: 'Error: Could not initialize Kanban board view.' });
+        return;
+      }
+    }
+
+    // Check for headerEl property existence before using it, and cast for usage
+    if (
+      'headerEl' in this &&
+      this.headerEl &&
+      typeof (this.headerEl as any).hide === 'function' &&
+      typeof (this.headerEl as any).show === 'function'
+    ) {
+      const headerEl = this.headerEl as HTMLElement; // Cast to HTMLElement for hide/show
       if (!this.plugin.settings['show-board-settings']) {
         headerEl.hide();
       } else {
         headerEl.show();
       }
     } else {
-      // This case should ideally not be reached if the view is properly constructed
-      console.warn('[KanbanView] setReactState: headerEl (from TextFileView) is not available.');
+      console.warn(
+        '[KanbanView] setReactState: this.headerEl is not available or does not have hide/show methods.'
+      );
     }
 
     if (stateManager) {
@@ -851,8 +890,34 @@ export class KanbanView extends TextFileView implements HoverParent {
 
         // After rendering, if there was a pending highlight scroll, apply it.
         if (this.targetHighlightLocation) {
-          // console.log("[KanbanView] setReactState: Re-applying highlight after render:", this.targetHighlightLocation);
-          // this.applyHighlight(); // This might be too early, DOM might not be fully ready for scroll
+          console.log(
+            '[KanbanView] setReactState: Scheduling applyHighlight after render with a short delay for target:',
+            JSON.stringify(this.targetHighlightLocation)
+          );
+          this.getWindow().setTimeout(() => {
+            const hasFocus = this.contentEl.contains(document.activeElement);
+            const viewStillActive = this.contentEl && !(this.leaf as any).detached;
+            console.log(
+              `[KanbanView] setReactState (setTimeout): Checking conditions before applyHighlight. Target: ${JSON.stringify(
+                this.targetHighlightLocation
+              )}, HasFocus: ${hasFocus}, ViewStillActive: ${viewStillActive}`
+            );
+            if (this.targetHighlightLocation && viewStillActive) {
+              // Removed hasFocus check for now to see if that's the blocker, will add back if highlight happens when it shouldn't
+              console.log(
+                '[KanbanView] setReactState (setTimeout): Conditions met (or focus check bypassed). Calling applyHighlight.'
+              );
+              this.applyHighlight();
+            } else if (!this.targetHighlightLocation) {
+              console.log(
+                '[KanbanView] setReactState (setTimeout): Aborted applyHighlight because targetHighlightLocation is now null.'
+              );
+            } else if (!viewStillActive) {
+              console.log(
+                '[KanbanView] setReactState (setTimeout): Aborted applyHighlight because view is no longer active or contentEl is missing.'
+              );
+            }
+          }, 100); // Increased delay slightly to 100ms
         }
       };
 
@@ -971,22 +1036,31 @@ export class KanbanView extends TextFileView implements HoverParent {
   }
 
   public applyHighlight() {
-    console.log('[KanbanView] applyHighlight called. Target:', this.targetHighlightLocation);
+    console.log(
+      `[KanbanView] applyHighlight: Called. Current targetHighlightLocation: ${JSON.stringify(
+        this.targetHighlightLocation
+      )}`
+    );
     this.contentEl.querySelectorAll('.search-result-highlight').forEach((el) => {
       el.removeClass('search-result-highlight');
     });
 
     if (!this.targetHighlightLocation) {
-      console.log('[KanbanView] applyHighlight: No targetHighlightLocation. Aborting.'); // Added log
+      console.log('[KanbanView] applyHighlight: No targetHighlightLocation. Aborting.');
       return;
     }
 
     const board = this.getBoard();
-    if (
-      !board &&
-      (this.targetHighlightLocation.cardTitle || !this.targetHighlightLocation.blockId)
-    ) {
-      console.warn('[KanbanView] applyHighlight: Board data not available for title-based lookup.');
+    if (!board) {
+      console.warn(
+        `[KanbanView] applyHighlight: getBoard() returned null. This may prevent title-based highlighting. File: ${this.file?.path}`
+      );
+      if (this.targetHighlightLocation.cardTitle || !this.targetHighlightLocation.blockId) {
+        console.error(
+          '[KanbanView] applyHighlight: Board data not available, and lookup requires it. Aborting highlight.'
+        );
+        return;
+      }
     }
 
     let targetItemElement: HTMLElement | null = null;
@@ -1074,12 +1148,21 @@ export class KanbanView extends TextFileView implements HoverParent {
 
     if (targetItemElement) {
       console.log(
-        '[KanbanView] applyHighlight: Adding search-result-highlight to:',
+        '[KanbanView] applyHighlight: Adding search-result-highlight to found element:',
         targetItemElement
       );
       targetItemElement.addClass('search-result-highlight');
+      // Also attempt to scroll to it
+      console.log('[KanbanView] applyHighlight: Scrolling to highlighted element.');
+      targetItemElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else {
-      console.log('[KanbanView] applyHighlight: No target item element found for highlighting.');
+      console.log(
+        `[KanbanView] applyHighlight: No target item element found for highlighting with target: ${JSON.stringify(
+          this.targetHighlightLocation
+        )}. Searched by blockId: '${this.targetHighlightLocation.blockId}', and/or title: '${
+          this.targetHighlightLocation.cardTitle
+        }' in list: '${this.targetHighlightLocation.listName}'.`
+      );
     }
   }
 
