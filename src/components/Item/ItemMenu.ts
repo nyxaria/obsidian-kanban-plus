@@ -18,12 +18,261 @@ import {
   constructTimePicker,
 } from './helpers';
 
-const illegalCharsRegEx = /[\\/:"*?<>|]+/g;
-const embedRegEx = /!?\[\[([^\]]*)\.[^\]]+\]\]/g;
-const wikilinkRegEx = /!?\[\[([^\]]*)\]\]/g;
+const illegalCharsRegEx = /[^\\/:"*?<>|]+/g;
+const embedRegEx = /!?\[\[([^\\]]*)\.[^\\]]+\]\]/g;
+const wikilinkRegEx = /!?\[\[([^\\]]*)\]\]/g;
 const mdLinkRegEx = /!?\[([^\]]*)\]\([^)]*\)/g;
-const tagRegEx = /#([^\u2000-\u206F\u2E00-\u2E7F'!"#$%&()*+,.:;<=>?@^`{|}~[\]\\\s\n\r]+)/g;
+const tagRegEx = /#([^\u2000-\u206F\u2E00-\u2E7F'!"#$%&()*+,.:;<=>?@^`{|}~[\]\\\\\s\n\r]+)/g;
 const condenceWhiteSpaceRE = /\s+/g;
+
+// --- HELPER FUNCTION DEFINITIONS START ---
+function addAssignMemberOptions(
+  menu: Menu,
+  item: Item,
+  teamMembers: string[],
+  stateManager: StateManager,
+  boardModifiers: BoardModifiers,
+  path: Path
+) {
+  if (teamMembers.length > 0) {
+    menu.addItem((menuItem) => {
+      menuItem.setTitle(t('Assign Member') || 'Assign Member').setIcon('lucide-users');
+      const subMenu = menuItem.setSubmenu();
+      const cardAssignedMembers = item.data.assignedMembers || [];
+
+      teamMembers.forEach((member) => {
+        if (typeof member === 'string' && member.trim() !== '') {
+          subMenu.addItem((subMenuItem) => {
+            subMenuItem
+              .setTitle(member)
+              .setChecked(cardAssignedMembers.includes(member))
+              .onClick(async () => {
+                let newAssignedMembers = [...cardAssignedMembers];
+                let newTitleRaw = item.data.titleRaw;
+                const memberSyntax = `@@${member}`;
+
+                if (newAssignedMembers.includes(member)) {
+                  newAssignedMembers = newAssignedMembers.filter((m) => m !== member);
+                  const regexMember = new RegExp(
+                    `(?:^|\\s)${escapeRegExpStr(memberSyntax)}(?=\\s|$)`,
+                    'gi'
+                  );
+                  newTitleRaw = newTitleRaw
+                    .replace(regexMember, ' ')
+                    .replace(/\s{2,}/g, ' ')
+                    .trim();
+                } else {
+                  newAssignedMembers.push(member);
+                  if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
+                    newTitleRaw += ' ';
+                  }
+                  newTitleRaw += memberSyntax;
+                }
+
+                const updatedItemData = {
+                  ...item.data,
+                  assignedMembers: newAssignedMembers,
+                };
+                boardModifiers.updateItem(
+                  path,
+                  stateManager.updateItemContent({ ...item, data: updatedItemData }, newTitleRaw)
+                );
+              });
+          });
+        } else {
+          console.warn(
+            '[Kanban Plugin] ItemMenu: Invalid or empty team member found in settings and was skipped:',
+            member
+          );
+        }
+      });
+    });
+  }
+}
+
+function addAssignTagOptions(
+  menu: Menu,
+  item: Item,
+  kanbanBoardTags: string[],
+  isLoadingTags: boolean,
+  stateManager: StateManager,
+  boardModifiers: BoardModifiers,
+  path: Path,
+  onTagAddedCallback: (newTag: string) => void
+) {
+  if (isLoadingTags) {
+    menu.addItem((loadItem) => {
+      loadItem.setTitle('Loading tags...');
+      // loadItem.setEnabled(false); // Temporarily commented out
+    });
+  } else {
+    menu.addItem((menuItem) => {
+      menuItem.setTitle(t('Assign Tag') || 'Assign Tag').setIcon('lucide-tag');
+      const tagSubMenu = menuItem.setSubmenu();
+
+      if (kanbanBoardTags.length > 0) {
+        const cardMetaTagsLower = (item.data.metadata?.tags || []).map((t) =>
+          t.replace(/^#/, '').toLowerCase()
+        );
+
+        kanbanBoardTags.forEach((tag) => {
+          if (tag && typeof tag === 'string' && tag.trim() !== '') {
+            tagSubMenu.addItem((subMenuItem) => {
+              const menuTagClean = tag.trim();
+              const menuTagLower = menuTagClean.toLowerCase();
+              const isAssigned = cardMetaTagsLower.includes(menuTagLower);
+
+              subMenuItem
+                .setTitle(menuTagClean)
+                .setChecked(isAssigned)
+                .onClick(async () => {
+                  const clickedTagOriginalCasing = menuTagClean;
+                  const clickedTagLower = clickedTagOriginalCasing.toLowerCase();
+
+                  let currentCardMetaTags = item.data.metadata?.tags || [];
+                  let newTitleRaw = item.data.titleRaw;
+
+                  const existingTagIndex = currentCardMetaTags.findIndex(
+                    (t) => t.replace(/^#/, '').toLowerCase() === clickedTagLower
+                  );
+
+                  if (existingTagIndex !== -1) {
+                    currentCardMetaTags = [
+                      ...currentCardMetaTags.slice(0, existingTagIndex),
+                      ...currentCardMetaTags.slice(existingTagIndex + 1),
+                    ];
+                    const escapedClickedTag = escapeRegExpStr(clickedTagOriginalCasing);
+                    const tagRegex = new RegExp(`(?:^|\s)#${escapedClickedTag}(?=\s|$)`, 'gi');
+                    newTitleRaw = newTitleRaw
+                      .replace(tagRegex, ' ')
+                      .replace(/\s{2,}/g, ' ')
+                      .trim();
+                  } else {
+                    currentCardMetaTags.push(clickedTagOriginalCasing);
+                    const titleLower = newTitleRaw.toLowerCase();
+                    const tagWithHashLower = `#${clickedTagLower}`;
+                    if (!titleLower.includes(tagWithHashLower)) {
+                      if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
+                        newTitleRaw += ' ';
+                      }
+                      newTitleRaw += `#${clickedTagOriginalCasing}`;
+                    }
+                  }
+
+                  const updatedItemData = update(item.data, {
+                    metadata: { tags: { $set: currentCardMetaTags } },
+                    titleRaw: { $set: newTitleRaw.trim() },
+                  });
+                  const updatedItem = { ...item, data: updatedItemData };
+
+                  boardModifiers.updateItem(
+                    path,
+                    stateManager.updateItemContent(updatedItem, updatedItem.data.titleRaw)
+                  );
+                });
+            });
+          }
+        });
+      } else {
+        tagSubMenu.addItem((subMenuItem) => {
+          subMenuItem.setTitle('No tags found in Kanban boards');
+          // subMenuItem.setEnabled(false); // Temporarily commented out
+        });
+      }
+
+      tagSubMenu.addSeparator();
+      tagSubMenu.addItem((subMenuItem) => {
+        subMenuItem
+          .setTitle(t('Add New Tag...') || 'Add New Tag...')
+          .setIcon('lucide-plus-circle')
+          .onClick(async () => {
+            new TagNameModal(stateManager.app, (newTagRaw) => {
+              if (newTagRaw && newTagRaw.trim() !== '') {
+                let newTagClean = newTagRaw.trim().replace(/^#/, '');
+                newTagClean = newTagClean.replace(/\s+/g, '-');
+
+                if (newTagClean) {
+                  const newTagToAddOriginalCasing = newTagClean;
+                  const newTagToAddLower = newTagToAddOriginalCasing.toLowerCase();
+                  let currentCardMetaTags = item.data.metadata?.tags || [];
+                  let newTitleRaw = item.data.titleRaw;
+
+                  const alreadyExistsIdx = currentCardMetaTags.findIndex(
+                    (t) => t.replace(/^#/, '').toLowerCase() === newTagToAddLower
+                  );
+
+                  if (alreadyExistsIdx === -1) {
+                    currentCardMetaTags.push(newTagToAddOriginalCasing);
+                    const titleLower = newTitleRaw.toLowerCase();
+                    const tagWithHashLower = `#${newTagToAddLower}`;
+                    if (!titleLower.includes(tagWithHashLower)) {
+                      if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
+                        newTitleRaw += ' ';
+                      }
+                      newTitleRaw += `#${newTagToAddOriginalCasing}`;
+                    }
+                  }
+
+                  const updatedItemData = update(item.data, {
+                    metadata: { tags: { $set: currentCardMetaTags } },
+                    titleRaw: { $set: newTitleRaw.trim() },
+                  });
+                  const updatedItem = { ...item, data: updatedItemData };
+
+                  boardModifiers.updateItem(
+                    path,
+                    stateManager.updateItemContent(updatedItem, updatedItem.data.titleRaw)
+                  );
+                  onTagAddedCallback(newTagToAddOriginalCasing);
+                }
+              }
+            }).open();
+          });
+      });
+    });
+  }
+}
+
+function addMoveToOptions(
+  menu: Menu,
+  path: Path,
+  stateManager: StateManager,
+  boardModifiers: BoardModifiers
+) {
+  const addMoveToOptionsInner = (currentMenu: Menu) => {
+    const lanes = stateManager.state.children;
+    if (lanes.length <= 1) return;
+    for (let i = 0, len = lanes.length; i < len; i++) {
+      const laneTitle =
+        typeof lanes[i].data.title === 'string' ? lanes[i].data.title : 'Unnamed Lane';
+      currentMenu.addItem((menuItem) =>
+        menuItem
+          .setIcon('lucide-square-kanban')
+          .setChecked(path[0] === i)
+          .setTitle(laneTitle)
+          .onClick(() => {
+            if (path[0] === i) return;
+            stateManager.setState((boardData) => {
+              return moveEntity(boardData, path, [i, 0]);
+            });
+          })
+      );
+    }
+  };
+
+  if (Platform.isPhone) {
+    addMoveToOptionsInner(menu); // Direct add for phone
+  } else {
+    menu.addItem((menuItem) => {
+      const submenu = (menuItem as any) // Cast to any for setSubmenu, or ensure Menu type supports it.
+        .setTitle(t('Move to list') || 'Move to list')
+        .setIcon('lucide-square-kanban')
+        .setSubmenu();
+      addMoveToOptionsInner(submenu);
+    });
+  }
+}
+// --- HELPER FUNCTION DEFINITIONS END ---
 
 interface UseItemMenuParams {
   setEditState: Dispatch<StateUpdater<EditState>>;
@@ -66,7 +315,134 @@ export function useItemMenu({
       const allVaultTagsObj = stateManager.app.metadataCache.getTags();
       const allVaultTags = Object.keys(allVaultTagsObj);
 
-      const menu = new Menu().addItem((menuItem) => {
+      const menu = new Menu();
+
+      // --- PRIORITY ITEMS SECTION START ---
+      // 1. Assign Member
+      addAssignMemberOptions(menu, item, teamMembers, stateManager, boardModifiers, path);
+
+      // 2. Assign Tag
+      addAssignTagOptions(
+        menu,
+        item,
+        kanbanBoardTags,
+        isLoadingTags,
+        stateManager,
+        boardModifiers,
+        path,
+        (newTag) => {
+          // Optimistic update for kanbanBoardTags
+          if (!kanbanBoardTags.includes(newTag)) {
+            setKanbanBoardTags((prevTags) => [...prevTags, newTag].sort());
+          }
+        }
+      );
+
+      // 3. Add/Edit Date & Time (Moved here)
+      menu.addItem((menuItem) => {
+        menuItem
+          .setIcon('lucide-calendar-check')
+          .setTitle(hasDate ? t('Edit date') : t('Add date'))
+          .onClick(() => {
+            constructDatePicker(
+              e.view,
+              stateManager,
+              coordinates,
+              constructMenuDatePickerOnChange({
+                stateManager,
+                boardModifiers,
+                item,
+                hasDate,
+                path,
+              }),
+              item.data.metadata.date?.toDate()
+            );
+          });
+      });
+
+      if (hasDate) {
+        menu.addItem((menuItem) => {
+          menuItem
+            .setIcon('lucide-x')
+            .setTitle(t('Remove date'))
+            .onClick(() => {
+              const shouldLinkDates = stateManager.getSetting('link-date-to-daily-note');
+              const dateTrigger = stateManager.getSetting('date-trigger');
+              const dateRegex = new RegExp(
+                `(^|\\s)${escapeRegExpStr(dateTrigger)}(\\d{4}-\\d{2}-\\d{2})(\\s|$)`
+              );
+              const newTitleRaw = item.data.titleRaw.replace(dateRegex, ' ').trim();
+
+              boardModifiers.updateItem(
+                path,
+                update(item, {
+                  data: {
+                    metadata: { date: { $set: undefined } },
+                    titleRaw: { $set: newTitleRaw },
+                    ...(shouldLinkDates && {
+                      links: { $apply: (l) => l.filter((x) => x.type !== 'date') },
+                    }),
+                  },
+                })
+              );
+            });
+        });
+
+        menu.addItem((menuItem) => {
+          menuItem
+            .setIcon('lucide-clock')
+            .setTitle(hasTime ? t('Edit time') : t('Add time'))
+            .onClick(() => {
+              constructTimePicker(
+                e.view,
+                stateManager,
+                coordinates,
+                constructMenuTimePickerOnChange({
+                  stateManager,
+                  boardModifiers,
+                  item,
+                  hasTime,
+                  path,
+                }),
+                item.data.metadata.time
+              );
+            });
+        });
+
+        if (hasTime) {
+          menu.addItem((menuItem) => {
+            menuItem
+              .setIcon('lucide-x')
+              .setTitle(t('Remove time'))
+              .onClick(() => {
+                const timeTrigger = stateManager.getSetting('time-trigger');
+                const timeRegex = new RegExp(
+                  `(^|\\s)${escapeRegExpStr(timeTrigger)}(\\d{2}:\\d{2}(?::\\d{2})?)(\\s|$)`
+                );
+                const newTitleRaw = item.data.titleRaw.replace(timeRegex, ' ').trim();
+
+                boardModifiers.updateItem(
+                  path,
+                  update(item, {
+                    data: {
+                      metadata: { time: { $set: undefined } },
+                      titleRaw: { $set: newTitleRaw },
+                    },
+                  })
+                );
+              });
+          });
+        }
+      }
+
+      // 4. Move to List
+      addMoveToOptions(menu, path, stateManager, boardModifiers);
+
+      menu.addSeparator(); // Separator after priority items
+      // --- PRIORITY ITEMS SECTION END ---
+
+      // Original items (date items were already removed from here in previous step)
+      menu.addItem((menuItem) => {
         menuItem
           .setIcon('lucide-edit')
           .setTitle(t('Edit card'))
@@ -218,349 +594,9 @@ export function useItemMenu({
             .setTitle(t('Delete card'))
             .onClick(() => boardModifiers.deleteEntity(path));
         })
-        .addSeparator()
-        .addItem((menuItem) => {
-          menuItem
-            .setIcon('lucide-calendar-check')
-            .setTitle(hasDate ? t('Edit date') : t('Add date'))
-            .onClick(() => {
-              constructDatePicker(
-                e.view,
-                stateManager,
-                coordinates,
-                constructMenuDatePickerOnChange({
-                  stateManager,
-                  boardModifiers,
-                  item,
-                  hasDate,
-                  path,
-                }),
-                item.data.metadata.date?.toDate()
-              );
-            });
-        });
+        .addSeparator();
 
-      if (hasDate) {
-        menu.addItem((menuItem) => {
-          menuItem
-            .setIcon('lucide-x')
-            .setTitle(t('Remove date'))
-            .onClick(() => {
-              const shouldLinkDates = stateManager.getSetting('link-date-to-daily-note');
-              const dateTrigger = stateManager.getSetting('date-trigger');
-              const contentMatch = shouldLinkDates
-                ? '(?:\\[[^\\]]+\\]\\([^\\)]+\\)|\\[\\[[^\\]]+\\]\\])'
-                : '{[^}]+}';
-              const dateRegEx = new RegExp(
-                `(^|\\s)${escapeRegExpStr(dateTrigger as string)}${contentMatch}`
-              );
-
-              const titleRaw = item.data.titleRaw.replace(dateRegEx, '').trim();
-
-              boardModifiers.updateItem(path, stateManager.updateItemContent(item, titleRaw));
-            });
-        });
-
-        menu.addItem((menuItem) => {
-          menuItem
-            .setIcon('lucide-clock')
-            .setTitle(hasTime ? t('Edit time') : t('Add time'))
-            .onClick(() => {
-              constructTimePicker(
-                e.view,
-                stateManager,
-                coordinates,
-                constructMenuTimePickerOnChange({
-                  stateManager,
-                  boardModifiers,
-                  item,
-                  hasTime,
-                  path,
-                }),
-                item.data.metadata.time
-              );
-            });
-        });
-
-        if (hasTime) {
-          menu.addItem((menuItem) => {
-            menuItem
-              .setIcon('lucide-x')
-              .setTitle(t('Remove time'))
-              .onClick(() => {
-                const timeTrigger = stateManager.getSetting('time-trigger');
-                const timeRegEx = new RegExp(
-                  `(^|\\s)${escapeRegExpStr(timeTrigger as string)}{[^}]+}`
-                );
-
-                const titleRaw = item.data.titleRaw.replace(timeRegEx, '').trim();
-
-                boardModifiers.updateItem(path, stateManager.updateItemContent(item, titleRaw));
-              });
-          });
-        }
-      }
-
-      // Assign Member Submenu
-      if (teamMembers.length > 0) {
-        menu.addItem((menuItem) => {
-          menuItem.setTitle(t('Assign Member') || 'Assign Member').setIcon('lucide-users');
-
-          const subMenu = menuItem.setSubmenu();
-          const cardAssignedMembers = item.data.assignedMembers || [];
-
-          teamMembers.forEach((member) => {
-            if (typeof member === 'string' && member.trim() !== '') {
-              subMenu.addItem((subMenuItem) => {
-                subMenuItem
-                  .setTitle(member)
-                  .setChecked(cardAssignedMembers.includes(member))
-                  .onClick(async () => {
-                    let newAssignedMembers = [...cardAssignedMembers];
-                    let newTitleRaw = item.data.titleRaw;
-
-                    if (newAssignedMembers.includes(member)) {
-                      newAssignedMembers = newAssignedMembers.filter((m) => m !== member);
-                      const memberTag = `@@${member}`;
-                      newTitleRaw = newTitleRaw.replace(` ${memberTag}`, ' ');
-                      newTitleRaw = newTitleRaw.replace(memberTag, '');
-                      newTitleRaw = newTitleRaw.replace(/\s+/g, ' ').trim();
-                    } else {
-                      newAssignedMembers.push(member);
-                      if (newTitleRaw.trim() === '') {
-                        newTitleRaw = `@@${member}`;
-                      } else {
-                        newTitleRaw = `${newTitleRaw.trim()} @@${member}`.trim();
-                      }
-                    }
-
-                    const updatedItemData = {
-                      ...item.data,
-                      assignedMembers: newAssignedMembers,
-                    };
-                    boardModifiers.updateItem(
-                      path,
-                      stateManager.updateItemContent(
-                        { ...item, data: updatedItemData },
-                        newTitleRaw
-                      )
-                    );
-                  });
-              });
-            } else {
-              console.warn(
-                '[Kanban Plugin] ItemMenu: Invalid or empty team member found in settings and was skipped:',
-                member
-              );
-            }
-          });
-        });
-      }
-
-      // Assign Tag Submenu
-      if (isLoadingTags) {
-        menu.addItem((loadItem) => loadItem.setTitle('Loading tags...').setEnabled(false));
-      } else {
-        menu.addItem((menuItem) => {
-          menuItem.setTitle(t('Assign Tag') || 'Assign Tag').setIcon('lucide-tag');
-          const tagSubMenu = menuItem.setSubmenu();
-
-          if (isLoadingTags) {
-            tagSubMenu.addItem((subMenuItem) => {
-              subMenuItem.setTitle('Loading tags...').setEnabled(false);
-            });
-          } else if (kanbanBoardTags.length > 0) {
-            // Log the tags being used to build this menu instance
-            console.log(
-              '[ItemMenu] Building Assign Tag submenu with kanbanBoardTags:',
-              JSON.parse(JSON.stringify(kanbanBoardTags))
-            );
-            const cardTags = (item.data.metadata?.tags || []).map((t) => t.replace(/^#/, ''));
-
-            kanbanBoardTags.forEach((tag) => {
-              if (tag && typeof tag === 'string' && tag.trim() !== '') {
-                tagSubMenu.addItem((subMenuItem) => {
-                  const menuTagClean = tag.trim();
-                  const cardMetaTagsLower = (item.data.metadata?.tags || []).map((t) =>
-                    t.replace(/^#/, '').toLowerCase()
-                  );
-                  const menuTagLower = menuTagClean.toLowerCase();
-                  const isAssigned = cardMetaTagsLower.includes(menuTagLower);
-
-                  subMenuItem
-                    .setTitle(menuTagClean)
-                    .setChecked(isAssigned)
-                    .onClick(async () => {
-                      const clickedTagOriginalCasing = menuTagClean;
-                      const clickedTagLower = clickedTagOriginalCasing.toLowerCase();
-
-                      let currentCardMetaTags = item.data.metadata?.tags || [];
-                      let newTitleRaw = item.data.titleRaw;
-
-                      const existingTagIndex = currentCardMetaTags.findIndex(
-                        (t) => t.replace(/^#/, '').toLowerCase() === clickedTagLower
-                      );
-
-                      if (existingTagIndex !== -1) {
-                        // Tag is assigned, so remove it
-                        currentCardMetaTags = [
-                          ...currentCardMetaTags.slice(0, existingTagIndex),
-                          ...currentCardMetaTags.slice(existingTagIndex + 1),
-                        ];
-
-                        // Remove #tag or tag from title, case-insensitively
-                        const escapedClickedTag = escapeRegExpStr(clickedTagOriginalCasing); // Use original casing for the pattern but search insensitively
-                        const tagRegexWithHash = new RegExp(
-                          `\\s*#${escapedClickedTag}(?!\\w)`,
-                          'gi'
-                        );
-                        const tagRegexWithoutHash = new RegExp(
-                          `\\s*${escapedClickedTag}(?!\\w)`,
-                          'gi'
-                        );
-
-                        newTitleRaw = newTitleRaw.replace(tagRegexWithHash, '');
-                        newTitleRaw = newTitleRaw.replace(tagRegexWithoutHash, '');
-                        newTitleRaw = newTitleRaw.replace(/\s{2,}/g, ' ').trim();
-                      } else {
-                        // Tag is not assigned, so add it (preserving original casing from menu)
-                        currentCardMetaTags.push(clickedTagOriginalCasing);
-                        // Add #tag to title if not already present (case-insensitive check for presence before adding)
-                        const titleLower = newTitleRaw.toLowerCase();
-                        const tagWithHashLower = `#${clickedTagLower}`;
-                        if (!titleLower.includes(tagWithHashLower)) {
-                          if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
-                            newTitleRaw += ' ';
-                          }
-                          newTitleRaw += `#${clickedTagOriginalCasing}`; // Add with original casing
-                        }
-                      }
-
-                      const updatedItemData = update(item.data, {
-                        metadata: { tags: { $set: currentCardMetaTags } },
-                        titleRaw: { $set: newTitleRaw.trim() },
-                      });
-                      const updatedItem = { ...item, data: updatedItemData };
-
-                      boardModifiers.updateItem(
-                        path,
-                        stateManager.updateItemContent(updatedItem, updatedItem.data.titleRaw)
-                      );
-
-                      // NO optimistic update here for existing tags, they are already in kanbanBoardTags
-                    });
-                });
-              }
-            });
-          } else {
-            tagSubMenu.addItem((subMenuItem) => {
-              subMenuItem.setTitle('No tags found in Kanban boards').setEnabled(false);
-            });
-          }
-
-          tagSubMenu.addSeparator();
-          tagSubMenu.addItem((subMenuItem) => {
-            subMenuItem
-              .setTitle(t('Add New Tag...') || 'Add New Tag...')
-              .setIcon('lucide-plus-circle')
-              .onClick(async () => {
-                new TagNameModal(stateManager.app, (newTagRaw) => {
-                  if (newTagRaw && newTagRaw.trim() !== '') {
-                    let newTagClean = newTagRaw.trim().replace(/^#/, '');
-                    newTagClean = newTagClean.replace(/\s+/g, '-');
-
-                    if (newTagClean) {
-                      // For "Add New Tag", we operate on the cleaned (potentially new casing) tag
-                      const newTagToAddOriginalCasing = newTagClean; // This is the casing from the modal input
-                      const newTagToAddLower = newTagToAddOriginalCasing.toLowerCase();
-
-                      let currentCardMetaTags = item.data.metadata?.tags || [];
-                      let newTitleRaw = item.data.titleRaw;
-
-                      const alreadyExistsIdx = currentCardMetaTags.findIndex(
-                        (t) => t.replace(/^#/, '').toLowerCase() === newTagToAddLower
-                      );
-
-                      if (alreadyExistsIdx === -1) {
-                        // Only add if not already present (case-insensitive)
-                        currentCardMetaTags.push(newTagToAddOriginalCasing); // Add with casing from modal
-                        // Add #tag to title if not already present (case-insensitive check)
-                        const titleLower = newTitleRaw.toLowerCase();
-                        const tagWithHashLower = `#${newTagToAddLower}`;
-                        if (!titleLower.includes(tagWithHashLower)) {
-                          if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
-                            newTitleRaw += ' ';
-                          }
-                          newTitleRaw += `#${newTagToAddOriginalCasing}`; // Add with modal's casing
-                        }
-                      }
-
-                      const updatedItemData = update(item.data, {
-                        metadata: { tags: { $set: currentCardMetaTags } },
-                        titleRaw: { $set: newTitleRaw.trim() },
-                      });
-                      const updatedItem = { ...item, data: updatedItemData };
-
-                      boardModifiers.updateItem(
-                        path,
-                        stateManager.updateItemContent(updatedItem, updatedItem.data.titleRaw)
-                      );
-
-                      // Optimistically update the kanbanBoardTags state ONLY after adding a NEW tag via modal
-                      if (newTagClean) {
-                        // ensure newTagClean is valid before updating
-                        setKanbanBoardTags((prevTags) => {
-                          const newTagsSet = new Set(prevTags);
-                          // Check if the tag (in its original or cleaned form) is already present before adding
-                          // This uses the exact string from the modal, which might have different casing than existing tags.
-                          // The .sort() later and Set uniqueness will handle it if it truly normalizes to an existing one.
-                          if (!newTagsSet.has(newTagClean)) {
-                            newTagsSet.add(newTagClean);
-                          }
-                          return Array.from(newTagsSet).sort();
-                        });
-                      }
-                    }
-                  }
-                }).open();
-              });
-          });
-        });
-      }
-
-      const addMoveToOptions = (menu: Menu) => {
-        const lanes = stateManager.state.children;
-        if (lanes.length <= 1) return;
-        for (let i = 0, len = lanes.length; i < len; i++) {
-          const laneTitle =
-            typeof lanes[i].data.title === 'string' ? lanes[i].data.title : 'Unnamed Lane';
-          menu.addItem((menuItem) =>
-            menuItem
-              .setIcon('lucide-square-kanban')
-              .setChecked(path[0] === i)
-              .setTitle(laneTitle)
-              .onClick(() => {
-                if (path[0] === i) return;
-                stateManager.setState((boardData) => {
-                  return moveEntity(boardData, path, [i, 0]);
-                });
-              })
-          );
-        }
-      };
-
-      if (Platform.isPhone) {
-        addMoveToOptions(menu);
-      } else {
-        menu.addItem((menuItem) => {
-          const submenu = (menuItem as any)
-            .setTitle(t('Move to list') || 'Move to list')
-            .setIcon('lucide-square-kanban')
-            .setSubmenu();
-
-          addMoveToOptions(submenu);
-        });
-      }
+      const templates = stateManager.getSetting('templates');
 
       menu.showAtMouseEvent(e);
     },

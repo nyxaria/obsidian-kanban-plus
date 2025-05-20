@@ -2,6 +2,7 @@ import update from 'immutability-helper';
 import { Content, List, Parent, Root } from 'mdast';
 import { ListItem } from 'mdast-util-from-markdown/lib';
 import { toString } from 'mdast-util-to-string';
+import moment from 'moment';
 import { stringifyYaml } from 'obsidian';
 import { KanbanSettings } from 'src/Settings';
 import { StateManager } from 'src/StateManager';
@@ -51,6 +52,7 @@ interface TaskItem extends ListItem {
 export function listItemToItemData(stateManager: StateManager, md: string, item: TaskItem) {
   const moveTags = stateManager.getSetting('move-tags');
   const moveDates = stateManager.getSetting('move-dates');
+  const dateFormat = stateManager.getSetting('date-format');
 
   const startNode = item.children.first();
   const endNode = item.children.last();
@@ -179,6 +181,27 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     }
 
     if (genericNode.type === 'wikilink') {
+      const linkContent = (genericNode as ValueNode).value;
+      if (linkContent && dateFormat) {
+        const potentialDate = moment(linkContent.trim(), dateFormat, true);
+
+        if (potentialDate.isValid()) {
+          if (!itemData.metadata.dateStr) {
+            itemData.metadata.dateStr = potentialDate.format(dateFormat);
+          }
+
+          if (moveDates) {
+            title = markRangeForDeletion(title, {
+              start: genericNode.position.start.offset - itemBoundary.start,
+              end: genericNode.position.end.offset - itemBoundary.start,
+            });
+          }
+          itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
+          itemData.metadata.fileMetadata = (genericNode as FileNode).fileMetadata;
+          itemData.metadata.fileMetadataOrder = (genericNode as FileNode).fileMetadataOrder;
+          return true;
+        }
+      }
       itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
       itemData.metadata.fileMetadata = (genericNode as FileNode).fileMetadata;
       itemData.metadata.fileMetadataOrder = (genericNode as FileNode).fileMetadataOrder;

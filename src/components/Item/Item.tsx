@@ -60,7 +60,8 @@ const ItemInner = memo(function ItemInner({
   cancelEditCounter,
 }: ItemInnerProps) {
   const { stateManager, boardModifiers } = useContext(KanbanContext);
-  const [editState, setEditState] = useState<EditState>(EditingProcessState.cancel);
+  const [editState, setEditState] = useState<EditState>(EditingProcessState.Cancel);
+  const [isHovered, setIsHovered] = useState(false);
   const itemInnerRef = useRef<HTMLDivElement>(null);
   const prevCancelEditCounterRef = useRef<number>(cancelEditCounter);
 
@@ -68,7 +69,7 @@ const ItemInner = memo(function ItemInner({
 
   useEffect(() => {
     const handler = () => {
-      if (isEditingActive(editState)) setEditState(EditingProcessState.cancel);
+      if (isEditingActive(editState)) setEditState(EditingProcessState.Cancel);
     };
 
     dndManager.dragManager.emitter.on('dragStart', handler);
@@ -84,14 +85,21 @@ const ItemInner = memo(function ItemInner({
   }, [item.data.forceEditMode]);
 
   useEffect(() => {
+    const currentEditStateAtEffectStart = editState; // Capture editState when effect runs
     if (prevCancelEditCounterRef.current !== cancelEditCounter) {
-      if (isEditingActive(editState)) {
+      if (isEditingActive(currentEditStateAtEffectStart)) {
+        // Use captured state
         console.log(
-          `[ItemInner item ${item.id}] cancelEditCounter changed to ${cancelEditCounter}. Was ${prevCancelEditCounterRef.current}. EditState:`,
-          editState,
+          `[ItemInner item ${item.id}] cancelEditCounter changed to ${cancelEditCounter}. Was ${prevCancelEditCounterRef.current}. Condition isEditingActive(${JSON.stringify(currentEditStateAtEffectStart)}) is TRUE. Setting editState from`,
+          currentEditStateAtEffectStart,
           '-> complete'
         );
-        setEditState(EditingProcessState.complete);
+        setEditState(EditingProcessState.Complete);
+      } else {
+        console.log(
+          `[ItemInner item ${item.id}] cancelEditCounter changed to ${cancelEditCounter}. Was ${prevCancelEditCounterRef.current}. Condition isEditingActive(${JSON.stringify(currentEditStateAtEffectStart)}) is FALSE. Not setting to complete. Current editState remains:`,
+          currentEditStateAtEffectStart
+        );
       }
     }
     prevCancelEditCounterRef.current = cancelEditCounter;
@@ -202,6 +210,8 @@ const ItemInner = memo(function ItemInner({
   return (
     <div
       ref={itemInnerRef}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       // eslint-disable-next-line react/no-unknown-property
       onDblClick={onDoubleClick}
       onContextMenu={onContextMenu}
@@ -249,6 +259,8 @@ const ItemInner = memo(function ItemInner({
           path={path}
           shouldMarkItemsComplete={shouldMarkItemsComplete}
           stateManager={stateManager}
+          style={{ marginTop: '0px' }}
+          isVisible={isHovered}
         />
         <ItemContent
           item={item}
@@ -257,7 +269,11 @@ const ItemInner = memo(function ItemInner({
           editState={editState}
           isStatic={isStatic}
           targetHighlight={targetHighlight}
-          style={{ flexGrow: 1, marginLeft: '8px' }}
+          style={{
+            flexGrow: 1,
+            marginLeft: isHovered ? '8px' : '0px',
+            transition: 'margin-left 0.2s ease-in-out',
+          }}
         />
       </div>
       <ItemMetadata searchQuery={isMatch ? searchQuery : undefined} item={item} />

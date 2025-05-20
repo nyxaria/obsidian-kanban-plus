@@ -53,6 +53,7 @@ interface DateAndTimeProps {
   onEditTime?: JSX.MouseEventHandler<HTMLSpanElement>;
   filePath: string;
   getDateColor: (date: moment.Moment) => DateColor;
+  style?: JSX.CSSProperties;
 }
 
 export function DateAndTime({
@@ -62,91 +63,77 @@ export function DateAndTime({
   onEditDate,
   onEditTime,
   getDateColor,
+  style,
 }: DateProps & DateAndTimeProps) {
   const moveDates = stateManager.useSetting('move-dates');
+  console.log('[DateAndTime] moveDates setting value:', moveDates); // DEBUG LOG
   const dateFormat = stateManager.useSetting('date-format');
   const timeFormat = stateManager.useSetting('time-format');
   const dateDisplayFormat = stateManager.useSetting('date-display-format');
   const shouldLinkDate = stateManager.useSetting('link-date-to-daily-note');
 
+  // Refined DEBUG LOG for metadata
+  console.log(
+    '[DateAndTime] item.data.metadata received. dateStr:',
+    item.data.metadata.dateStr,
+    'date (Moment obj exist?):',
+    !!item.data.metadata.date,
+    'time (Moment obj exist?):',
+    !!item.data.metadata.time
+  );
   const targetDate = item.data.metadata.time ?? item.data.metadata.date;
   const dateColor = useMemo(() => {
     if (!targetDate) return null;
     return getDateColor(targetDate);
   }, [targetDate, getDateColor]);
 
+  console.log('[DateAndTime] dateColor:', JSON.stringify(dateColor));
+
   if (!moveDates || !targetDate) return null;
 
-  const dateStr = targetDate.format(dateFormat);
+  const rawDateStr = item.data.metadata.dateStr;
+  const rawTimeStr = item.data.metadata.timeStr;
 
-  if (!dateStr) return null;
+  if (!rawDateStr) return null;
 
-  const hasDate = !!item.data.metadata.date;
-  const hasTime = !!item.data.metadata.time;
-  const dateDisplayStr = targetDate.format(dateDisplayFormat);
-  const timeDisplayStr = !hasTime ? null : targetDate.format(timeFormat);
-
-  const datePath = dateStr ? getLinkpath(dateStr) : null;
-  const isResolved = dateStr
-    ? stateManager.app.metadataCache.getFirstLinkpathDest(datePath, filePath)
-    : null;
-  const date =
-    datePath && shouldLinkDate ? (
-      <a
-        href={datePath}
-        data-href={datePath}
-        className={`internal-link ${isResolved ? '' : 'is-unresolved'}`}
-        target="blank"
-        rel="noopener"
-      >
-        {dateDisplayStr}
-      </a>
-    ) : (
-      dateDisplayStr
-    );
-
-  const dateProps: HTMLAttributes<HTMLSpanElement> = {};
-
-  if (!shouldLinkDate) {
-    dateProps['aria-label'] = t('Change date');
-    dateProps.onClick = onEditDate;
+  let displayString = rawDateStr;
+  if (rawTimeStr) {
+    displayString += ` ${rawTimeStr}`;
   }
 
+  console.log(
+    '[DateAndTime] Rendering with displayString:',
+    JSON.stringify(displayString),
+    'RawDate:',
+    rawDateStr,
+    'RawTime:',
+    rawTimeStr
+  ); // DEBUG LOG
+
+  const dateProps: HTMLAttributes<HTMLSpanElement> = {};
+  dateProps['aria-label'] = t('Change date/time');
+  dateProps.onClick = onEditDate;
+
   return (
-    <span
-      style={
-        dateColor && {
-          '--date-color': dateColor.color,
-          '--date-background-color': dateColor.backgroundColor,
-        }
-      }
-      className={classcat([
-        c('item-metadata-date-wrapper'),
-        c('date'),
-        {
-          'has-background': !!dateColor?.backgroundColor,
-        },
-      ])}
+    <div
+      onClick={onEditDate}
+      style={{
+        cursor: 'pointer',
+        padding: '1px 5px',
+        borderRadius: '3px',
+        fontSize: '0.9em',
+        display: 'inline-flex',
+        alignItems: 'center',
+        backgroundColor: dateColor?.backgroundColor || 'var(--background-modifier-hover)',
+        color:
+          dateColor?.text ||
+          (dateColor?.backgroundColor ? 'var(--text-on-accent)' : 'var(--text-normal)'),
+        ...style,
+      }}
+      className={classcat([c('item-metadata-date-lozenge')])}
+      aria-label={t('Change date/time')}
     >
-      {hasDate && (
-        <>
-          <span
-            {...dateProps}
-            className={`${c('item-metadata-date')} ${!shouldLinkDate ? 'is-button' : ''}`}
-          >
-            {date}
-          </span>{' '}
-        </>
-      )}
-      {hasTime && (
-        <span
-          onClick={onEditTime}
-          className={`${c('item-metadata-time')} is-button`}
-          aria-label={t('Change time')}
-        >
-          {timeDisplayStr}
-        </span>
-      )}
-    </span>
+      {displayString}
+    </div>
   );
 }

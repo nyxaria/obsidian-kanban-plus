@@ -280,7 +280,7 @@ export function useGetTagSymbolFn(
   return useMemo(() => getTagSymbolFn(tagSymbols), [tagSymbols]);
 }
 
-export function getDateColorFn(dateColors: DateColor[]) {
+export function getDateColorFn(dateColors: DateColor[], dateDisplayFormat: string) {
   const orders = (dateColors || []).map<[moment.Moment | 'today' | 'before' | 'after', DateColor]>(
     (c) => {
       if (c.isToday) {
@@ -354,7 +354,15 @@ export function useGetDateColorFn(
   stateManager: StateManager
 ): (date: moment.Moment) => DateColor | null {
   const dateColors = stateManager.useSetting('date-colors');
-  return useMemo(() => getDateColorFn(dateColors), [dateColors]);
+  const dateDisplayFormat = stateManager.useSetting('date-display-format');
+
+  // HACK: Stringify dateColors for useMemo dependency
+  const dateColorsString = JSON.stringify(dateColors);
+
+  return useMemo(() => {
+    console.log('[useGetDateColorFn] useMemo for getDateColorFn re-running.');
+    return getDateColorFn(dateColors, dateDisplayFormat);
+  }, [dateColorsString, dateDisplayFormat]); // Use stringified version as dependency
 }
 
 export function parseMetadataWithOptions(data: InlineField, metadataKeys: DataKey[]): PageData {
