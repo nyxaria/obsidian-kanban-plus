@@ -281,23 +281,32 @@ export default class KanbanPlugin extends Plugin {
     }
 
     const file = view.file;
+    let stateManager = this.stateManagers.get(file);
 
-    if (this.stateManagers.has(file)) {
-      this.stateManagers.get(file).registerView(view, data, shouldParseData);
+    if (stateManager) {
+      stateManager.registerView(view, data, shouldParseData);
     } else {
-      this.stateManagers.set(
-        file,
-        new StateManager(
-          this.app,
-          view,
-          data,
-          () => this.stateManagers.delete(file),
-          () => this.settings
-        )
+      stateManager = new StateManager(
+        this.app,
+        view, // Pass the primary view first
+        data,
+        () => this.stateManagers.delete(file),
+        () => this.settings
       );
+      this.stateManagers.set(file, stateManager);
+      // For a new StateManager, it calls registerView on itself internally for the initial view.
     }
 
     reg.viewStateReceivers.forEach((fn) => fn(this.getKanbanViews(win)));
+
+    // Check if the view was pending an initial render because StateManager wasn't ready
+    if ((view as any)._isPendingInitialRender && stateManager?.state) {
+      console.log(
+        `[KanbanPlugin] addView: View ${view.id} was pending initial render. Triggering setReactState.`
+      );
+      (view as any)._isPendingInitialRender = false; // Clear the flag
+      view.setReactState({}); // Trigger the render
+    }
   }
 
   removeView(view: KanbanView) {
@@ -380,10 +389,20 @@ export default class KanbanPlugin extends Plugin {
   }
 
   async setMarkdownView(leaf: WorkspaceLeaf, focus: boolean = true) {
+    const currentKanbanState = leaf.view.getState();
     await leaf.setViewState(
       {
         type: 'markdown',
-        state: leaf.view.getState(),
+        state: {
+          // Preserve some potentially useful generic state if they exist and are simple types
+          // but prioritize a clean state for MarkdownView.
+          file: (leaf.view as KanbanView).file?.path || currentKanbanState.file,
+          mode: 'source',
+          source: false,
+          // Attempt to carry over scroll position if available and simple
+          scroll:
+            typeof currentKanbanState.scroll === 'number' ? currentKanbanState.scroll : undefined,
+        },
         popstate: true,
       } as ViewState,
       { focus }
@@ -979,58 +998,34 @@ export default class KanbanPlugin extends Plugin {
             } else {
               newState.state = { eState: eStateForHighlighting || null } as any;
             }
+
             let isKanbanFile = false;
-            if (newState.state?.file) {
-              const filePath = newState.state.file as string;
-              // console.log(
-              //   '[Kanban Main] setViewState: self.app object presence:',
-              //   self.app ? 'exists' : 'null or undefined'
-              // );
-              if (self.app?.vault) {
-                const file = self.app.vault.getAbstractFileByPath(filePath);
-                if (file instanceof TFile) {
-                  isKanbanFile = hasFrontmatterKey(file);
-                  // console.log(
-                  //   `[Kanban Main] setViewState: Check isKanbanFile for ${filePath} (using TFile). Result: ${isKanbanFile}`
-                  // );
-                } else {
-                  // console.log(
-                  //   `[Kanban Main] setViewState: Could not get TFile for ${filePath}. Path might be a folder or non-existent.`
-                  // );
-                }
-              } else {
-                // console.log('[Kanban Main] setViewState: self.app.vault is not available.');
+            const filePathForModeCheck = newState.state?.file as string | undefined;
+
+            if (filePathForModeCheck) {
+              const file = self.app.vault.getAbstractFileByPath(filePathForModeCheck);
+              if (file instanceof TFile) {
+                isKanbanFile = hasFrontmatterKey(file);
               }
             }
-            if (isKanbanFile && newState.type !== kanbanViewType) {
-              // console.log(
-              //   '[Kanban Main] setViewState: Is a Kanban file, will change type to kanban.'
-              // );
+
+            if (isKanbanFile && filePathForModeCheck) {
+              const leafId = (this as any).id || filePathForModeCheck; // Use leaf.id if available, else filePath
+              const explicitMode = self.kanbanFileModes[leafId];
+
+              if (explicitMode === 'markdown') {
+                newState.type = 'markdown';
+              } else {
+                // Default to Kanban view for Kanban files unless explicitly set to markdown for this leaf
+                newState.type = kanbanViewType;
+              }
+            } else if (isKanbanFile && !filePathForModeCheck) {
+              // It's a Kanban file but we don't have a path for mode checking (should be rare)
+              // Default to Kanban view
               newState.type = kanbanViewType;
-            } else if (isKanbanFile && newState.type === kanbanViewType) {
-              // console.log(
-              //   '[Kanban Main] setViewState: Is a Kanban file and type is already kanban.'
-              // );
-            } else {
-              // console.log(
-              //   '[Kanban Main] setViewState: Not a Kanban file or type does not need change. Current type:',
-              //   newState.type
-              // );
             }
-            // console.log(
-            //   '[Kanban Main] setViewState: newState being passed to original setViewState (JSON):',
-            //   JSON.stringify(newState, null, 2)
-            // );
-            if (
-              eStateForHighlighting &&
-              (eStateForHighlighting.blockId || eStateForHighlighting.match)
-            ) {
-              (this as any)._kanbanPendingHighlightState = eStateForHighlighting;
-              // console.log(
-              //   '[Kanban Main] setViewState: Stored _kanbanPendingHighlightState on leaf:',
-              //   JSON.stringify(eStateForHighlighting, null, 2)
-              // );
-            }
+            // If not a KanbanFile, newState.type remains as Obsidian determined it.
+
             return originalMethod.call(this, newState, eStateForHighlighting);
           };
         },

@@ -49,6 +49,11 @@ function getCSSClass(frontmatter: Record<string, any>): string[] {
 }
 
 export const Kanban = ({ view, stateManager, reactState }: KanbanProps) => {
+  if (!stateManager) {
+    console.warn('[Kanban Component] StateManager is not available. Aborting render.');
+    return null;
+  }
+
   const dateColorsFromHook = stateManager.useSetting('date-colors');
   const tagColorsFromHook = stateManager.useSetting('tag-colors');
 

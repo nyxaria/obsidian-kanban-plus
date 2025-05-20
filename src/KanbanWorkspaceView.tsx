@@ -536,7 +536,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin }) {
                 style={{
                   color: colorValue,
                   backgroundColor: bgColor,
-                  padding: '3px 6px',
+                  padding: '0px 6px',
                   borderRadius: '4px',
                   marginRight: '5px',
                   display: 'inline-flex',
