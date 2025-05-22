@@ -974,7 +974,6 @@ export class KanbanView extends TextFileView implements HoverParent {
       `[KanbanView] applyHighlight: Called. Current targetHighlightLocation: ${targetHighlightLocationString}`
     );
 
-    // Clear existing highlights first
     this.contentEl.querySelectorAll('.search-result-highlight').forEach((el) => {
       el.removeClass('search-result-highlight');
     });
@@ -984,58 +983,84 @@ export class KanbanView extends TextFileView implements HoverParent {
       return;
     }
 
-    const board = this.getBoard(); // Get current board data
-
-    // If highlighting relies on cardTitle or listName, and board is not available, we might not be able to proceed.
-    if (
-      !board &&
-      (this.targetHighlightLocation.cardTitle ||
-        this.targetHighlightLocation.listName ||
-        !this.targetHighlightLocation.blockId) // if no blockId, we definitely need the board
-    ) {
+    const board = this.getBoard();
+    if (!board) {
       console.error(
-        `[KanbanView] applyHighlight: Board data not available, and lookup (title/list) requires it. File: ${this.file?.path}. Aborting highlight.`
+        `[KanbanView] applyHighlight: Board data not available for file: ${this.file?.path}. Aborting highlight.`
       );
       return;
     }
 
     let targetItemElement: HTMLElement | null = null;
-    let blockIdToSearch = this.targetHighlightLocation.blockId;
+    let blockIdToSearch: string | undefined = this.targetHighlightLocation.blockId;
+    let cardTitleForSearch: string | undefined = this.targetHighlightLocation.cardTitle;
+    let listNameForSearch: string | undefined = this.targetHighlightLocation.listName;
 
-    // If match object exists (from global search), try to extract blockId or title
-    if (this.targetHighlightLocation.match && this.targetHighlightLocation.match.item) {
-      const matchedItemData = this.targetHighlightLocation.match.item as ItemData; // Assuming 'item' holds ItemData
-      if (matchedItemData.blockId) {
-        blockIdToSearch = matchedItemData.blockId;
+    // 1. Handle global search result from targetHighlightLocation.match
+    if (this.targetHighlightLocation.match && !blockIdToSearch && !cardTitleForSearch) {
+      const matchData = this.targetHighlightLocation.match;
+      console.log('[KanbanView] applyHighlight: Processing global search match:', matchData);
+      if (matchData.content && matchData.matches && matchData.matches.length > 0) {
+        const content = matchData.content as string;
+        const firstMatchOffsets = matchData.matches[0] as [number, number];
+        const matchedText = content.substring(firstMatchOffsets[0], firstMatchOffsets[1]);
         console.log(
-          `[KanbanView] applyHighlight: Using blockId '${blockIdToSearch}' from targetHighlightLocation.match.item`
+          `[KanbanView] applyHighlight: Extracted matchedText from global search: '${matchedText}'`
         );
-      } else if (matchedItemData.title && !this.targetHighlightLocation.cardTitle) {
-        // Fallback to title from match if no blockId and no explicit cardTitle in targetHighlightLocation
-        this.targetHighlightLocation.cardTitle = matchedItemData.title;
-        console.log(
-          `[KanbanView] applyHighlight: Using cardTitle '${this.targetHighlightLocation.cardTitle}' from targetHighlightLocation.match.item as blockId not found.`
+
+        let foundCard = null;
+        for (const lane of board.children) {
+          for (const item of lane.children) {
+            // Check against titleRaw first, then title if no match
+            if (item.data.titleRaw?.toLowerCase().includes(matchedText.toLowerCase())) {
+              foundCard = item;
+              break;
+            }
+            if (!foundCard && item.data.title?.toLowerCase().includes(matchedText.toLowerCase())) {
+              foundCard = item;
+              break;
+            }
+          }
+          if (foundCard) break;
+        }
+
+        if (foundCard) {
+          blockIdToSearch = foundCard.data.blockId || foundCard.id;
+          cardTitleForSearch = undefined; // Prioritize blockId/id found from search match
+          listNameForSearch = undefined;
+          console.log(
+            `[KanbanView] applyHighlight: Found card from global search. ID/BlockID to use: '${blockIdToSearch}' from card title: '${foundCard.data.titleRaw}'`
+          );
+        } else {
+          console.warn(
+            `[KanbanView] applyHighlight: Global search matchedText '${matchedText}' not found in any card title on the board.`
+          );
+          // Fall through to allow blockId/title/list if they were somehow set along with match
+        }
+      } else {
+        console.warn(
+          '[KanbanView] applyHighlight: Malformed global search match data in targetHighlightLocation:',
+          matchData
         );
       }
     }
 
+    // 2. Attempt to find by blockId (either from direct nav or resolved from global search)
     if (blockIdToSearch) {
-      // Normalize blockId (remove leading # or ^)
       const normalizedBlockId = blockIdToSearch.replace(/^[#^]+/, '');
       console.log(
         `[KanbanView] applyHighlight: Attempting to find parent item element by data-id: '${normalizedBlockId}'`
       );
-      // First, find the .kanban-plugin__item which has the data-id
       const parentItemElement = this.contentEl.querySelector(
         `div.kanban-plugin__item[data-id='${normalizedBlockId}']`
       ) as HTMLElement;
 
       if (parentItemElement) {
         console.log('[KanbanView] applyHighlight: Found parent item element:', parentItemElement);
-        // Then, find the .kanban-plugin__item-content-wrapper within it
-        targetItemElement = parentItemElement.querySelector(
-          'div.kanban-plugin__item-content-wrapper'
-        ) as HTMLElement;
+        targetItemElement =
+          (parentItemElement.querySelector(
+            'div.kanban-plugin__item-content-wrapper'
+          ) as HTMLElement) || parentItemElement;
         if (targetItemElement) {
           console.log(
             '[KanbanView] applyHighlight: Found content wrapper for blockId:',
@@ -1043,10 +1068,8 @@ export class KanbanView extends TextFileView implements HoverParent {
           );
         } else {
           console.log(
-            '[KanbanView] applyHighlight: Parent item found, but .kanban-plugin__item-content-wrapper not found within it for blockId.'
+            '[KanbanView] applyHighlight: Parent item found, but .kanban-plugin__item-content-wrapper not found. Using parent.'
           );
-          // As a fallback, use the parent item itself if content wrapper is missing
-          targetItemElement = parentItemElement;
         }
       } else {
         console.log(
@@ -1055,19 +1078,13 @@ export class KanbanView extends TextFileView implements HoverParent {
       }
     }
 
-    // If not found by blockId, or if blockId wasn't primary, try by title and list name
-    if (
-      !targetItemElement &&
-      this.targetHighlightLocation.cardTitle &&
-      this.targetHighlightLocation.listName &&
-      board
-    ) {
+    // 3. If not found by blockId, and cardTitleForSearch/listNameForSearch are available (from direct nav)
+    if (!targetItemElement && cardTitleForSearch && listNameForSearch) {
       console.log(
-        `[KanbanView] applyHighlight: Attempting title/list lookup. Title: '${this.targetHighlightLocation.cardTitle}', List: '${this.targetHighlightLocation.listName}'`
+        `[KanbanView] applyHighlight: Attempting title/list lookup. Title: '${cardTitleForSearch}', List: '${listNameForSearch}'`
       );
       const targetLane = board.children.find(
-        (lane) =>
-          lane.data.title.toLowerCase() === this.targetHighlightLocation.listName?.toLowerCase()
+        (lane) => lane.data.title.toLowerCase() === listNameForSearch?.toLowerCase()
       );
       if (targetLane) {
         console.log(
@@ -1076,9 +1093,10 @@ export class KanbanView extends TextFileView implements HoverParent {
         for (const item of targetLane.children) {
           const currentItemTitle = item.data.title;
           console.log(
-            `[KanbanView] applyHighlight: Item ID ${item.id} in lane, Title from data: "'${currentItemTitle}'", Target Title: "'${this.targetHighlightLocation.cardTitle}'"`
+            `[KanbanView] applyHighlight: Item ID ${item.id} in lane, Title from data: "'${currentItemTitle}'", Target Title: "'${cardTitleForSearch}'"`
           );
-          if (currentItemTitle?.includes(this.targetHighlightLocation.cardTitle ?? '')) {
+          // Use includes for partial match, as cardTitle might be a snippet
+          if (currentItemTitle?.toLowerCase().includes(cardTitleForSearch.toLowerCase())) {
             const itemDomId = item.data.blockId ? item.data.blockId.replace(/^[#^]+/, '') : item.id;
             const parentItemElement = this.contentEl.querySelector(
               `div.kanban-plugin__item[data-id='${itemDomId}']`
@@ -1089,24 +1107,22 @@ export class KanbanView extends TextFileView implements HoverParent {
                   'div.kanban-plugin__item-content-wrapper'
                 ) as HTMLElement) || parentItemElement;
               console.log(
-                '[KanbanView] applyHighlight: Found item by title in lane (DOM element):',
+                '[KanbanView] applyHighlight: Found item by title/list in lane (DOM element):',
                 targetItemElement
               );
             } else {
               console.log(
-                `[KanbanView] applyHighlight: Matched item data by title (ID: ${item.id}), but its DOM element with data-id '${itemDomId}' not found.`
+                `[KanbanView] applyHighlight: Matched item data by title/list (ID: ${item.id}), but its DOM element with data-id '${itemDomId}' not found.`
               );
             }
-            break;
+            break; // Found the first matching card by title
           }
         }
       } else {
-        console.log(
-          `[KanbanView] applyHighlight: Lane '${this.targetHighlightLocation.listName}' not found.`
-        );
+        console.log(`[KanbanView] applyHighlight: Lane '${listNameForSearch}' not found.`);
       }
       console.log(
-        `[KanbanView] applyHighlight: Result of title/list lookup for item '${this.targetHighlightLocation.cardTitle}' in list '${this.targetHighlightLocation.listName}':`,
+        `[KanbanView] applyHighlight: Result of title/list lookup for item '${cardTitleForSearch}' in list '${listNameForSearch}':`,
         targetItemElement
       );
     }
