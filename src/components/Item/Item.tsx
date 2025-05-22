@@ -36,6 +36,7 @@ import { getItemClassModifiers } from './helpers';
 export interface DraggableItemProps {
   item: Item;
   itemIndex: number;
+  laneId: string;
   isStatic?: boolean;
   shouldMarkItemsComplete?: boolean;
   targetHighlight?: any;
@@ -312,7 +313,7 @@ export const DraggableItem = memo(function DraggableItem(props: DraggableItemPro
   const measureRef = useRef<HTMLDivElement>(null);
   const search = useContext(SearchContext);
 
-  const { itemIndex, targetHighlight, ...innerProps } = props;
+  const { itemIndex, targetHighlight, laneId, ...innerProps } = props;
 
   const bindHandle = useDragHandle(measureRef, measureRef);
 
@@ -346,7 +347,13 @@ export const DraggableItem = memo(function DraggableItem(props: DraggableItemPro
             measureRef={measureRef}
             id={props.item.id}
             index={itemIndex}
-            data={props.item}
+            data={{
+              id: props.item.id,
+              type: 'item',
+              accepts: ['item'],
+              parentLaneId: laneId,
+              originalIndex: itemIndex,
+            }}
           >
             <ItemInner
               {...innerProps}
@@ -364,6 +371,7 @@ export const DraggableItem = memo(function DraggableItem(props: DraggableItemPro
 interface ItemsProps {
   isStatic?: boolean;
   items: Item[];
+  laneId: string;
   shouldMarkItemsComplete: boolean;
   targetHighlight?: any;
   cancelEditCounter: number;
@@ -372,6 +380,7 @@ interface ItemsProps {
 export const Items = memo(function Items({
   isStatic,
   items,
+  laneId,
   shouldMarkItemsComplete,
   targetHighlight,
   cancelEditCounter,
@@ -388,6 +397,7 @@ export const Items = memo(function Items({
             key={boardView + item.id}
             item={item}
             itemIndex={i}
+            laneId={laneId}
             shouldMarkItemsComplete={shouldMarkItemsComplete}
             isStatic={isStatic}
             targetHighlight={targetHighlight}

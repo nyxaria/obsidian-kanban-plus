@@ -95,6 +95,9 @@ export class KanbanView extends TextFileView implements HoverParent {
       'tag-symbols': DEFAULT_SETTINGS['tag-symbols'] || [],
       savedWorkspaceViews: DEFAULT_SETTINGS.savedWorkspaceViews || [],
       hideHashForTagsWithoutSymbols: DEFAULT_SETTINGS.hideHashForTagsWithoutSymbols || false,
+      teamMembers: DEFAULT_SETTINGS.teamMembers || [],
+      teamMemberColors: DEFAULT_SETTINGS.teamMemberColors || {},
+      editable: DEFAULT_SETTINGS.editable !== undefined ? DEFAULT_SETTINGS.editable : true,
     };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));
@@ -747,24 +750,17 @@ export class KanbanView extends TextFileView implements HoverParent {
     ReactDOM.unmountComponentAtNode(this.contentEl);
   }
 
-  handleDrop(dragEntity: any, dropEntity: any) {
-    console.log('[KanbanView] handleDrop called', dragEntity, dropEntity);
-    // Actual drop logic will go here
-  }
-
-  async setReactState(newState: { targetHighlight?: any; forceRerender?: boolean }) {
+  async setReactState(newState?: any) {
+    console.log('[KanbanView] setReactState called with:', newState);
     let stateManager = this.plugin.stateManagers.get(this.file);
 
-    // If StateManager is not found, try to re-establish it via plugin.addView
-    // This can happen if the view was inactive and is now being updated for highlighting.
     if (!stateManager && this.file && this.data) {
-      // Check this.data too
       console.warn(
         `[KanbanView] setReactState: StateManager not found for ${this.file.path}. Attempting to re-initialize with plugin.addView.`
       );
       try {
         await this.plugin.addView(this, this.data, this.isPrimary);
-        stateManager = this.plugin.stateManagers.get(this.file); // Re-fetch after addView
+        stateManager = this.plugin.stateManagers.get(this.file);
         if (stateManager) {
           console.log(
             `[KanbanView] setReactState: StateManager re-established for ${this.file.path} after plugin.addView.`
@@ -774,13 +770,15 @@ export class KanbanView extends TextFileView implements HoverParent {
             `[KanbanView] setReactState: Failed to re-establish StateManager for ${this.file.path} after plugin.addView. Cannot render.`
           );
           this.contentEl.empty();
-          this.contentEl.createDiv({ text: 'Error: Failed to connect to Kanban data manager.' });
+          this.contentEl.createDiv({
+            text: 'Error: Failed to connect to Kanban data manager.',
+          });
           return;
         }
-      } catch (error) {
+      } catch (e) {
         console.error(
           `[KanbanView] setReactState: Error during plugin.addView for ${this.file.path}:`,
-          error
+          e
         );
         this.contentEl.empty();
         this.contentEl.createDiv({ text: 'Error: Could not initialize Kanban board view.' });
@@ -788,23 +786,22 @@ export class KanbanView extends TextFileView implements HoverParent {
       }
     }
 
-    // Check for headerEl property existence before using it, and cast for usage
+    // Header element visibility (simplified, ensure headerEl exists and has show/hide)
     if (
-      'headerEl' in this &&
-      this.headerEl &&
-      typeof (this.headerEl as any).hide === 'function' &&
-      typeof (this.headerEl as any).show === 'function'
+      (this as any).headerEl &&
+      typeof (this as any).headerEl.hide === 'function' &&
+      typeof (this as any).headerEl.show === 'function'
     ) {
-      const headerEl = this.headerEl as HTMLElement; // Cast to HTMLElement for hide/show
-      if (!this.plugin.settings['show-board-settings']) {
-        headerEl.hide();
-      } else {
+      const headerEl = (this as any).headerEl;
+      // Assuming a global setting for show-board-settings, replace with actual logic if different
+      if (this.plugin.settings['show-board-settings']) {
+        // This might need to be a board-specific setting
         headerEl.show();
+      } else {
+        headerEl.hide();
       }
     } else {
-      console.warn(
-        '[KanbanView] setReactState: this.headerEl is not available or does not have hide/show methods.'
-      );
+      // console.warn('[KanbanView] setReactState: this.headerEl is not available or does not have hide/show methods.');
     }
 
     if (stateManager) {
@@ -813,55 +810,45 @@ export class KanbanView extends TextFileView implements HoverParent {
       }
 
       const win = this.getWindow();
-
-      // Ensure that the initial render (or re-render) happens after a slight delay
-      // This is to prevent blocking the UI thread, especially during initial load or
-      // when rapidly switching between files. It also gives Obsidian's layout
-      // engine a chance to settle if the view is being resized or moved.
       if (this._initialRenderTimeoutId) {
         win.clearTimeout(this._initialRenderTimeoutId);
       }
+      this._isPendingInitialRender = true; // Flag that a render is intended
 
-      this._isPendingInitialRender = true;
-
-      const renderBoard = (boardFromArgs: Board | null, isPrimaryFromArgs: boolean) => {
+      const renderBoardCallback = (currentBoardState: Board | null, isPrimaryView: boolean) => {
         if (!this.contentEl || (this.leaf as any).detached) {
           console.log(
-            '[KanbanView] setReactState: Content element not available or leaf detached. Skipping render.'
+            '[KanbanView] setReactState (renderBoardCallback): Content element not available or leaf detached. Skipping render.'
           );
           this._isPendingInitialRender = false;
           return;
         }
 
-        // Call getBoard() and store its result
-        const currentBoardState = this.getBoard();
         console.log(
-          `[KanbanView] renderBoard: Value received from this.getBoard(): `,
+          '[KanbanView] renderBoardCallback: Value received from this.getBoard(): ',
           currentBoardState ? `Board object with ID: ${currentBoardState.id}` : 'null'
         );
 
         if (this.contentEl) {
           const unmounted = ReactDOM.unmountComponentAtNode(this.contentEl);
           console.log(
-            `[KanbanView] setReactState: Attempted unmount. Was component unmounted? ${unmounted}. contentEl children after unmount: ${this.contentEl.children.length}`
+            `[KanbanView] setReactState (renderBoardCallback): Attempted unmount. Was component unmounted? ${unmounted}. contentEl children after unmount: ${this.contentEl.children.length}`
           );
-          // As a more forceful measure, also clear innerHTML if unmountComponentAtNode might leave DOM elements
-          // This can sometimes help if Preact/React has lost track of the root.
+          // Aggressive cleanup if unmount fails or leaves children
           if (!unmounted || this.contentEl.children.length > 0) {
             console.log(
-              `[KanbanView] setReactState: Unmount returned ${unmounted} or children still exist. Clearing innerHTML.`
+              `[KanbanView] setReactState (renderBoardCallback): Unmount returned ${unmounted} or children still exist. Clearing innerHTML.`
             );
             this.contentEl.innerHTML = '';
           }
-          this._reactHasRenderedOnceInThisInstance = true; // Still useful to track if a render has occurred
+          this._reactHasRenderedOnceInThisInstance = true;
         } else {
           console.warn(
-            '[KanbanView] setReactState: contentEl is null or undefined before attempting to unmount/render.'
+            '[KanbanView] setReactState (renderBoardCallback): contentEl is null or undefined before attempting to unmount/render.'
           );
         }
 
         if (currentBoardState) {
-          // Check the locally stored result
           ReactDOM.render(
             React.createElement(
               DndContext,
@@ -876,7 +863,7 @@ export class KanbanView extends TextFileView implements HoverParent {
                 app: this.app,
                 file: this.file,
                 reactState: this._reactState,
-                setReactState: (s: any) => this.setReactState(s),
+                setReactState: (s: any) => this.setReactState(s), // Pass bound version
                 emitter: this.emitter,
                 dispatch: (...args: any) => this.plugin.onDbChange(this.file, ...args),
                 onwardsNavigate: this.plugin.onwardsNavigate,
@@ -885,90 +872,269 @@ export class KanbanView extends TextFileView implements HoverParent {
             ),
             this.contentEl
           );
-          console.log('[KanbanView] setReactState: React component rendered/updated.');
+          console.log(
+            '[KanbanView] setReactState (renderBoardCallback): React component rendered/updated.'
+          );
           this._isPendingInitialRender = false;
-          this.pendingHighlightScroll = null; // Clear pending scroll after render
+          this.pendingHighlightScroll = null; // Clear pending scroll state
 
-          // After rendering, if there was a pending highlight scroll, apply it.
           if (this.targetHighlightLocation) {
             console.log(
-              '[KanbanView] setReactState: Scheduling applyHighlight after render with a short delay for target:',
+              '[KanbanView] setReactState (renderBoardCallback): Scheduling applyHighlight after render with a short delay for target:',
               JSON.stringify(this.targetHighlightLocation)
             );
             this.getWindow().setTimeout(() => {
               const hasFocus = this.contentEl.contains(document.activeElement);
               const viewStillActive = this.contentEl && !(this.leaf as any).detached;
+              let targetHighlightLocationString = 'null';
+              try {
+                targetHighlightLocationString = JSON.stringify(this.targetHighlightLocation);
+              } catch (e_shl) {
+                console.error(
+                  '[KanbanView] ERROR stringifying this.targetHighlightLocation in setReactState:',
+                  e_shl.message
+                );
+                targetHighlightLocationString = `UNSTRINGIFIABLE: ${Object.keys(this.targetHighlightLocation || {}).join(', ')}`;
+              }
               console.log(
-                `[KanbanView] setReactState (setTimeout): Checking conditions before applyHighlight. Target: ${JSON.stringify(
-                  this.targetHighlightLocation
-                )}, HasFocus: ${hasFocus}, ViewStillActive: ${viewStillActive}`
+                `[KanbanView] setReactState (renderBoardCallback setTimeout): Checking conditions before applyHighlight. Target: ${targetHighlightLocationString}, HasFocus: ${hasFocus}, ViewStillActive: ${viewStillActive}`
               );
               if (this.targetHighlightLocation && viewStillActive) {
                 console.log(
-                  '[KanbanView] setReactState (setTimeout): Conditions met. Calling applyHighlight.'
+                  '[KanbanView] setReactState (renderBoardCallback setTimeout): Conditions met. Calling applyHighlight.'
                 );
                 this.applyHighlight();
-              } else if (!this.targetHighlightLocation) {
+              } else if (this.targetHighlightLocation) {
+                if (!viewStillActive)
+                  console.log(
+                    '[KanbanView] setReactState (renderBoardCallback setTimeout): Aborted applyHighlight because view is no longer active or contentEl is missing.'
+                  );
+              } else {
                 console.log(
-                  '[KanbanView] setReactState (setTimeout): Aborted applyHighlight because targetHighlightLocation is now null.'
-                );
-              } else if (!viewStillActive) {
-                console.log(
-                  '[KanbanView] setReactState (setTimeout): Aborted applyHighlight because view is no longer active or contentEl is missing.'
+                  '[KanbanView] setReactState (renderBoardCallback setTimeout): Aborted applyHighlight because targetHighlightLocation is now null.'
                 );
               }
             }, 100);
           }
         } else {
-          // This 'else' is now based on currentBoardState
-          console.warn(
-            `[KanbanView] renderBoard: currentBoardState (from this.getBoard()) is null for file ${this.file?.path}. Cannot render board.`
+          console.error(
+            `[KanbanView] setReactState (renderBoardCallback): currentBoardState (from this.getBoard()) is null for file ${this.file?.path}. Cannot render board.`
           );
           this.contentEl.empty();
-          this.contentEl.createDiv({ text: 'Error: Kanban data not available for rendering.' });
+          this.contentEl.createDiv({
+            text: 'Error: Kanban data not available for rendering.',
+          });
           this._isPendingInitialRender = false;
         }
       };
 
-      // For the very first render in the view's lifecycle, or if forced.
-      if (!this._reactHasRenderedOnceInThisInstance) {
-        this._initialRenderTimeoutId = win.setTimeout(
-          () => renderBoard(this.getBoard(), this.isPrimary),
-          0
-        );
-      } else {
-        // For subsequent updates, render immediately if not already pending
-        // This helps with responsiveness for things like search updates
-        if (!this._isPendingInitialRender || newState?.forceRerender) {
-          renderBoard(this.getBoard(), this.isPrimary);
+      // Determine if immediate render or timeout render
+      if (this._reactHasRenderedOnceInThisInstance) {
+        if (!this._isPendingInitialRender || (newState && newState.forceRerender)) {
+          // If already rendered, and not in a pending initial state (or forced), render directly
+          renderBoardCallback(this.getBoard(), this.isPrimary);
         } else {
-          // If a render is already pending, ensure it runs, but don't stack them.
-          // This scenario might be rare if logic is correct.
+          // If pending initial render, ensure it happens via timeout
           if (this._initialRenderTimeoutId) win.clearTimeout(this._initialRenderTimeoutId);
           this._initialRenderTimeoutId = win.setTimeout(
-            () => renderBoard(this.getBoard(), this.isPrimary),
-            0
+            () => renderBoardCallback(this.getBoard(), this.isPrimary),
+            0 // Execute as soon as possible
           );
         }
+      } else {
+        // First render always goes through timeout to ensure DOM is ready etc.
+        this._initialRenderTimeoutId = win.setTimeout(
+          () => renderBoardCallback(this.getBoard(), this.isPrimary),
+          0 // Execute as soon as possible
+        );
       }
     } else {
       console.warn(
         `[KanbanView] setReactState: StateManager not found for file ${this.file?.path}. Cannot render board.`
       );
       this.contentEl.empty();
-      this.contentEl.createDiv({ text: 'Error: Kanban data manager not found for this file.' });
+      this.contentEl.createDiv({
+        text: 'Error: Kanban data manager not found for this file.',
+      });
     }
   }
 
-  public clearActiveSearchHighlight() {
-    // This is for the BORDER highlight
+  applyHighlight() {
+    let targetHighlightLocationString = 'null';
+    try {
+      targetHighlightLocationString = JSON.stringify(this.targetHighlightLocation);
+    } catch (e_ahl) {
+      console.error(
+        '[KanbanView] ERROR stringifying this.targetHighlightLocation in applyHighlight:',
+        e_ahl.message
+      );
+      targetHighlightLocationString = `UNSTRINGIFIABLE: ${Object.keys(this.targetHighlightLocation || {}).join(', ')}`;
+    }
+    console.log(
+      `[KanbanView] applyHighlight: Called. Current targetHighlightLocation: ${targetHighlightLocationString}`
+    );
+
+    // Clear existing highlights first
+    this.contentEl.querySelectorAll('.search-result-highlight').forEach((el) => {
+      el.removeClass('search-result-highlight');
+    });
+
+    if (!this.targetHighlightLocation) {
+      console.log('[KanbanView] applyHighlight: No targetHighlightLocation. Aborting.');
+      return;
+    }
+
+    const board = this.getBoard(); // Get current board data
+
+    // If highlighting relies on cardTitle or listName, and board is not available, we might not be able to proceed.
+    if (
+      !board &&
+      (this.targetHighlightLocation.cardTitle ||
+        this.targetHighlightLocation.listName ||
+        !this.targetHighlightLocation.blockId) // if no blockId, we definitely need the board
+    ) {
+      console.error(
+        `[KanbanView] applyHighlight: Board data not available, and lookup (title/list) requires it. File: ${this.file?.path}. Aborting highlight.`
+      );
+      return;
+    }
+
+    let targetItemElement: HTMLElement | null = null;
+    let blockIdToSearch = this.targetHighlightLocation.blockId;
+
+    // If match object exists (from global search), try to extract blockId or title
+    if (this.targetHighlightLocation.match && this.targetHighlightLocation.match.item) {
+      const matchedItemData = this.targetHighlightLocation.match.item as ItemData; // Assuming 'item' holds ItemData
+      if (matchedItemData.blockId) {
+        blockIdToSearch = matchedItemData.blockId;
+        console.log(
+          `[KanbanView] applyHighlight: Using blockId '${blockIdToSearch}' from targetHighlightLocation.match.item`
+        );
+      } else if (matchedItemData.title && !this.targetHighlightLocation.cardTitle) {
+        // Fallback to title from match if no blockId and no explicit cardTitle in targetHighlightLocation
+        this.targetHighlightLocation.cardTitle = matchedItemData.title;
+        console.log(
+          `[KanbanView] applyHighlight: Using cardTitle '${this.targetHighlightLocation.cardTitle}' from targetHighlightLocation.match.item as blockId not found.`
+        );
+      }
+    }
+
+    if (blockIdToSearch) {
+      // Normalize blockId (remove leading # or ^)
+      const normalizedBlockId = blockIdToSearch.replace(/^[#^]+/, '');
+      console.log(
+        `[KanbanView] applyHighlight: Attempting to find parent item element by data-id: '${normalizedBlockId}'`
+      );
+      // First, find the .kanban-plugin__item which has the data-id
+      const parentItemElement = this.contentEl.querySelector(
+        `div.kanban-plugin__item[data-id='${normalizedBlockId}']`
+      ) as HTMLElement;
+
+      if (parentItemElement) {
+        console.log('[KanbanView] applyHighlight: Found parent item element:', parentItemElement);
+        // Then, find the .kanban-plugin__item-content-wrapper within it
+        targetItemElement = parentItemElement.querySelector(
+          'div.kanban-plugin__item-content-wrapper'
+        ) as HTMLElement;
+        if (targetItemElement) {
+          console.log(
+            '[KanbanView] applyHighlight: Found content wrapper for blockId:',
+            targetItemElement
+          );
+        } else {
+          console.log(
+            '[KanbanView] applyHighlight: Parent item found, but .kanban-plugin__item-content-wrapper not found within it for blockId.'
+          );
+          // As a fallback, use the parent item itself if content wrapper is missing
+          targetItemElement = parentItemElement;
+        }
+      } else {
+        console.log(
+          `[KanbanView] applyHighlight: Element with data-id '${normalizedBlockId}' not found directly.`
+        );
+      }
+    }
+
+    // If not found by blockId, or if blockId wasn't primary, try by title and list name
+    if (
+      !targetItemElement &&
+      this.targetHighlightLocation.cardTitle &&
+      this.targetHighlightLocation.listName &&
+      board
+    ) {
+      console.log(
+        `[KanbanView] applyHighlight: Attempting title/list lookup. Title: '${this.targetHighlightLocation.cardTitle}', List: '${this.targetHighlightLocation.listName}'`
+      );
+      const targetLane = board.children.find(
+        (lane) =>
+          lane.data.title.toLowerCase() === this.targetHighlightLocation.listName?.toLowerCase()
+      );
+      if (targetLane) {
+        console.log(
+          `[KanbanView] applyHighlight: Found target lane by title: ${targetLane.data.title}. It has ${targetLane.children.length} items.`
+        );
+        for (const item of targetLane.children) {
+          const currentItemTitle = item.data.title;
+          console.log(
+            `[KanbanView] applyHighlight: Item ID ${item.id} in lane, Title from data: "'${currentItemTitle}'", Target Title: "'${this.targetHighlightLocation.cardTitle}'"`
+          );
+          if (currentItemTitle?.includes(this.targetHighlightLocation.cardTitle ?? '')) {
+            const itemDomId = item.data.blockId ? item.data.blockId.replace(/^[#^]+/, '') : item.id;
+            const parentItemElement = this.contentEl.querySelector(
+              `div.kanban-plugin__item[data-id='${itemDomId}']`
+            ) as HTMLElement;
+            if (parentItemElement) {
+              targetItemElement =
+                (parentItemElement.querySelector(
+                  'div.kanban-plugin__item-content-wrapper'
+                ) as HTMLElement) || parentItemElement;
+              console.log(
+                '[KanbanView] applyHighlight: Found item by title in lane (DOM element):',
+                targetItemElement
+              );
+            } else {
+              console.log(
+                `[KanbanView] applyHighlight: Matched item data by title (ID: ${item.id}), but its DOM element with data-id '${itemDomId}' not found.`
+              );
+            }
+            break;
+          }
+        }
+      } else {
+        console.log(
+          `[KanbanView] applyHighlight: Lane '${this.targetHighlightLocation.listName}' not found.`
+        );
+      }
+      console.log(
+        `[KanbanView] applyHighlight: Result of title/list lookup for item '${this.targetHighlightLocation.cardTitle}' in list '${this.targetHighlightLocation.listName}':`,
+        targetItemElement
+      );
+    }
+
+    if (targetItemElement) {
+      console.log(
+        '[KanbanView] applyHighlight: Applying .search-result-highlight to:',
+        targetItemElement
+      );
+      targetItemElement.addClass('search-result-highlight');
+      // Scroll into view with a slight delay to ensure layout is stable
+      setTimeout(() => {
+        targetItemElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+    } else {
+      console.log(
+        `[KanbanView] applyHighlight: No target item element found for highlighting. target: ${JSON.stringify(this.targetHighlightLocation)}. No ID could be determined (direct, subpath, or offset). Title/list search for title: '${this.targetHighlightLocation.cardTitle}' in list: '${this.targetHighlightLocation.listName}' also failed or was not applicable.`
+      );
+    }
+  }
+
+  clearActiveSearchHighlight() {
     console.log(
       '[KanbanView] clearActiveSearchHighlight (for BORDER) called. Current this.targetHighlightLocation:',
       this.targetHighlightLocation
     );
     if (this.targetHighlightLocation) {
-      // If any border highlight was active
-      this.targetHighlightLocation = null;
+      this.targetHighlightLocation = null; // Clear the state that might trigger re-highlighting
       this.contentEl.querySelectorAll('.search-result-highlight').forEach((el) => {
         el.removeClass('search-result-highlight');
       });
@@ -980,397 +1146,586 @@ export class KanbanView extends TextFileView implements HoverParent {
     }
   }
 
-  public processHighlightFromExternal(eState: any) {
-    if (eState && eState.blockId) {
-      this.targetHighlightLocation = { blockId: eState.blockId };
-      setTimeout(() => {
-        if (this.targetHighlightLocation) {
-          this.setReactState({ targetHighlight: this.targetHighlightLocation });
-        }
-      }, 100);
-    } else {
-      if (!eState && this.targetHighlightLocation) {
-        this.targetHighlightLocation = null;
-        this.setReactState({ targetHighlight: null });
-      }
-    }
-  }
+  handleBoardClickToClearHighlight = (event: MouseEvent) => {
+    const target = event.target as HTMLElement;
 
-  private handleBoardClickToClearHighlight = (event: MouseEvent) => {
-    const targetElement = event.target as HTMLElement;
-    if (targetElement.closest('.kanban-plugin__item')) {
-      return;
-    }
+    // Don't clear if the click is on an item itself, or interactive elements like links, buttons, inputs, etc.
     if (
-      targetElement.tagName === 'A' ||
-      targetElement.tagName === 'BUTTON' ||
-      targetElement.tagName === 'INPUT' ||
-      targetElement.tagName === 'TEXTAREA' ||
-      targetElement.tagName === 'SELECT' ||
-      (targetElement.hasAttribute('contenteditable') &&
-        targetElement.getAttribute('contenteditable') === 'true') ||
-      targetElement.closest('.setting-item') // Ignore clicks within settings items in a modal for example
+      target.closest('.kanban-plugin__item') ||
+      target.tagName === 'A' ||
+      target.tagName === 'BUTTON' ||
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      (target.hasAttribute('contenteditable') &&
+        target.getAttribute('contenteditable') === 'true') ||
+      target.closest('.setting-item') // Don't clear if clicking within a setting item (e.g., in a modal over the board)
     ) {
-      return;
+      return; // Do nothing, let the interaction proceed
     }
-    this.clearActiveSearchHighlight(); // Clears border highlight
 
-    // Also clear global search highlight if active
+    // If we reach here, the click was on the board background or a non-interactive area
+    this.clearActiveSearchHighlight();
+
+    // Also clear any global search match stored
     if (this.currentSearchMatch) {
       console.log(
         '[KanbanView] handleBoardClickToClearHighlight: Clearing currentSearchMatch for global search highlight.',
         this.currentSearchMatch
       );
       this.currentSearchMatch = null;
-      this.setReactState({}); // Trigger re-render to remove global search highlights
+      this.setReactState({}); // Trigger a re-render to remove any search-specific UI elements
     } else {
-      console.log(
-        '[KanbanView] handleBoardClickToClearHighlight: No currentSearchMatch to clear for global search highlight.'
-      );
+      // console.log('[KanbanView] handleBoardClickToClearHighlight: No currentSearchMatch to clear for global search highlight.');
     }
 
-    // Emit event to cancel any active card edits, if the setting is enabled
+    // Handle card edit cancellation if the setting is enabled
     if (this.plugin.settings.clickOutsideCardToSaveEdit) {
       console.log(
         '[KanbanView] handleBoardClickToClearHighlight: Emitting "cancelAllCardEdits" (setting enabled)'
       );
       this.emitter.emit('cancelAllCardEdits');
     } else {
-      console.log(
-        '[KanbanView] handleBoardClickToClearHighlight: "clickOutsideCardToSaveEdit" setting disabled. Not emitting event.'
-      );
+      // console.log('[KanbanView] handleBoardClickToClearHighlight: "clickOutsideCardToSaveEdit" setting disabled. Not emitting event.');
     }
   };
 
-  public setTargetHighlightLocation(
-    location: { blockId?: string; cardTitle?: string; listName?: string } | null
-  ) {
-    console.log('[KanbanView] setTargetHighlightLocation (for BORDER):', location);
-    this.targetHighlightLocation = location;
-    // DO NOT update this._reactState.targetHighlight here directly.
-  }
-
-  public applyHighlight() {
+  handleDrop(dragEntity: any, dropEntity: any) {
+    // Enhanced logging for drag and drop entities
     console.log(
-      `[KanbanView] applyHighlight: Called. Current targetHighlightLocation: ${JSON.stringify(
-        this.targetHighlightLocation
-      )}`
+      '[KanbanView] handleDrop RAW DRAG ENTITY (top-level props):',
+      Object.keys(dragEntity).join(', ')
     );
-    this.contentEl.querySelectorAll('.search-result-highlight').forEach((el) => {
-      el.removeClass('search-result-highlight');
-    });
+    console.log(
+      '[KanbanView] handleDrop RAW DROP ENTITY (top-level props):',
+      Object.keys(dropEntity).join(', ')
+    );
 
-    if (!this.targetHighlightLocation) {
-      console.log('[KanbanView] applyHighlight: No targetHighlightLocation. Aborting.');
-      return;
-    }
+    const dragData = dragEntity.getData();
+    const dropData = dropEntity.getData();
+
+    // Create copies for logging, excluding the circular 'win' property
+    const dragDataForLog = { ...dragData };
+    delete dragDataForLog.win;
+    // console.log('[KanbanView] handleDrop DRAG ENTITY DATA:', JSON.stringify(dragDataForLog, null, 2));
+
+    const dropDataForLog = { ...dropData };
+    delete dropDataForLog.win;
+    // console.log('[KanbanView] handleDrop DROP ENTITY DATA:', JSON.stringify(dropDataForLog, null, 2));
 
     const board = this.getBoard();
     if (!board) {
-      console.warn(
-        `[KanbanView] applyHighlight: getBoard() returned null. This may prevent title-based highlighting. File: ${this.file?.path}`
+      console.error('[KanbanView] handleDrop: Could not get board data.');
+      return;
+    }
+    console.log(`[KanbanView] handleDrop: Board ID: ${board.id}, File: ${this.file?.path}`);
+    let newBoard: Board;
+
+    // Card to Lane/List Drag (or reorder within lane)
+    if (
+      dragData?.type === 'item' &&
+      (dropData?.type === 'lane' || dropData?.type === 'placeholder')
+    ) {
+      const cardId = dragData.id; // ID of the card being dragged
+      const sourceLaneId = dragData.parentLaneId; // Custom: Lane ID the card came from
+      const originalCardIndex = dragData.originalIndex; // Custom: Original index in source lane
+
+      let targetLaneId: string | undefined;
+      let targetVisualIndex: number | undefined;
+
+      if (dropData.type === 'lane') {
+        targetLaneId = dropData.id; // ID of the lane being dropped onto
+        targetVisualIndex =
+          typeof dropData.index === 'number'
+            ? dropData.index
+            : board.children.find((lane) => lane.id === targetLaneId)?.children.length || 0;
+        console.log('[KanbanView] handleDrop (Card To Lane): Drop target is a LANE.', {
+          targetLaneId,
+          targetVisualIndex,
+        });
+      } else {
+        // dropData.type === 'placeholder'
+        try {
+          console.log(
+            '[KanbanView] handleDrop (Card To Placeholder): Raw dropEntity.getPath() output:',
+            JSON.stringify(dropEntity.getPath())
+          );
+        } catch (e) {
+          console.error('[KanbanView] ERROR stringifying dropEntity.getPath():', e.message);
+          console.log(
+            '[KanbanView] dropEntity.getPath() raw object (if available):',
+            dropEntity.getPath()
+          );
+        }
+        try {
+          console.log(
+            '[KanbanView] handleDrop (Card To Placeholder): Full dropData for placeholder:',
+            JSON.stringify(dropDataForLog, null, 2)
+          );
+        } catch (e) {
+          console.error('[KanbanView] ERROR stringifying dropDataForLog (placeholder):', e.message);
+          console.log(
+            '[KanbanView] dropDataForLog (placeholder) keys:',
+            Object.keys(dropDataForLog)
+          );
+        }
+
+        const placeholderPath = dropEntity.getPath();
+        if (placeholderPath && placeholderPath.length > 0) {
+          const targetLaneBoardIndex = placeholderPath[0];
+          if (targetLaneBoardIndex >= 0 && targetLaneBoardIndex < board.children.length) {
+            const potentialTargetLane = board.children[targetLaneBoardIndex];
+            if (potentialTargetLane && potentialTargetLane.id) {
+              targetLaneId = potentialTargetLane.id;
+              // The placeholder's index within the lane is often the second part of the path, or dropData.index
+              targetVisualIndex =
+                typeof dropData.index === 'number'
+                  ? dropData.index
+                  : placeholderPath.length > 1
+                    ? placeholderPath[1]
+                    : potentialTargetLane.children.length;
+              console.log(
+                '[KanbanView] handleDrop (Card To Placeholder): Determined target lane from path.',
+                { targetLaneId, targetVisualIndex, targetLaneBoardIndex, placeholderPath }
+              );
+            } else {
+              console.error(
+                '[KanbanView] handleDrop (Card To Placeholder): Lane at path index ' +
+                  targetLaneBoardIndex +
+                  ' is invalid or has no ID.'
+              );
+            }
+          } else {
+            console.error(
+              '[KanbanView] handleDrop (Card To Placeholder): Path lane index ' +
+                targetLaneBoardIndex +
+                ' is out of bounds for board.children.'
+            );
+          }
+        } else {
+          console.error(
+            '[KanbanView] handleDrop (Card To Placeholder): dropEntity.getPath() returned empty or invalid path.'
+          );
+        }
+
+        // If targetLaneId is still undefined after path logic, we have a problem.
+        if (!targetLaneId) {
+          console.error(
+            '[KanbanView] handleDrop (Card To Placeholder): CRITICAL - Could not determine target lane using path. Placeholder data:'
+          );
+          try {
+            console.error(JSON.stringify(dropDataForLog, null, 2)); // Log problematic data here
+          } catch (e_crit) {
+            console.error(
+              '[KanbanView] ERROR stringifying dropDataForLog in CRITICAL block:',
+              e_crit.message
+            );
+            console.log(
+              '[KanbanView] dropDataForLog (CRITICAL block) keys:',
+              Object.keys(dropDataForLog)
+            );
+          }
+          return; // Early exit
+        }
+      }
+
+      console.log(
+        '[KanbanView] handleDrop (Card To Lane/Placeholder): Extracted IDs and Indices:',
+        // Removed JSON.stringify here for now to avoid potential errors on the main log object if complex values exist.
+        {
+          cardId,
+          sourceLaneId,
+          originalCardIndex,
+          targetLaneId,
+          targetVisualIndex,
+          dragDataType: dragData?.type,
+          dropDataType: dropData?.type,
+        }
       );
-      if (this.targetHighlightLocation.cardTitle || !this.targetHighlightLocation.blockId) {
+
+      if (
+        cardId === undefined ||
+        sourceLaneId === undefined ||
+        targetLaneId === undefined || // Check the resolved targetLaneId
+        typeof originalCardIndex !== 'number' ||
+        typeof targetVisualIndex !== 'number' // Ensure targetVisualIndex is a number
+      ) {
+        console.error('[KanbanView] handleDrop (Card): Missing critical IDs or indices.');
+        try {
+          console.error(
+            JSON.stringify(
+              {
+                cardId,
+                sourceLaneId,
+                originalCardIndex,
+                targetLaneId,
+                targetVisualIndex,
+                dragData: dragDataForLog,
+                dropData: dropDataForLog,
+              },
+              null,
+              2
+            )
+          );
+        } catch (e_ids) {
+          console.error(
+            '[KanbanView] ERROR stringifying data in Missing Critical IDs block:',
+            e_ids.message
+          );
+          console.log(
+            '[KanbanView] dragDataForLog (Missing IDs) keys:',
+            Object.keys(dragDataForLog)
+          );
+          console.log(
+            '[KanbanView] dropDataForLog (Missing IDs) keys:',
+            Object.keys(dropDataForLog)
+          );
+        }
+        return;
+      }
+
+      const sourceLaneIndex = board.children.findIndex((lane) => lane.id === sourceLaneId);
+      const targetLaneIndex = board.children.findIndex((lane) => lane.id === targetLaneId);
+
+      if (sourceLaneIndex === -1 || targetLaneIndex === -1) {
         console.error(
-          '[KanbanView] applyHighlight: Board data not available, and lookup requires it. Aborting highlight.'
+          '[KanbanView] handleDrop (Card): Source or target lane not found in board data.'
+        );
+        try {
+          console.error(
+            JSON.stringify(
+              { sourceLaneId, targetLaneId, sourceLaneIndex, targetLaneIndex },
+              null,
+              2
+            )
+          );
+        } catch (e_stl) {
+          console.error(
+            '[KanbanView] ERROR stringifying source/target lane details in handleDrop:',
+            e_stl.message
+          );
+          console.log(
+            '[KanbanView] source/target lane details object keys (handleDrop):',
+            Object.keys({ sourceLaneId, targetLaneId, sourceLaneIndex, targetLaneIndex })
+          );
+        }
+        return;
+      }
+
+      const cardToMove = board.children[sourceLaneIndex]?.children[originalCardIndex];
+
+      if (!cardToMove) {
+        console.error(
+          '[KanbanView] handleDrop (Card): Card to move not found in source lane at original index.'
         );
         return;
       }
-    }
 
-    let targetItemElement: HTMLElement | null = null;
-    let blockIdToSearch: string | undefined = undefined;
+      // const cardToMoveDetails = board.children[sourceLaneIndex]?.children[originalCardIndex];
+      // console.log('[KanbanView] handleDrop: Processed data for card drag/drop decision:', JSON.stringify({ cardId, sourceLaneId, originalCardIndex, targetLaneId, targetVisualIndex, cardToMoveId: cardToMoveDetails?.id, cardToMoveTitle: cardToMoveDetails?.data?.titleRaw, targetLaneExists: !!board.children[targetLaneIndex] }, null, 2));
+      // ^^^^ THIS LINE IS COMMENTED OUT TO PREVENT CIRCULAR STRINGIFY ERROR
 
-    if (this.targetHighlightLocation.blockId) {
-      blockIdToSearch = this.targetHighlightLocation.blockId;
-      console.log(
-        `[KanbanView] applyHighlight: Using blockId directly from targetHighlightLocation: ${blockIdToSearch}`
-      );
-    } else if (
-      this.targetHighlightLocation.match &&
-      typeof this.targetHighlightLocation.match === 'object' &&
-      this.targetHighlightLocation.match.subpathResult &&
-      typeof this.targetHighlightLocation.match.subpathResult === 'object' &&
-      this.targetHighlightLocation.match.subpathResult.type === 'block' &&
-      this.targetHighlightLocation.match.subpathResult.blockId
-    ) {
-      blockIdToSearch = this.targetHighlightLocation.match.subpathResult.blockId;
-      console.log(
-        `[KanbanView] applyHighlight: Extracted blockId from targetHighlightLocation.match.subpathResult: ${blockIdToSearch}`
-      );
-    } else if (
-      board && // Ensure board is loaded for offset matching
-      this.targetHighlightLocation.match &&
-      typeof this.targetHighlightLocation.match === 'object' &&
-      this.targetHighlightLocation.match.matches &&
-      Array.isArray(this.targetHighlightLocation.match.matches) &&
-      this.targetHighlightLocation.match.matches.length > 0 &&
-      Array.isArray(this.targetHighlightLocation.match.matches[0]) &&
-      this.targetHighlightLocation.match.matches[0].length === 2 &&
-      typeof this.targetHighlightLocation.match.matches[0][0] === 'number' &&
-      typeof this.targetHighlightLocation.match.matches[0][1] === 'number'
-    ) {
-      const searchStartOffset = this.targetHighlightLocation.match.matches[0][0];
-      const searchEndOffset = this.targetHighlightLocation.match.matches[0][1];
-      console.log(
-        `[KanbanView] applyHighlight: Attempting to find item by character offsets: ${searchStartOffset}-${searchEndOffset}`
-      );
-
-      for (const lane of board.children) {
-        for (const item of lane.children) {
-          if (
-            item.data.position &&
-            item.data.position.start &&
-            item.data.position.end &&
-            typeof item.data.position.start.offset === 'number' &&
-            typeof item.data.position.end.offset === 'number'
-          ) {
-            const itemStartOffset = item.data.position.start.offset;
-            const itemEndOffset = item.data.position.end.offset;
-
-            // Skip if offsets are unknown (marked as -1 by parser)
-            if (itemStartOffset === -1 || itemEndOffset === -1) {
-              console.log(
-                `[KanbanView] applyHighlight: Skipping item ID ${item.id} due to unknown offsets (${itemStartOffset}, ${itemEndOffset})`
-              );
-              continue; // Skip to the next item
-            }
-
-            // Check for overlap:
-            if (
-              (searchStartOffset >= itemStartOffset && searchStartOffset < itemEndOffset) ||
-              (itemStartOffset >= searchStartOffset && itemStartOffset < searchEndOffset)
-            ) {
-              blockIdToSearch = item.id;
-              console.log(
-                `[KanbanView] applyHighlight: Found matching item by offset. ID: ${blockIdToSearch}, Item Title: ${item.data.titleRaw.substring(0, 50)}...`
-              );
-              break;
-            }
-          }
-        }
-        if (blockIdToSearch) {
-          break;
-        }
-      }
-      if (!blockIdToSearch) {
+      // IMMUTABILITY HELPER LOGIC (simplified for card move)
+      if (sourceLaneId === targetLaneId) {
+        // Reordering within the same lane
         console.log(
-          `[KanbanView] applyHighlight: No item found matching character offsets ${searchStartOffset}-${searchEndOffset}`
+          `[KanbanView] handleDrop: Reordering card ${cardId} in lane ${sourceLaneId} from index ${originalCardIndex} to ${targetVisualIndex}`
         );
-      }
-    }
-
-    if (blockIdToSearch) {
-      console.log(
-        `[KanbanView] applyHighlight: Attempting to find parent item element by data-id: '${blockIdToSearch}'`
-      );
-      const parentItemElement = this.contentEl.querySelector(
-        `div.kanban-plugin__item[data-id='${blockIdToSearch}']`
-      ) as HTMLElement;
-
-      if (parentItemElement) {
-        console.log('[KanbanView] applyHighlight: Found parent item element:', parentItemElement);
-        console.log(
-          '[KanbanView] applyHighlight: Attempting to find child .kanban-plugin__item-content-wrapper within parent.'
-        );
-        targetItemElement = parentItemElement.querySelector(
-          '.kanban-plugin__item-content-wrapper'
-        ) as HTMLElement;
-        if (targetItemElement) {
-          console.log(
-            '[KanbanView] applyHighlight: Found child content wrapper element:',
-            targetItemElement
-          );
-        } else {
-          console.error(
-            '[KanbanView] applyHighlight: Parent item element found, but FAILED to find child .kanban-plugin__item-content-wrapper. HTML of parent:',
-            parentItemElement.outerHTML
-          );
-        }
-      } else {
-        console.error(
-          `[KanbanView] applyHighlight: FAILED to find parent item element by data-id: '${blockIdToSearch}'`
-        );
-      }
-    }
-
-    if (
-      !targetItemElement &&
-      this.targetHighlightLocation.cardTitle &&
-      this.targetHighlightLocation.listName
-    ) {
-      console.log(
-        `[KanbanView] applyHighlight: Attempting title/list lookup. Title: '${this.targetHighlightLocation.cardTitle}', List: '${this.targetHighlightLocation.listName}'`
-      ); // Added log
-      const lanes = Array.from(this.contentEl.querySelectorAll('.kanban-plugin__lane'));
-      const targetLane = lanes.find((lane) => {
-        const laneTitleEl = lane.querySelector('.kanban-plugin__lane-title');
-        return (
-          laneTitleEl && laneTitleEl.textContent?.trim() === this.targetHighlightLocation.listName
-        );
-      });
-
-      if (targetLane) {
-        console.log('[KanbanView] applyHighlight: Found target lane by title:', targetLane); // Added log
-        const items = Array.from(targetLane.querySelectorAll('.kanban-plugin__item'));
-        console.log(
-          `[KanbanView] applyHighlight: Found ${items.length} items in lane '${this.targetHighlightLocation.listName}'. Checking titles:`
-        ); // Added log
-
-        const targetItem = items.find((item, index) => {
-          // Try to find the content wrapper first, as this is also what gets highlighted
-          const contentWrapperEl = item.querySelector('.kanban-plugin__item-content-wrapper');
-          if (contentWrapperEl) {
-            const currentItemTitle = contentWrapperEl.textContent?.trim();
-            console.log(
-              `[KanbanView] applyHighlight: Item ${index} in lane, Title from .kanban-plugin__item-content-wrapper: "'${currentItemTitle}'", Target Title: "'${this.targetHighlightLocation.cardTitle}'"`
-            );
-            // Use startsWith for a more flexible match, as DOM title might include tags
-            return currentItemTitle?.includes(this.targetHighlightLocation.cardTitle ?? '');
-          }
-          console.log(
-            `[KanbanView] applyHighlight: Item ${index} in lane, .kanban-plugin__item-content-wrapper not found.`
-          ); // Closing parenthesis for console.log
-          return false;
-        }); // Closing parenthesis for items.find
-
-        if (targetItem) {
-          // Check if targetItem was found
-          console.log(
-            '[KanbanView] applyHighlight: Found target item by title in lane:',
-            targetItem
-          );
-          // The element to highlight is the content wrapper
-          targetItemElement = targetItem.querySelector(
-            '.kanban-plugin__item-content-wrapper'
-          ) as HTMLElement;
-        }
-      } else {
-        // if (!targetLane)
-        console.log('[KanbanView] applyHighlight: Target lane NOT found by title.');
-      }
-      console.log(
-        `[KanbanView] applyHighlight: Result of title/list lookup for item '${this.targetHighlightLocation.cardTitle}' in list '${this.targetHighlightLocation.listName}':`,
-        targetItemElement
-      );
-    }
-
-    if (targetItemElement) {
-      console.log(
-        '[KanbanView] applyHighlight: Adding search-result-highlight to found element:',
-        targetItemElement
-      );
-      targetItemElement.addClass('search-result-highlight');
-      // Also attempt to scroll to it
-      console.log('[KanbanView] applyHighlight: Scrolling to highlighted element.');
-      targetItemElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } else {
-      let searchDetail = `target: ${JSON.stringify(this.targetHighlightLocation)}.`;
-      if (blockIdToSearch) {
-        // If an ID was determined but element not found
-        searchDetail += ` Tried to find element by ID: '${blockIdToSearch}' but it was not found in the DOM.`;
-      } else if (this.targetHighlightLocation.cardTitle && this.targetHighlightLocation.listName) {
-        // This case means blockIdToSearch was never found (not by direct, subpath, or offset)
-        // AND the title/list search (which happens if !targetItemElement after ID search) also failed.
-        searchDetail += ` No ID could be determined (direct, subpath, or offset). Title/list search for title: '${this.targetHighlightLocation.cardTitle}' in list: '${this.targetHighlightLocation.listName}' also failed or was not applicable.`;
-      } else if (!blockIdToSearch) {
-        searchDetail += ` No ID could be determined (direct, subpath, or offset), and title/list information was not available for fallback search.`;
-      }
-
-      console.log(
-        `[KanbanView] applyHighlight: No target item element found for highlighting. ${searchDetail}`
-      );
-    }
-  }
-
-  // Restored scrollToCard method
-  public scrollToCard(location: TargetHighlightLocation | null) {
-    console.log('[KanbanView] scrollToCard called. Target:', location);
-    if (!location) return;
-
-    let targetItemElement: HTMLElement | null = null;
-
-    if (location.blockId) {
-      targetItemElement = this.contentEl.querySelector(
-        `[data-id='${location.blockId}']`
-      ) as HTMLElement;
-      console.log(
-        `[KanbanView] scrollToCard: Attempting to find item by blockId: ${location.blockId}`,
-        targetItemElement
-      );
-    }
-
-    if (!targetItemElement && location.cardTitle && location.listName) {
-      console.log(
-        `[KanbanView] scrollToCard: Attempting title/list lookup. Title: '${location.cardTitle}', List: '${location.listName}'`
-      );
-      const lanes = Array.from(this.contentEl.querySelectorAll('.kanban-plugin__lane'));
-      const targetLane = lanes.find((lane) => {
-        const laneTitleEl = lane.querySelector('.kanban-plugin__lane-title');
-        return laneTitleEl && laneTitleEl.textContent?.trim() === location.listName;
-      });
-
-      if (targetLane) {
-        console.log('[KanbanView] scrollToCard: Found target lane by title:', targetLane);
-        const items = Array.from(targetLane.querySelectorAll('.kanban-plugin__item'));
-        console.log(
-          `[KanbanView] scrollToCard: Found ${items.length} items in lane '${location.listName}'. Checking titles:`
+        // Ensure targetVisualIndex is valid for splice
+        const actualTargetDropIndex = Math.min(
+          targetVisualIndex,
+          board.children[sourceLaneIndex].children.length -
+            (originalCardIndex < targetVisualIndex ? 1 : 0)
         );
 
-        const targetItem = items.find((item, index) => {
-          const contentWrapperEl = item.querySelector('.kanban-plugin__item-content-wrapper');
-          if (contentWrapperEl) {
-            const currentItemTitle = contentWrapperEl.textContent?.trim();
-            console.log(
-              `[KanbanView] scrollToCard: Item ${index} in lane, Title from .kanban-plugin__item-content-wrapper: "'${currentItemTitle}'", Target Title: "'${location.cardTitle}'"`
-            );
-            return currentItemTitle?.includes(location.cardTitle ?? '');
-          }
-          console.log(
-            `[KanbanView] scrollToCard: Item ${index} in lane, .kanban-plugin__item-content-wrapper not found.`
-          );
-          return false;
+        if (originalCardIndex === actualTargetDropIndex) return; // No change
+
+        newBoard = update(board, {
+          children: {
+            [sourceLaneIndex]: {
+              children: {
+                $splice: [
+                  [originalCardIndex, 1], // Remove from old position
+                  [actualTargetDropIndex, 0, cardToMove], // Add to new position
+                ],
+              },
+            },
+          },
         });
-        if (targetItem) {
-          console.log('[KanbanView] scrollToCard: Found target item by title in lane:', targetItem);
-          targetItemElement = targetItem as HTMLElement;
-        }
       } else {
-        console.log('[KanbanView] scrollToCard: Target lane NOT found by title.');
+        // Moving card to a different lane
+        console.log(
+          `[KanbanView] handleDrop: Moving card ${cardId} from lane ${sourceLaneId} (idx ${sourceLaneIndex}, card original idx ${originalCardIndex}) to lane ${targetLaneId} (idx ${targetLaneIndex}) at targetVisualIndex ${targetVisualIndex}`
+        );
+        // Ensure targetVisualIndex is valid for splice in target lane
+        const actualTargetDropIndex = Math.min(
+          targetVisualIndex,
+          board.children[targetLaneIndex].children.length
+        );
+
+        newBoard = update(board, {
+          children: {
+            [sourceLaneIndex]: {
+              children: {
+                $splice: [[originalCardIndex, 1]], // Remove from source lane using its original index
+              },
+            },
+            [targetLaneIndex]: {
+              children: {
+                $splice: [[actualTargetDropIndex, 0, cardToMove]],
+              },
+            },
+          },
+        });
       }
+      this.setBoard(newBoard);
+      // Lane Reordering
+      // Assumes lane has type 'lane' and its data contains its original 'index' among siblings.
+      // Assumes the drop target (if another lane) also has type 'lane' and an 'index'.
+    } else if (
+      dragData?.type === 'lane' &&
+      dropData?.type === 'lane' && // Check if drop target is also a lane
+      dragData.id &&
+      dropData.id && // Ensure IDs are present
+      dragData.id !== dropData.id
+    ) {
+      const draggedLaneId = dragData.id;
+      const targetLaneId = dropData.id;
+
+      const oldLaneIndex = board.children.findIndex((lane) => lane.id === draggedLaneId);
+      const newLaneTargetIndex = board.children.findIndex((lane) => lane.id === targetLaneId);
+
       console.log(
-        `[KanbanView] scrollToCard: Result of title/list lookup for item '${location.cardTitle}' in list '${location.listName}':`,
-        targetItemElement
+        `[KanbanView] handleDrop (Lane): Reordering lane ${draggedLaneId} (old index ${oldLaneIndex}) to target lane ${targetLaneId} (target index ${newLaneTargetIndex})`
+      );
+
+      if (oldLaneIndex === -1 || newLaneTargetIndex === -1) {
+        console.error(
+          '[KanbanView] handleDrop (Lane): Dragged or target lane not found in board data by ID.',
+          { draggedLaneId, targetLaneId, oldLaneIndex, newLaneTargetIndex }
+        );
+        return;
+      }
+
+      // Effective new index is the index of the target lane (insert before it)
+      const effectiveNewLaneIndex = newLaneTargetIndex;
+
+      // If dragging a lane downwards, and it's placed before a target that was originally after it,
+      // the target's index effectively decreases by one once the dragged lane is removed from its old spot.
+      // So, if oldLaneIndex < newLaneTargetIndex, the insertion happens at newLaneTargetIndex, but it might appear as newLaneTargetIndex-1 if the target shifted.
+      // Let's simplify: if we drop ON lane Y, we want to insert BEFORE Y.
+      // The newLaneTargetIndex is the index of Y. So, that's our insertion point.
+      // However, if the dragged lane was originally before Y, removing it will shift Y to the left by 1.
+      if (oldLaneIndex < newLaneTargetIndex) {
+        // Dragging down: Insert at newLaneTargetIndex. The actual splice index for insertion needs to account for removal if it affects target's original pos.
+        // No, this is simpler: the newLaneTargetIndex is where we want it. If it was previously before, it moves. If after, it moves.
+      } else {
+        // Dragging up: Insert at newLaneTargetIndex. This is correct.
+      }
+
+      if (oldLaneIndex === effectiveNewLaneIndex) {
+        console.log('[KanbanView] handleDrop (Lane): No effective change in order.');
+        return; // No change
+      }
+
+      const laneToMove = board.children[oldLaneIndex];
+      if (!laneToMove || laneToMove.id !== draggedLaneId) {
+        console.error(
+          `[KanbanView] handleDrop (Lane): Lane to move with ID ${draggedLaneId} at index ${oldLaneIndex} not found or ID mismatch. Found:`,
+          laneToMove?.id
+        );
+        return;
+      }
+
+      // The splice operation for insertion should use the index of the target lane.
+      // If the dragged lane is moved from an earlier position to a later position (e.g. index 0 to index 2),
+      // it should be inserted at index 2. The item at original index 2 becomes index 3.
+      // If moved from index 2 to index 0, it's inserted at index 0. Item at original 0 becomes 1.
+      // The `effectiveNewLaneIndex` should be the visual slot it moves into.
+      // The actual insertion index for splice needs care if oldLaneIndex < newLaneTargetIndex.
+      // If oldIdx = 0, newTargetIdx = 2. Remove from 0. Lanes at 1,2 become 0,1. Insert at 2 (which is now board.children.length if originally 3 lanes).
+      // No, immutability helper handles this. We remove from old, then insert at new relative to the modified array.
+
+      newBoard = update(board, {
+        children: {
+          $splice: [
+            [oldLaneIndex, 1], // Remove from old position
+            [effectiveNewLaneIndex, 0, laneToMove], // Add to new position
+          ],
+        },
+      });
+      this.setBoard(newBoard);
+    } else if (dragData?.type === 'item' && dropData?.type === 'item') {
+      // Card onto Card drop
+      const draggedCardId = dragData.id;
+      const sourceLaneId = dragData.parentLaneId;
+      const originalCardIndexInSourceLane = dragData.originalIndex;
+
+      const targetCardId = dropData.id;
+      const targetLaneId = dropData.parentLaneId; // Lane of the card being dropped onto
+      const targetCardIndexInTargetLane = dropData.originalIndex; // Index of the card being dropped onto, in its lane
+
+      console.log('[KanbanView] handleDrop (Card To Card): Processing drag.', {
+        draggedCardId,
+        sourceLaneId,
+        originalCardIndexInSourceLane,
+        targetCardId,
+        targetLaneId,
+        targetCardIndexInTargetLane,
+      });
+
+      if (
+        draggedCardId === undefined ||
+        sourceLaneId === undefined ||
+        typeof originalCardIndexInSourceLane !== 'number' ||
+        targetCardId === undefined ||
+        targetLaneId === undefined ||
+        typeof targetCardIndexInTargetLane !== 'number'
+      ) {
+        console.error('[KanbanView] handleDrop (Card To Card): Missing critical IDs or indices.');
+        try {
+          console.error(
+            JSON.stringify(
+              {
+                draggedCardId,
+                sourceLaneId,
+                originalCardIndexInSourceLane,
+                targetCardId,
+                targetLaneId,
+                targetCardIndexInTargetLane,
+                dragData: dragDataForLog,
+                dropData: dropDataForLog,
+              },
+              null,
+              2
+            )
+          );
+        } catch (e_cc_ids) {
+          console.error(
+            '[KanbanView] ERROR stringifying data in CardToCard Missing IDs block:',
+            e_cc_ids.message
+          );
+        }
+        return;
+      }
+
+      const sourceLaneBoardIndex = board.children.findIndex((lane) => lane.id === sourceLaneId);
+      const targetLaneBoardIndex = board.children.findIndex((lane) => lane.id === targetLaneId);
+
+      if (sourceLaneBoardIndex === -1 || targetLaneBoardIndex === -1) {
+        console.error(
+          '[KanbanView] handleDrop (Card To Card): Source or target lane not found in board data.',
+          { sourceLaneId, targetLaneId, sourceLaneBoardIndex, targetLaneBoardIndex }
+        );
+        return;
+      }
+
+      const cardToMove =
+        board.children[sourceLaneBoardIndex]?.children[originalCardIndexInSourceLane];
+
+      if (!cardToMove || cardToMove.id !== draggedCardId) {
+        console.error(
+          '[KanbanView] handleDrop (Card To Card): Card to move not found in source lane or ID mismatch.',
+          {
+            draggedCardId,
+            foundCardId: cardToMove?.id,
+            sourceLaneBoardIndex,
+            originalCardIndexInSourceLane,
+          }
+        );
+        return;
+      }
+
+      const insertionIndexInTargetLane = targetCardIndexInTargetLane;
+
+      if (sourceLaneId === targetLaneId) {
+        // Reordering within the same lane, dropping onto another card
+        console.log(
+          `[KanbanView] handleDrop (Card To Card): Reordering card ${draggedCardId} in lane ${sourceLaneId} from index ${originalCardIndexInSourceLane} to before target card ${targetCardId} at index ${targetCardIndexInTargetLane}`
+        );
+
+        if (
+          originalCardIndexInSourceLane === targetCardIndexInTargetLane ||
+          originalCardIndexInSourceLane === targetCardIndexInTargetLane - 1
+        ) {
+          // If card is dropped on itself or on the card immediately succeeding it (which means no change in order)
+          // This also handles if it's dropped on the card immediately before it, resulting in no change if target is calculated as item before.
+          // More precise: if dropping card X onto card Y, and X is already immediately before Y, no change.
+          // If X is at index i, and Y is at index i+1. targetCardIndexInTargetLane is i+1. insertionIndexInTargetLane becomes i+1.
+          // If originalCardIndexInSourceLane (i) < insertionIndexInTargetLane (i+1), then adjustedInsertionIndex becomes i+1 -1 = i.
+          // So it's removed from i and inserted at i. This is a no-op.
+          console.log('[KanbanView] handleDrop (Card to Card): No effective change in order.');
+          return;
+        }
+
+        // If the card is dragged downwards (original index is less than target's original index)
+        // and we are inserting *before* the target, the target's effective index will be one less after removal.
+        const adjustedInsertionIndex =
+          originalCardIndexInSourceLane < targetCardIndexInTargetLane
+            ? targetCardIndexInTargetLane - 1
+            : targetCardIndexInTargetLane;
+
+        newBoard = update(board, {
+          children: {
+            [sourceLaneBoardIndex]: {
+              children: {
+                $splice: [
+                  [originalCardIndexInSourceLane, 1], // Remove from old position
+                  [adjustedInsertionIndex, 0, cardToMove], // Add to new position (before target card)
+                ],
+              },
+            },
+          },
+        });
+      } else {
+        // Moving card to a different lane, dropping onto a card in that lane
+        console.log(
+          `[KanbanView] handleDrop (Card To Card): Moving card ${draggedCardId} from lane ${sourceLaneId} to lane ${targetLaneId}, to be placed before target card ${targetCardId} at its index ${targetCardIndexInTargetLane}`
+        );
+        // insertionIndexInTargetLane is already targetCardIndexInTargetLane, which is where it should be placed before.
+        newBoard = update(board, {
+          children: {
+            [sourceLaneBoardIndex]: {
+              children: {
+                $splice: [[originalCardIndexInSourceLane, 1]], // Remove from source lane
+              },
+            },
+            [targetLaneBoardIndex]: {
+              children: {
+                $splice: [[insertionIndexInTargetLane, 0, cardToMove]], // Insert before target card in target lane
+              },
+            },
+          },
+        });
+      }
+      this.setBoard(newBoard);
+    } else {
+      let dragDataToLogStr = 'UNABLE_TO_STRINGIFY_DRAG_DATA';
+      let dropDataToLogStr = 'UNABLE_TO_STRINGIFY_DROP_DATA';
+      try {
+        dragDataToLogStr = JSON.stringify(dragDataForLog, null, 2);
+      } catch (e_drag) {
+        console.error(
+          '[KanbanView] ERROR stringifying dragDataForLog in unhandled drop:',
+          e_drag.message
+        );
+        dragDataToLogStr = `UNSTRINGIFIABLE_DRAG_DATA: ${Object.keys(dragDataForLog || {}).join(', ')}`;
+      }
+      try {
+        dropDataToLogStr = JSON.stringify(dropDataForLog, null, 2);
+      } catch (e_drop) {
+        console.error(
+          '[KanbanView] ERROR stringifying dropDataForLog in unhandled drop:',
+          e_drop.message
+        );
+        dropDataToLogStr = `UNSTRINGIFIABLE_DROP_DATA: ${Object.keys(dropDataForLog || {}).join(', ')}`;
+      }
+      console.warn(
+        '[KanbanView] handleDrop: Unhandled drag/drop. dragData:',
+        dragDataToLogStr,
+        'dropData:',
+        dropDataToLogStr
       );
     }
-
-    if (targetItemElement) {
-      console.log('[KanbanView] scrollToCard: Scrolling to element:', targetItemElement);
-      targetItemElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } else {
-      console.log('[KanbanView] scrollToCard: No target item element found for scrolling.');
-    }
-  }
-
-  async onClose() {
-    console.log(`[KanbanView] onClose: ${this.file?.path}`);
-    // Clear any pending timeouts that might try to use this view
-    if (this.scrollTimeoutId) {
-      clearTimeout(this.scrollTimeoutId);
-      this.scrollTimeoutId = null;
-    }
-    if (this._initialRenderTimeoutId) {
-      clearTimeout(this._initialRenderTimeoutId);
-      this._initialRenderTimeoutId = null;
-    }
-
-    this.emitter.removeAllListeners(); // Remove listeners before React unmount
-    this.previewQueue.clear();
-    this.previewCache.clear();
-    this.emitter.emit('queueEmpty');
-
-    this.plugin.removeView(this);
-    this.activeEditor = null;
-    this.actionButtons = {};
   }
 }
