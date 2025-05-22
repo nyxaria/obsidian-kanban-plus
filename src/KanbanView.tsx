@@ -1161,23 +1161,37 @@ export class KanbanView extends TextFileView implements HoverParent {
     }
 
     if (blockIdToSearch) {
-      targetItemElement = this.contentEl.querySelector(
-        `[data-id='${blockIdToSearch}'] .kanban-plugin__item-content-wrapper`
-      ) as HTMLElement;
-      if (!targetItemElement) {
-        const itemEl = this.contentEl.querySelector(
-          `[data-id='${blockIdToSearch}']`
-        ) as HTMLElement;
-        if (itemEl) {
-          targetItemElement = itemEl.querySelector(
-            '.kanban-plugin__item-content-wrapper'
-          ) as HTMLElement;
-        }
-      }
       console.log(
-        `[KanbanView] applyHighlight: Attempting to find item by determined blockId: ${blockIdToSearch}`,
-        targetItemElement
+        `[KanbanView] applyHighlight: Attempting to find parent item element by data-id: '${blockIdToSearch}'`
       );
+      const parentItemElement = this.contentEl.querySelector(
+        `div.kanban-plugin__item[data-id='${blockIdToSearch}']`
+      ) as HTMLElement;
+
+      if (parentItemElement) {
+        console.log('[KanbanView] applyHighlight: Found parent item element:', parentItemElement);
+        console.log(
+          '[KanbanView] applyHighlight: Attempting to find child .kanban-plugin__item-content-wrapper within parent.'
+        );
+        targetItemElement = parentItemElement.querySelector(
+          '.kanban-plugin__item-content-wrapper'
+        ) as HTMLElement;
+        if (targetItemElement) {
+          console.log(
+            '[KanbanView] applyHighlight: Found child content wrapper element:',
+            targetItemElement
+          );
+        } else {
+          console.error(
+            '[KanbanView] applyHighlight: Parent item element found, but FAILED to find child .kanban-plugin__item-content-wrapper. HTML of parent:',
+            parentItemElement.outerHTML
+          );
+        }
+      } else {
+        console.error(
+          `[KanbanView] applyHighlight: FAILED to find parent item element by data-id: '${blockIdToSearch}'`
+        );
+      }
     }
 
     if (
@@ -1212,7 +1226,7 @@ export class KanbanView extends TextFileView implements HoverParent {
               `[KanbanView] applyHighlight: Item ${index} in lane, Title from .kanban-plugin__item-content-wrapper: "'${currentItemTitle}'", Target Title: "'${this.targetHighlightLocation.cardTitle}'"`
             );
             // Use startsWith for a more flexible match, as DOM title might include tags
-            return currentItemTitle?.startsWith(this.targetHighlightLocation.cardTitle ?? '');
+            return currentItemTitle?.includes(this.targetHighlightLocation.cardTitle ?? '');
           }
           console.log(
             `[KanbanView] applyHighlight: Item ${index} in lane, .kanban-plugin__item-content-wrapper not found.`
@@ -1310,7 +1324,7 @@ export class KanbanView extends TextFileView implements HoverParent {
             console.log(
               `[KanbanView] scrollToCard: Item ${index} in lane, Title from .kanban-plugin__item-content-wrapper: "'${currentItemTitle}'", Target Title: "'${location.cardTitle}'"`
             );
-            return currentItemTitle?.startsWith(location.cardTitle ?? '');
+            return currentItemTitle?.includes(location.cardTitle ?? '');
           }
           console.log(
             `[KanbanView] scrollToCard: Item ${index} in lane, .kanban-plugin__item-content-wrapper not found.`
