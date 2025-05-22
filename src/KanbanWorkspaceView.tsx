@@ -46,6 +46,7 @@ interface WorkspaceCard {
   date?: moment.Moment;
   sourceStartLine?: number;
   checked?: boolean;
+  priority?: 'high' | 'medium' | 'low'; // <-- New property
 }
 
 // Define an internal type for pre-filtered cards
@@ -447,6 +448,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
               date: itemData.metadata?.date,
               sourceStartLine: sourceStartLine, // Use sourceStartLine from internalCard
               checked: itemData.checked,
+              priority: itemData.metadata?.priority, // <-- Add priority here
             });
           }
         }
@@ -2037,6 +2039,15 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                     textAlign: 'center',
                   }}
                 >
+                  Priority
+                </th>
+                <th
+                  style={{
+                    border: '1px solid var(--background-modifier-border)',
+                    padding: '4px',
+                    textAlign: 'center',
+                  }}
+                >
                   Members
                 </th>
                 <th
@@ -2095,6 +2106,22 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                     console.error('Error calculating due date:', error, 'card:', card);
                   }
                 }
+                const priorityDisplay = card.priority
+                  ? card.priority.charAt(0).toUpperCase() + card.priority.slice(1)
+                  : '-';
+                let priorityStyle = {};
+                switch (card.priority) {
+                  case 'high':
+                    priorityStyle = { color: 'var(--color-red)', fontWeight: 'bold' };
+                    break;
+                  case 'medium':
+                    priorityStyle = { color: 'var(--color-orange)' };
+                    break;
+                  case 'low':
+                    priorityStyle = { color: 'var(--color-green)' };
+                    break;
+                }
+
                 return (
                   <tr
                     key={card.id}
@@ -2157,6 +2184,16 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                       }}
                     >
                       {card.sourceBoardName}
+                    </td>
+                    <td
+                      style={{
+                        border: '1px solid var(--background-modifier-border)',
+                        padding: '4px',
+                        textAlign: 'center',
+                        ...priorityStyle,
+                      }}
+                    >
+                      {priorityDisplay}
                     </td>
                     {/* Members Cell - RESTORED with inner flex div */}
                     <td

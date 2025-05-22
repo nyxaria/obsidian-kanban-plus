@@ -1,5 +1,5 @@
 import update from 'immutability-helper';
-import { Menu, Platform, TFile, TFolder } from 'obsidian';
+import { Menu, MenuItem, Platform, TFile, TFolder } from 'obsidian';
 import { Dispatch, StateUpdater, useCallback, useEffect, useState } from 'preact/hooks';
 import { StateManager } from 'src/StateManager';
 import { Path } from 'src/dnd/types';
@@ -10,7 +10,7 @@ import { BoardModifiers } from '../../helpers/boardModifiers';
 import { TagNameModal } from '../../modals/TagNameModal';
 import { getAllTagsFromKanbanBoards } from '../../utils/kanbanTags';
 import { applyTemplate, escapeRegExpStr, generateInstanceId } from '../helpers';
-import { EditState, Item } from '../types';
+import { EditState, Item, ItemMetadata } from '../types';
 import {
   constructDatePicker,
   constructMenuDatePickerOnChange,
@@ -36,38 +36,76 @@ function addAssignMemberOptions(
 ) {
   if (teamMembers.length > 0) {
     menu.addItem((menuItem) => {
-      menuItem.setTitle(t('Assign Member') || 'Assign Member').setIcon('lucide-users');
-      const subMenu = menuItem.setSubmenu();
+      menuItem.setTitle('Assign Member').setIcon('lucide-users');
+      const subMenu = (menuItem as any).setSubmenu();
       const cardAssignedMembers = item.data.assignedMembers || [];
 
       teamMembers.forEach((member) => {
         if (typeof member === 'string' && member.trim() !== '') {
-          subMenu.addItem((subMenuItem) => {
+          subMenu.addItem((subMenuItem: MenuItem) => {
             subMenuItem
               .setTitle(member)
               .setChecked(cardAssignedMembers.includes(member))
               .onClick(async () => {
                 let newAssignedMembers = [...cardAssignedMembers];
-                let newTitleRaw = item.data.titleRaw;
-                const memberSyntax = `@@${member}`;
+                let baseTitle = item.data.titleRaw;
+                const memberSyntaxPrefix = '@@'; // Use the actual prefix from settings if available
 
-                if (newAssignedMembers.includes(member)) {
-                  newAssignedMembers = newAssignedMembers.filter((m) => m !== member);
-                  const regexMember = new RegExp(
-                    `(?:^|\\s)${escapeRegExpStr(memberSyntax)}(?=\\s|$)`,
-                    'gi'
-                  );
-                  newTitleRaw = newTitleRaw
-                    .replace(regexMember, ' ')
+                // Capture existing priority tag BEFORE cleaning baseTitle
+                const priorityRegexGlobal = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+                const existingPriorityMatch = priorityRegexGlobal.exec(baseTitle);
+                const existingPriorityTag = existingPriorityMatch
+                  ? existingPriorityMatch[0].trim()
+                  : null; // Get the full tag e.g., "!high"
+
+                // If priority tag exists, remove it from baseTitle for now so it's not duplicated
+                if (existingPriorityTag) {
+                  baseTitle = baseTitle
+                    .replace(priorityRegexGlobal, ' ')
                     .replace(/\s{2,}/g, ' ')
                     .trim();
+                }
+
+                // 1. Remove ALL existing member tags from baseTitle to get a clean title
+                const allMembersRegex = new RegExp(
+                  `\\s*${escapeRegExpStr(memberSyntaxPrefix)}[^\\s]+`,
+                  'g'
+                );
+                baseTitle = baseTitle
+                  .replace(allMembersRegex, '')
+                  .replace(/\s{2,}/g, ' ')
+                  .trim();
+
+                // 2. Update the newAssignedMembers list
+                if (newAssignedMembers.includes(member)) {
+                  newAssignedMembers = newAssignedMembers.filter((m) => m !== member);
                 } else {
                   newAssignedMembers.push(member);
-                  if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
-                    newTitleRaw += ' ';
-                  }
-                  newTitleRaw += memberSyntax;
                 }
+
+                // 3. Reconstruct workTitleRaw starting with the cleaned baseTitle
+                let workTitleRaw = baseTitle;
+
+                // Append members
+                if (newAssignedMembers.length > 0) {
+                  const membersString = newAssignedMembers
+                    .map((m) => `${memberSyntaxPrefix}${m}`)
+                    .join(' ');
+                  if (workTitleRaw.length > 0 && !workTitleRaw.endsWith(' ')) {
+                    workTitleRaw += ' ';
+                  }
+                  workTitleRaw += membersString;
+                }
+
+                // Re-append priority tag if it existed
+                if (existingPriorityTag) {
+                  if (workTitleRaw.length > 0 && !workTitleRaw.endsWith(' ')) {
+                    workTitleRaw += ' ';
+                  }
+                  workTitleRaw += existingPriorityTag;
+                }
+
+                workTitleRaw = workTitleRaw.replace(/\s{2,}/g, ' ').trim();
 
                 const updatedItemData = {
                   ...item.data,
@@ -75,7 +113,7 @@ function addAssignMemberOptions(
                 };
                 boardModifiers.updateItem(
                   path,
-                  stateManager.updateItemContent({ ...item, data: updatedItemData }, newTitleRaw)
+                  stateManager.updateItemContent({ ...item, data: updatedItemData }, workTitleRaw)
                 );
               });
           });
@@ -90,6 +128,73 @@ function addAssignMemberOptions(
   }
 }
 
+function addAssignPriorityOptions(
+  menu: Menu,
+  item: Item,
+  stateManager: StateManager,
+  boardModifiers: BoardModifiers,
+  path: Path
+) {
+  const priorities: Array<ItemMetadata['priority'] | 'clear'> = ['high', 'medium', 'low', 'clear'];
+  const priorityToIcon: Record<string, string> = {
+    high: 'lucide-flame',
+    medium: 'lucide-bar-chart-2',
+    low: 'lucide-arrow-down',
+    clear: 'lucide-x-circle',
+  };
+  const priorityToLabel: Record<string, string> = {
+    high: 'High',
+    medium: 'Medium',
+    low: 'Low',
+    clear: 'Clear',
+  };
+
+  menu.addItem((menuItem) => {
+    menuItem.setTitle('Assign Priority').setIcon('lucide-star');
+    const subMenu = (menuItem as any).setSubmenu();
+    const currentPriority = item.data.metadata?.priority;
+
+    priorities.forEach((priority) => {
+      subMenu.addItem((subMenuItem: MenuItem) => {
+        subMenuItem
+          .setTitle(priorityToLabel[priority || 'clear'])
+          .setIcon(priorityToIcon[priority || 'clear'])
+          .setChecked(priority === currentPriority || (priority === 'clear' && !currentPriority))
+          .onClick(async () => {
+            let newTitleRaw = item.data.titleRaw;
+            const newPriority = priority === 'clear' ? undefined : priority;
+
+            // Remove any existing priority tag
+            const priorityRegex = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+            newTitleRaw = newTitleRaw
+              .replace(priorityRegex, ' ')
+              .replace(/\s{2,}/g, ' ')
+              .trim();
+
+            // Add new priority tag if one is set
+            if (newPriority) {
+              if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
+                newTitleRaw += ' ';
+              }
+              newTitleRaw += `!${newPriority}`;
+            }
+
+            const updatedItemData = update(item.data, {
+              metadata: { priority: { $set: newPriority } },
+              titleRaw: { $set: newTitleRaw.trim() },
+            });
+            const updatedItem = { ...item, data: updatedItemData };
+
+            boardModifiers.updateItem(
+              path,
+              stateManager.updateItemContent(updatedItem, updatedItem.data.titleRaw)
+            );
+          });
+      });
+    });
+  });
+}
+
 function addAssignTagOptions(
   menu: Menu,
   item: Item,
@@ -101,14 +206,17 @@ function addAssignTagOptions(
   onTagAddedCallback: (newTag: string) => void
 ) {
   if (isLoadingTags) {
-    menu.addItem((loadItem) => {
-      loadItem.setTitle('Loading tags...');
-      // loadItem.setEnabled(false); // Temporarily commented out
+    menu.addItem((menuItem: MenuItem) => {
+      menuItem.setTitle('Assign Tag').setIcon('lucide-tag');
+      const tagSubMenu = (menuItem as any).setSubmenu();
+      tagSubMenu.addItem((loadItem: MenuItem) => {
+        loadItem.setTitle('Loading tags...');
+      });
     });
   } else {
-    menu.addItem((menuItem) => {
-      menuItem.setTitle(t('Assign Tag') || 'Assign Tag').setIcon('lucide-tag');
-      const tagSubMenu = menuItem.setSubmenu();
+    menu.addItem((menuItem: MenuItem) => {
+      menuItem.setTitle('Assign Tag').setIcon('lucide-tag');
+      const tagSubMenu = (menuItem as any).setSubmenu();
 
       if (kanbanBoardTags.length > 0) {
         const cardMetaTagsLower = (item.data.metadata?.tags || []).map((t) =>
@@ -117,7 +225,7 @@ function addAssignTagOptions(
 
         kanbanBoardTags.forEach((tag) => {
           if (tag && typeof tag === 'string' && tag.trim() !== '') {
-            tagSubMenu.addItem((subMenuItem) => {
+            tagSubMenu.addItem((subMenuItem: MenuItem) => {
               const menuTagClean = tag.trim();
               const menuTagLower = menuTagClean.toLowerCase();
               const isAssigned = cardMetaTagsLower.includes(menuTagLower);
@@ -129,7 +237,7 @@ function addAssignTagOptions(
                   const clickedTagOriginalCasing = menuTagClean;
                   const clickedTagLower = clickedTagOriginalCasing.toLowerCase();
 
-                  let currentCardMetaTags = item.data.metadata?.tags || [];
+                  const currentCardMetaTags = [...(item.data.metadata?.tags || [])];
                   let newTitleRaw = item.data.titleRaw;
 
                   const existingTagIndex = currentCardMetaTags.findIndex(
@@ -137,31 +245,45 @@ function addAssignTagOptions(
                   );
 
                   if (existingTagIndex !== -1) {
-                    currentCardMetaTags = [
-                      ...currentCardMetaTags.slice(0, existingTagIndex),
-                      ...currentCardMetaTags.slice(existingTagIndex + 1),
-                    ];
-                    const escapedClickedTag = escapeRegExpStr(clickedTagOriginalCasing);
-                    const tagRegex = new RegExp(`(?:^|\s)#${escapedClickedTag}(?=\s|$)`, 'gi');
-                    newTitleRaw = newTitleRaw
-                      .replace(tagRegex, ' ')
-                      .replace(/\s{2,}/g, ' ')
-                      .trim();
+                    currentCardMetaTags.splice(existingTagIndex, 1);
+
+                    const tagNameToRemove = clickedTagOriginalCasing.replace(/^#/, '');
+                    const tagPattern = `(?:^|\\s)(?:#?${escapeRegExpStr(tagNameToRemove)})(?=\\s|$)`;
+                    const tagRegexToRemove = new RegExp(tagPattern, 'gi');
+
+                    newTitleRaw = newTitleRaw.replace(tagRegexToRemove, ' ').trim();
+                    newTitleRaw = newTitleRaw.replace(/\s{2,}/g, ' ').trim();
                   } else {
-                    currentCardMetaTags.push(clickedTagOriginalCasing);
-                    const titleLower = newTitleRaw.toLowerCase();
-                    const tagWithHashLower = `#${clickedTagLower}`;
-                    if (!titleLower.includes(tagWithHashLower)) {
+                    // Tag is not assigned, so add it
+                    // Ensure tagToAdd always starts with # for consistency in titleRaw
+                    const tagToAddInTitle = clickedTagOriginalCasing.startsWith('#')
+                      ? clickedTagOriginalCasing
+                      : `#${clickedTagOriginalCasing}`;
+
+                    currentCardMetaTags.push(
+                      clickedTagOriginalCasing.startsWith('#')
+                        ? clickedTagOriginalCasing
+                        : `#${clickedTagOriginalCasing.replace(/^#/, '')}`
+                    ); // Store with # in metadata
+
+                    // Check if the tag (with #) is already in the titleRaw to avoid duplicates
+                    const escapedTagForCheck = escapeRegExpStr(tagToAddInTitle);
+                    const existingTagInTitleRegex = new RegExp(
+                      `(?:^|\\s)${escapedTagForCheck}(?=\\s|$)`,
+                      'i'
+                    );
+                    if (!existingTagInTitleRegex.test(newTitleRaw)) {
                       if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
                         newTitleRaw += ' ';
                       }
-                      newTitleRaw += `#${clickedTagOriginalCasing}`;
+                      newTitleRaw += tagToAddInTitle;
                     }
+                    newTitleRaw = newTitleRaw.replace(/\s{2,}/g, ' ').trim();
                   }
 
                   const updatedItemData = update(item.data, {
                     metadata: { tags: { $set: currentCardMetaTags } },
-                    titleRaw: { $set: newTitleRaw.trim() },
+                    titleRaw: { $set: newTitleRaw },
                   });
                   const updatedItem = { ...item, data: updatedItemData };
 
@@ -174,16 +296,15 @@ function addAssignTagOptions(
           }
         });
       } else {
-        tagSubMenu.addItem((subMenuItem) => {
+        tagSubMenu.addItem((subMenuItem: MenuItem) => {
           subMenuItem.setTitle('No tags found in Kanban boards');
-          // subMenuItem.setEnabled(false); // Temporarily commented out
         });
       }
 
       tagSubMenu.addSeparator();
-      tagSubMenu.addItem((subMenuItem) => {
+      tagSubMenu.addItem((subMenuItem: MenuItem) => {
         subMenuItem
-          .setTitle(t('Add New Tag...') || 'Add New Tag...')
+          .setTitle('Add New Tag...')
           .setIcon('lucide-plus-circle')
           .onClick(async () => {
             new TagNameModal(stateManager.app, (newTagRaw) => {
@@ -194,15 +315,15 @@ function addAssignTagOptions(
                 if (newTagClean) {
                   const newTagToAddOriginalCasing = newTagClean;
                   const newTagToAddLower = newTagToAddOriginalCasing.toLowerCase();
-                  let currentCardMetaTags = item.data.metadata?.tags || [];
+                  const initialTagsForNew = [...(item.data.metadata?.tags || [])];
                   let newTitleRaw = item.data.titleRaw;
 
-                  const alreadyExistsIdx = currentCardMetaTags.findIndex(
+                  const alreadyExistsIdx = initialTagsForNew.findIndex(
                     (t) => t.replace(/^#/, '').toLowerCase() === newTagToAddLower
                   );
 
                   if (alreadyExistsIdx === -1) {
-                    currentCardMetaTags.push(newTagToAddOriginalCasing);
+                    const finalTagsForNew = [...initialTagsForNew, newTagToAddOriginalCasing];
                     const titleLower = newTitleRaw.toLowerCase();
                     const tagWithHashLower = `#${newTagToAddLower}`;
                     if (!titleLower.includes(tagWithHashLower)) {
@@ -211,19 +332,18 @@ function addAssignTagOptions(
                       }
                       newTitleRaw += `#${newTagToAddOriginalCasing}`;
                     }
+                    const updatedItemData = update(item.data, {
+                      metadata: { tags: { $set: finalTagsForNew } },
+                      titleRaw: { $set: newTitleRaw.trim() },
+                    });
+                    const updatedItem = { ...item, data: updatedItemData };
+
+                    boardModifiers.updateItem(
+                      path,
+                      stateManager.updateItemContent(updatedItem, updatedItem.data.titleRaw)
+                    );
+                    onTagAddedCallback(newTagToAddOriginalCasing);
                   }
-
-                  const updatedItemData = update(item.data, {
-                    metadata: { tags: { $set: currentCardMetaTags } },
-                    titleRaw: { $set: newTitleRaw.trim() },
-                  });
-                  const updatedItem = { ...item, data: updatedItemData };
-
-                  boardModifiers.updateItem(
-                    path,
-                    stateManager.updateItemContent(updatedItem, updatedItem.data.titleRaw)
-                  );
-                  onTagAddedCallback(newTagToAddOriginalCasing);
                 }
               }
             }).open();
@@ -245,7 +365,7 @@ function addMoveToOptions(
     for (let i = 0, len = lanes.length; i < len; i++) {
       const laneTitle =
         typeof lanes[i].data.title === 'string' ? lanes[i].data.title : 'Unnamed Lane';
-      currentMenu.addItem((menuItem) =>
+      currentMenu.addItem((menuItem: MenuItem) =>
         menuItem
           .setIcon('lucide-square-kanban')
           .setChecked(path[0] === i)
@@ -312,16 +432,17 @@ export function useItemMenu({
       const hasDate = !!item.data.metadata.date;
       const hasTime = !!item.data.metadata.time;
       const teamMembers: string[] = stateManager.getSetting('teamMembers') || [];
-      const allVaultTagsObj = stateManager.app.metadataCache.getTags();
-      const allVaultTags = Object.keys(allVaultTagsObj);
 
       const menu = new Menu();
 
       // --- PRIORITY ITEMS SECTION START ---
-      // 1. Assign Member
+      // 1. Assign Priority
+      addAssignPriorityOptions(menu, item, stateManager, boardModifiers, path);
+
+      // 2. Assign Member
       addAssignMemberOptions(menu, item, teamMembers, stateManager, boardModifiers, path);
 
-      // 2. Assign Tag
+      // 3. Assign Tag
       addAssignTagOptions(
         menu,
         item,
@@ -338,12 +459,14 @@ export function useItemMenu({
         }
       );
 
-      // 3. Add/Edit Date & Time (Moved here)
+      // 4. Add/Edit Date & Time (Moved here)
       menu.addItem((menuItem) => {
         menuItem
           .setIcon('lucide-calendar-check')
           .setTitle(hasDate ? t('Edit date') : t('Add date'))
           .onClick(() => {
+            // Priority preservation logic will be handled by constructMenuDatePickerOnChange
+            // as it's responsible for the final titleRaw update.
             constructDatePicker(
               e.view,
               stateManager,
@@ -366,25 +489,53 @@ export function useItemMenu({
             .setIcon('lucide-x')
             .setTitle(t('Remove date'))
             .onClick(() => {
+              const originalTitleRaw = item.data.titleRaw;
+              const priorityRegexGlobal = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+              const existingPriorityMatch = priorityRegexGlobal.exec(originalTitleRaw);
+              const existingPriorityTag = existingPriorityMatch ? existingPriorityMatch[1] : null;
+
+              let newTitleRaw = originalTitleRaw;
+              if (existingPriorityTag) {
+                newTitleRaw = newTitleRaw
+                  .replace(priorityRegexGlobal, ' ')
+                  .replace(/\s{2,}/g, ' ')
+                  .trim();
+              }
+
               const shouldLinkDates = stateManager.getSetting('link-date-to-daily-note');
               const dateTrigger = stateManager.getSetting('date-trigger');
-              const dateRegex = new RegExp(
-                `(^|\\s)${escapeRegExpStr(dateTrigger)}(\\d{4}-\\d{2}-\\d{2})(\\s|$)`
-              );
-              const newTitleRaw = item.data.titleRaw.replace(dateRegex, ' ').trim();
+              // More robust regex to remove date and associated time if present
+              const dateTimeRegexPattern =
+                `s*${escapeRegExpStr(dateTrigger)}{[^}]+}(s*${escapeRegExpStr(stateManager.getSetting('time-trigger'))}{[^}]+})?` +
+                `|s*${escapeRegExpStr(dateTrigger)}[[^]]+](s*${escapeRegExpStr(stateManager.getSetting('time-trigger'))}{[^}]+})?` +
+                `|s*📅s*d{4}-d{2}-d{2}(s*${escapeRegExpStr(stateManager.getSetting('time-trigger'))}{[^}]+})?`;
 
-              boardModifiers.updateItem(
-                path,
-                update(item, {
-                  data: {
-                    metadata: { date: { $set: undefined } },
-                    titleRaw: { $set: newTitleRaw },
-                    ...(shouldLinkDates && {
-                      links: { $apply: (l) => l.filter((x) => x.type !== 'date') },
-                    }),
-                  },
-                })
-              );
+              const dateTimeRegex = new RegExp(dateTimeRegexPattern, 'gi');
+              newTitleRaw = newTitleRaw
+                .replace(dateTimeRegex, ' ')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
+
+              if (existingPriorityTag && !newTitleRaw.includes(existingPriorityTag)) {
+                if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
+                  newTitleRaw += ' ';
+                }
+                newTitleRaw += existingPriorityTag;
+              }
+              newTitleRaw = newTitleRaw.replace(/\s{2,}/g, ' ').trim();
+
+              const updates: any = {
+                // Use 'any' for now to bypass complex type issue with immutability-helper
+                data: {
+                  metadata: { date: { $set: undefined }, time: { $set: undefined } }, // Also clear time
+                  titleRaw: { $set: newTitleRaw },
+                  ...(shouldLinkDates && {
+                    links: { $apply: (l: any[]) => l.filter((x: any) => x.type !== 'date') },
+                  }),
+                },
+              };
+
+              boardModifiers.updateItem(path, update(item, updates));
             });
         });
 
@@ -393,6 +544,7 @@ export function useItemMenu({
             .setIcon('lucide-clock')
             .setTitle(hasTime ? t('Edit time') : t('Add time'))
             .onClick(() => {
+              // Priority preservation will be handled by constructMenuTimePickerOnChange
               constructTimePicker(
                 e.view,
                 stateManager,
@@ -415,11 +567,36 @@ export function useItemMenu({
               .setIcon('lucide-x')
               .setTitle(t('Remove time'))
               .onClick(() => {
+                const originalTitleRaw = item.data.titleRaw;
+                const priorityRegexGlobal = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+                const existingPriorityMatch = priorityRegexGlobal.exec(originalTitleRaw);
+                const existingPriorityTag = existingPriorityMatch ? existingPriorityMatch[1] : null;
+
+                let newTitleRaw = originalTitleRaw;
+                if (existingPriorityTag) {
+                  newTitleRaw = newTitleRaw
+                    .replace(priorityRegexGlobal, ' ')
+                    .replace(/\s{2,}/g, ' ')
+                    .trim();
+                }
+
                 const timeTrigger = stateManager.getSetting('time-trigger');
                 const timeRegex = new RegExp(
-                  `(^|\\s)${escapeRegExpStr(timeTrigger)}(\\d{2}:\\d{2}(?::\\d{2})?)(\\s|$)`
+                  `(?:^|s)${escapeRegExpStr(timeTrigger)}{[^}]+}(?=s|$)`,
+                  'gi'
                 );
-                const newTitleRaw = item.data.titleRaw.replace(timeRegex, ' ').trim();
+                newTitleRaw = newTitleRaw
+                  .replace(timeRegex, ' ')
+                  .replace(/\s{2,}/g, ' ')
+                  .trim();
+
+                if (existingPriorityTag && !newTitleRaw.includes(existingPriorityTag)) {
+                  if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
+                    newTitleRaw += ' ';
+                  }
+                  newTitleRaw += existingPriorityTag;
+                }
+                newTitleRaw = newTitleRaw.replace(/\s{2,}/g, ' ').trim();
 
                 boardModifiers.updateItem(
                   path,
@@ -435,7 +612,7 @@ export function useItemMenu({
         }
       }
 
-      // 4. Move to List
+      // 5. Move to List
       addMoveToOptions(menu, path, stateManager, boardModifiers);
 
       menu.addSeparator(); // Separator after priority items
@@ -595,8 +772,6 @@ export function useItemMenu({
             .onClick(() => boardModifiers.deleteEntity(path));
         })
         .addSeparator();
-
-      const templates = stateManager.getSetting('templates');
 
       menu.showAtMouseEvent(e);
     },

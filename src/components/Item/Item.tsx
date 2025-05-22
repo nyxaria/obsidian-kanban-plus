@@ -30,6 +30,7 @@ import { ItemCheckbox } from './ItemCheckbox';
 import { AssignedMembers, ItemContent, Tags } from './ItemContent';
 import { useItemMenu } from './ItemMenu';
 import { ItemMenuButton } from './ItemMenuButton';
+import { ItemPriority } from './ItemPriority';
 import { ItemMetadata } from './MetadataTable';
 import { getItemClassModifiers } from './helpers';
 
@@ -262,7 +263,7 @@ const ItemInner = memo(function ItemInner({
             searchQuery={isMatch ? searchQuery : undefined}
             isStatic={!!isStatic}
             targetHighlight={targetHighlight}
-            style={{ marginLeft: '-2px' }}
+            style={{ marginLeft: '-2.5px', marginRight: '0px' }}
           />
         </div>
       </div>
@@ -287,19 +288,26 @@ const ItemInner = memo(function ItemInner({
               style={{
                 flexGrow: 0,
                 flexShrink: 0,
-                marginRight: item.data.metadata?.dateStr ? '4px' : '0px',
-                marginLeft: '8px',
+                marginRight: item.data.metadata?.dateStr ? '0px' : '0px',
+                marginLeft: '4px',
                 marginBottom: '7px',
               }}
             />
             <RelativeDate item={item} stateManager={stateManager} />
           </div>
-          <AssignedMembers
-            assignedMembers={item.data.assignedMembers}
-            searchQuery={isMatch ? searchQuery : undefined}
-            teamMemberColors={teamMemberColors}
-            style={{ flexGrow: 0, flexShrink: 0, marginRight: '8px', marginBottom: '7px' }}
-          />
+          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            <AssignedMembers
+              assignedMembers={item.data.assignedMembers}
+              searchQuery={isMatch ? searchQuery : undefined}
+              teamMemberColors={teamMemberColors}
+              style={{ flexGrow: 0, flexShrink: 0, marginRight: '8px', marginBottom: '7px' }}
+            />
+            <ItemPriority
+              priority={item.data.metadata?.priority}
+              style={{ marginBottom: '7px' }}
+              assignedMembersCount={item.data.assignedMembers?.length || 0}
+            />
+          </div>
         </div>
       )}
 

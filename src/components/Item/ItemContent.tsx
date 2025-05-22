@@ -377,6 +377,7 @@ const ItemContentComponent = function ItemContent({
     members: string[];
     dateStr?: string;
     timeStr?: string;
+    priorityTag?: string | null;
   } | null>(null);
 
   const editorWrapperRef = useOnclickOutside(
@@ -406,11 +407,17 @@ const ItemContentComponent = function ItemContent({
       const originalDateStr = item.data.metadata?.dateStr;
       const originalTimeStr = item.data.metadata?.timeStr;
 
+      // Capture and store priority tag
+      const priorityRegexGlobal = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+      const existingPriorityMatch = priorityRegexGlobal.exec(rawTitle);
+      const capturedPriorityTag = existingPriorityMatch ? existingPriorityMatch[0].trim() : null;
+
       extractedPartsRef.current = {
         tags: [...originalTagsFromMetadata],
         members: [...originalMembersFromMetadata],
         dateStr: originalDateStr,
         timeStr: originalTimeStr,
+        priorityTag: capturedPriorityTag,
       };
 
       const tagStringsForRemoval = originalTagsFromMetadata.map((t) => `#${t.replace(/^#/, '')}`);
@@ -419,6 +426,11 @@ const ItemContentComponent = function ItemContent({
       );
 
       let cleanTitle = rawTitle;
+
+      // Remove priority tag first for cleaning
+      if (capturedPriorityTag) {
+        cleanTitle = cleanTitle.replace(priorityRegexGlobal, ' ').trim();
+      }
 
       for (const memberSyntax of memberStringsForRemoval) {
         const memberRegex = new RegExp(escapeRegExpStr(memberSyntax), 'gi');
@@ -493,7 +505,9 @@ const ItemContentComponent = function ItemContent({
         `[ItemContent ${item.id}] SaveEffect RUN COMPLETE. Matched editState: ${JSON.stringify(currentEditStateProp)}, titleRef.current: ${JSON.stringify(titleRef.current)}, extractedPartsRef.current: ${JSON.stringify(extractedPartsRef.current)}`
       );
       const workTitle = titleRef.current; // Capture current title for processing
-      titleRef.current = null; // Clear ref immediately to prevent re-entry for this specific edit cycle
+      const capturedPriorityTagFromRef = extractedPartsRef.current?.priorityTag; // Capture priority tag BEFORE clearing refs
+
+      titleRef.current = null; // Clear ref
       extractedPartsRef.current = null; // Also clear other extracted parts
 
       if (workTitle !== null) {
@@ -502,11 +516,11 @@ const ItemContentComponent = function ItemContent({
         let finalTitle = workTitle;
 
         // Re-accessing original parts from item.data for reconstruction
-        // This assumes that item.data (passed as prop) reflects the state *before* this current edit's title change.
         const originalTagsFromMetadata = item.data.metadata?.tags || [];
         const originalMembersFromMetadata = item.data.assignedMembers || [];
         const originalDateStr = item.data.metadata?.dateStr;
         const originalTimeStr = item.data.metadata?.timeStr;
+        // capturedPriorityTagFromRef is already defined above
 
         console.log(
           '[ItemContent] Reconstructing from item.data.metadata. Extracted Parts estimate:',
@@ -515,6 +529,7 @@ const ItemContentComponent = function ItemContent({
             members: originalMembersFromMetadata,
             dateStr: originalDateStr,
             timeStr: originalTimeStr,
+            priorityTag: capturedPriorityTagFromRef,
           })
         );
 
@@ -571,6 +586,19 @@ const ItemContentComponent = function ItemContent({
             finalTitle += ' ';
           else if (addedSomething) finalTitle += ' ';
           finalTitle += tagsString;
+          addedSomething = true;
+        }
+
+        // Re-append priority tag if it was captured
+        if (capturedPriorityTagFromRef) {
+          console.log(
+            '[ItemContent] Reconstructing: Adding priority tag',
+            capturedPriorityTagFromRef
+          );
+          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
+            finalTitle += ' ';
+          else if (addedSomething) finalTitle += ' ';
+          finalTitle += capturedPriorityTagFromRef;
           addedSomething = true;
         }
 
