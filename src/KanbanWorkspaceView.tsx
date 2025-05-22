@@ -48,6 +48,15 @@ interface WorkspaceCard {
   checked?: boolean;
 }
 
+// Define an internal type for pre-filtered cards
+interface WorkspaceCardInternal {
+  itemData: ItemData;
+  currentLaneTitle: string;
+  sourceBoardPath: string;
+  sourceBoardName: string;
+  sourceStartLine?: number;
+}
+
 export const KANBAN_WORKSPACE_VIEW_TYPE = 'kanban-workspace';
 export const KANBAN_WORKSPACE_ICON = 'lucide-filter';
 
@@ -151,6 +160,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
   const [newViewName, setNewViewName] = useState('');
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
 
+  // ADDED: New state for all available tags (stored WITHOUT #)
+  const [allScannedTags, setAllScannedTags] = useState<string[]>([]);
+
   // Load saved views from settings
   useEffect(() => {
     const loadedSavedViews = props.plugin.settings.savedWorkspaceViews || [];
@@ -161,7 +173,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     if (lastViewId) {
       const viewToLoad = loadedSavedViews.find((v) => v.id === lastViewId);
       if (viewToLoad) {
-        setActiveFilterTags([...viewToLoad.tags]);
+        // MODIFIED: Ensure tags loaded from saved view are stripped of leading '#'
+        setActiveFilterTags(viewToLoad.tags.map((t) => t.replace(/^#/, '')));
         setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
         if (viewToLoad.dueDateFilter) {
           setDueDateFilterValue(viewToLoad.dueDateFilter.value);
@@ -224,7 +237,14 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
   }, []);
 
   const handleScanDirectory = useCallback(
-    async (tagsToFilterBy: string[], membersToFilterBy: string[]) => {
+    async (
+      tagsToFilterBy: string[],
+      membersToFilterBy: string[],
+      currentDueDateValue: number | '', // ADDED PARAM
+      currentDueDateUnit: 'days' | 'weeks' | 'months', // ADDED PARAM
+      currentExcludeArchive: boolean, // ADDED PARAM
+      currentExcludeDone: boolean // ADDED PARAM
+    ) => {
       console.log(
         '[WorkspaceView] handleScanDirectory called with:',
         'Tags:',
@@ -232,13 +252,13 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         'Members:',
         membersToFilterBy,
         'Due Value:',
-        dueDateFilterValue,
+        currentDueDateValue, // USE PARAM
         'Due Unit:',
-        dueDateFilterUnit,
+        currentDueDateUnit, // USE PARAM
         'Exclude Archive:',
-        excludeArchive, // Log new filter
+        currentExcludeArchive, // USE PARAM
         'Exclude Done:',
-        excludeDone // Log new filter
+        currentExcludeDone // USE PARAM
       );
       setIsLoading(true);
       setError(null);
@@ -247,8 +267,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
 
       // Due Date Filter Logic - START
       let maxDueDate: moment.Moment | null = null;
-      if (typeof dueDateFilterValue === 'number' && dueDateFilterValue > 0) {
-        maxDueDate = moment().add(dueDateFilterValue, dueDateFilterUnit).endOf('day');
+      if (typeof currentDueDateValue === 'number' && currentDueDateValue > 0) {
+        // USE PARAM
+        maxDueDate = moment().add(currentDueDateValue, currentDueDateUnit).endOf('day'); // USE PARAMS
       }
       const today = moment().startOf('day');
       // Due Date Filter Logic - END
@@ -270,6 +291,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
       }
 
       const allCards: WorkspaceCard[] = [];
+      const allCardsDataPreFilter: WorkspaceCardInternal[] = []; // This is correctly declared
       const getGlobalSettingsForStateManager = (): KanbanSettings => {
         return props.plugin.settings || DEFAULT_SETTINGS;
       };
@@ -306,145 +328,22 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                         listItemNode as MdastListItem
                       );
 
-                      // Manually hydrate the date field from dateStr
-                      if (itemData.metadata?.dateStr) {
-                        console.log(
-                          '[WorkspaceView] Hydrating date. dateStr:',
-                          itemData.metadata.dateStr,
-                          'Board:',
-                          mdFile.basename,
-                          'Card:',
-                          itemData.titleRaw.slice(0, 20)
-                        );
+                      // Manually hydrate the date field from dateStr (important for any subsequent logic)
+                      if (itemData.metadata?.dateStr && !moment.isMoment(itemData.metadata.date)) {
                         itemData.metadata.date = moment(
                           itemData.metadata.dateStr,
                           tempStateManager.getSetting('date-format')
                         );
-                        console.log(
-                          '[WorkspaceView] Hydrated date. Result:',
-                          itemData.metadata.date?.isValid()
-                            ? itemData.metadata.date.format()
-                            : 'Invalid Date',
-                          'Board:',
-                          mdFile.basename,
-                          'Card:',
-                          itemData.titleRaw.slice(0, 20)
-                        );
-                      } else {
-                        // console.log('[WorkspaceView] No dateStr to hydrate. Board:', mdFile.basename, 'Card:', itemData.titleRaw.slice(0,20) );
                       }
 
-                      const cardTags = (itemData.metadata?.tags || []).map((t) =>
-                        t.replace(/^#/, '').toLowerCase()
-                      );
-                      const hasAllRequiredTags =
-                        tagsToFilterBy.length === 0 ||
-                        tagsToFilterBy.every((reqTag) => cardTags.includes(reqTag));
-
-                      // Member filtering logic - case-sensitive
-                      const cardAssignedMembers = itemData.assignedMembers || []; // Already string[] from parser
-                      const hasAllRequiredMembers =
-                        membersToFilterBy.length === 0 ||
-                        membersToFilterBy.every((reqMember) =>
-                          cardAssignedMembers.includes(reqMember)
-                        );
-
-                      // Due Date Filter Check - START
-                      let passesDueDateFilter = true;
-                      if (maxDueDate && itemData.metadata?.date) {
-                        const cardDate = itemData.metadata.date.clone().startOf('day');
-
-                        // ##### Log the dates being compared #####
-                        console.log(
-                          `[DueDateFilter] Checking card: ${itemData.titleRaw.slice(0, 20)}, ` +
-                            `cardDate: ${cardDate.format()}, today: ${today.format()}, maxDueDate: ${maxDueDate.format()}`
-                        );
-                        const isValid = cardDate.isValid();
-                        const isAfterMax = cardDate.isAfter(maxDueDate);
-                        const isBeforeToday = cardDate.isBefore(today); // card is in the past
-                        console.log(
-                          `[DueDateFilter] Conditions for ${itemData.titleRaw.slice(0, 20)}: ` +
-                            `isValid: ${isValid}, isAfterMax: ${isAfterMax}, isBeforeToday (Overdue?): ${isBeforeToday}`
-                        );
-                        // ##### End Logs #####
-
-                        if (
-                          !isValid || // Date is not valid
-                          isAfterMax || // Date is beyond the filter's future window
-                          isBeforeToday // Date is in the past (already due or before today)
-                        ) {
-                          passesDueDateFilter = false;
-                          console.log(
-                            `[DueDateFilter] Card ${itemData.titleRaw.slice(0, 20)} FAILED due date filter. Conditions: !isValid=${!isValid}, isAfterMax=${isAfterMax}, isBeforeToday=${isBeforeToday}`
-                          );
-                        } else {
-                          console.log(
-                            `[DueDateFilter] Card ${itemData.titleRaw.slice(0, 20)} PASSED due date filter. Conditions: isValid=${isValid}, isAfterMax=${isAfterMax}, isBeforeToday=${isBeforeToday}`
-                          );
-                        }
-                      } else if (maxDueDate && !itemData.metadata?.date) {
-                        passesDueDateFilter = false;
-                        console.log(
-                          `[DueDateFilter] Card ${itemData.titleRaw.slice(0, 20)} FAILED (no date, but filter active).`
-                        );
-                      }
-                      // Due Date Filter Check - END
-
-                      // Archive Filter Check - START
-                      let passesArchiveFilter = true;
-                      if (excludeArchive && currentLaneTitle.toLowerCase() === 'archive') {
-                        passesArchiveFilter = false;
-                        // console.log(`[ArchiveFilter] Card ${itemData.titleRaw.slice(0,20)} FAILED (in Archive lane and excludeArchive is true).`);
-                      }
-                      // Archive Filter Check - END
-
-                      // Done Filter Check - START
-                      let passesDoneFilter = true;
-                      if (excludeDone && itemData.checked) {
-                        passesDoneFilter = false;
-                        // console.log(`[DoneFilter] Card ${itemData.titleRaw.slice(0,20)} FAILED (is checked and excludeDone is true).`);
-                      }
-                      // Done Filter Check - END
-
-                      if (
-                        hasAllRequiredTags &&
-                        hasAllRequiredMembers &&
-                        passesDueDateFilter &&
-                        passesArchiveFilter && // Add archive filter result
-                        passesDoneFilter // Add done filter result
-                      ) {
-                        console.log(
-                          '[WorkspaceView] PRE-PUSH. Card Title:',
-                          itemData.titleRaw.slice(0, 20),
-                          'itemData.metadata.date:',
-                          itemData.metadata?.date,
-                          'isMoment:',
-                          moment.isMoment(itemData.metadata?.date),
-                          'isValid:',
-                          itemData.metadata?.date?.isValid(),
-                          'dateStr:',
-                          itemData.metadata?.dateStr,
-                          'Board:',
-                          mdFile.basename
-                        );
-                        allCards.push({
-                          id:
-                            itemData.blockId ||
-                            `${mdFile.path}-${currentLaneTitle}-${itemData.titleRaw.slice(0, 10)}-${Math.random()}`,
-                          title: itemData.title,
-                          tags: (itemData.metadata?.tags || []).map((t) =>
-                            t.startsWith('#') ? t : `#${t}`
-                          ),
-                          assignedMembers: itemData.assignedMembers || [],
-                          sourceBoardName: mdFile.basename,
-                          sourceBoardPath: mdFile.path,
-                          laneTitle: currentLaneTitle,
-                          blockId: itemData.blockId,
-                          date: itemData.metadata?.date,
-                          sourceStartLine: listItemNode.position?.start.line,
-                          checked: itemData.checked,
-                        });
-                      }
+                      // CORRECTED: Populate allCardsDataPreFilter with all parsed items
+                      allCardsDataPreFilter.push({
+                        itemData,
+                        currentLaneTitle,
+                        sourceBoardPath: mdFile.path,
+                        sourceBoardName: mdFile.basename,
+                        sourceStartLine: listItemNode.position?.start.line,
+                      });
                     }
                   }
                 }
@@ -453,6 +352,102 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
               console.error(`[WorkspaceView] Error processing board ${mdFile.path}:`, parseError);
               setError(`Error processing ${mdFile.path}: ${parseError.message}`);
             }
+          }
+        }
+
+        // MOVED AND CORRECTED: Populate allScannedTags from all cardsDataPreFilter (which now contains all items)
+        const uniqueTagsFromAllPossibleCards = new Set<string>();
+        allCardsDataPreFilter.forEach((internalCard) => {
+          internalCard.itemData.metadata?.tags?.forEach((tag) => {
+            if (tag && tag.trim() !== '') {
+              uniqueTagsFromAllPossibleCards.add(tag.trim().replace(/^#/, '')); // Store without leading #
+            }
+          });
+        });
+        const sortedUniqueTags = Array.from(uniqueTagsFromAllPossibleCards).sort();
+        setAllScannedTags(sortedUniqueTags);
+        console.log('[WorkspaceView] All scanned tags (for dropdown):', sortedUniqueTags);
+
+        // Now, filter from allCardsDataPreFilter to populate the final allCards array for display
+        for (const internalCard of allCardsDataPreFilter) {
+          const { itemData, currentLaneTitle, sourceBoardPath, sourceBoardName, sourceStartLine } =
+            internalCard;
+
+          // Filters are applied here, using parameters like tagsToFilterBy, membersToFilterBy, etc.
+          const cardTags = (itemData.metadata?.tags || []).map((t) =>
+            t.replace(/^#/, '').toLowerCase()
+          );
+          const hasAllRequiredTags =
+            tagsToFilterBy.length === 0 ||
+            tagsToFilterBy.every((reqTag) => cardTags.includes(reqTag));
+
+          const cardAssignedMembers = itemData.assignedMembers || [];
+          const hasAllRequiredMembers =
+            membersToFilterBy.length === 0 ||
+            membersToFilterBy.every((reqMember) => cardAssignedMembers.includes(reqMember));
+
+          let passesDueDateFilter = true;
+          if (maxDueDate && itemData.metadata?.date) {
+            // maxDueDate and today are defined earlier using currentDueDateValue
+            const cardDate = itemData.metadata.date.clone().startOf('day');
+            const isValid = cardDate.isValid();
+            const isAfterMax = cardDate.isAfter(maxDueDate);
+            const isBeforeToday = cardDate.isBefore(today);
+            if (!isValid || isAfterMax || isBeforeToday) {
+              passesDueDateFilter = false;
+            }
+          } else if (maxDueDate && !itemData.metadata?.date) {
+            passesDueDateFilter = false;
+          }
+
+          let passesArchiveFilter = true;
+          if (currentExcludeArchive && currentLaneTitle.toLowerCase() === 'archive') {
+            passesArchiveFilter = false;
+          }
+
+          let passesDoneFilter = true;
+          if (currentExcludeDone && itemData.checked) {
+            passesDoneFilter = false;
+          }
+
+          if (
+            hasAllRequiredTags &&
+            hasAllRequiredMembers &&
+            passesDueDateFilter &&
+            passesArchiveFilter &&
+            passesDoneFilter
+          ) {
+            // console.log and allCards.push logic was here, it's correct
+            // ... (The existing console.log('[WorkspaceView] PRE-PUSH...') and allCards.push({...}) logic remains here)
+            console.log(
+              '[WorkspaceView] PRE-PUSH. Card Title:',
+              itemData.titleRaw.slice(0, 20),
+              'itemData.metadata.date:',
+              itemData.metadata?.date,
+              'isMoment:',
+              moment.isMoment(itemData.metadata?.date),
+              'isValid:',
+              itemData.metadata?.date?.isValid(),
+              'dateStr:',
+              itemData.metadata?.dateStr,
+              'Board:',
+              sourceBoardName // CORRECTED: Use sourceBoardName from internalCard scope
+            );
+            allCards.push({
+              id:
+                itemData.blockId ||
+                `${sourceBoardPath}-${currentLaneTitle}-${itemData.titleRaw.slice(0, 10)}-${Math.random()}`,
+              title: itemData.title,
+              tags: (itemData.metadata?.tags || []).map((t) => (t.startsWith('#') ? t : `#${t}`)),
+              assignedMembers: itemData.assignedMembers || [],
+              sourceBoardName: sourceBoardName, // Use sourceBoardName from internalCard
+              sourceBoardPath: sourceBoardPath, // Use sourceBoardPath from internalCard
+              laneTitle: currentLaneTitle,
+              blockId: itemData.blockId,
+              date: itemData.metadata?.date,
+              sourceStartLine: sourceStartLine, // Use sourceStartLine from internalCard
+              checked: itemData.checked,
+            });
           }
         }
 
@@ -474,16 +469,31 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
       setIsLoading,
       setError,
       setFilteredCards,
-      dueDateFilterValue,
-      dueDateFilterUnit,
-      excludeArchive, // Add to dependencies
-      excludeDone, // Add to dependencies
+      // No longer need direct state dependencies for filter values here,
+      // as they are passed as arguments.
+      // dueDateFilterValue,
+      // dueDateFilterUnit,
+      // excludeArchive,
+      // excludeDone,
+      setAllScannedTags,
+      // handleScanDirectory, // ADDED BACK
     ]
   );
 
   // Effect to re-scan when filters change
   useEffect(() => {
-    handleScanDirectory([...activeFilterTags], [...activeFilterMembers]);
+    console.log(
+      '[EffectUpdate] Filters changed. activeFilterTags before calling handleScanDirectory:',
+      JSON.stringify(activeFilterTags)
+    ); // ADDED LOG
+    handleScanDirectory(
+      [...activeFilterTags],
+      [...activeFilterMembers],
+      dueDateFilterValue, // PASS STATE
+      dueDateFilterUnit, // PASS STATE
+      excludeArchive, // PASS STATE
+      excludeDone // PASS STATE
+    );
   }, [
     activeFilterTags,
     activeFilterMembers,
@@ -491,7 +501,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     dueDateFilterUnit,
     excludeArchive,
     excludeDone,
-    handleScanDirectory,
+    handleScanDirectory, // ADD handleScanDirectory to this useEffect's dependency array
   ]);
 
   // Effect to listen for refresh events from the parent ItemView
@@ -501,7 +511,14 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         "[KanbanWorkspaceViewComponent] 'refresh-data' event received. Calling handleScanDirectory."
       );
       // Ensure we use the latest filter states when refreshing
-      handleScanDirectory([...activeFilterTags], [...activeFilterMembers]);
+      handleScanDirectory(
+        [...activeFilterTags],
+        [...activeFilterMembers],
+        dueDateFilterValue, // PASS STATE
+        dueDateFilterUnit, // PASS STATE
+        excludeArchive, // PASS STATE
+        excludeDone // PASS STATE
+      );
     };
 
     if (props.viewEvents) {
@@ -513,7 +530,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         props.viewEvents.off('refresh-data', refresher);
       }
     };
-  }, [props.viewEvents, handleScanDirectory, activeFilterTags, activeFilterMembers]); // Add dependencies
+  }, [props.viewEvents, handleScanDirectory, activeFilterTags, activeFilterMembers]);
 
   const handleToggleCardDoneStatus = useCallback(
     async (card: WorkspaceCard, newCheckedStatus: boolean) => {
@@ -601,7 +618,14 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
           new Notice(
             `"${card.title}" marked as ${newCheckedStatus ? 'Done' : 'Undone'} in ${targetFile.basename}.`
           );
-          handleScanDirectory([...activeFilterTags], [...activeFilterMembers]); // Refresh list
+          handleScanDirectory(
+            [...activeFilterTags],
+            [...activeFilterMembers],
+            dueDateFilterValue, // PASS STATE
+            dueDateFilterUnit, // PASS STATE
+            excludeArchive, // PASS STATE
+            excludeDone // PASS STATE
+          ); // Refresh list
         } else if (!card.blockId && !card.sourceStartLine) {
           new Notice(
             `Cannot update done status for "${card.title}": No block ID or source line. Updated in view only (file not changed).`
@@ -638,7 +662,17 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         );
       }
     },
-    [props.plugin, setFilteredCards, activeFilterTags, activeFilterMembers, handleScanDirectory]
+    [
+      props.plugin,
+      setFilteredCards,
+      activeFilterTags,
+      activeFilterMembers,
+      dueDateFilterValue, // ADD STATE DEPENDENCY
+      dueDateFilterUnit, // ADD STATE DEPENDENCY
+      excludeArchive, // ADD STATE DEPENDENCY
+      excludeDone, // ADD STATE DEPENDENCY
+      handleScanDirectory,
+    ]
   );
 
   const handleRowClick = useCallback(
@@ -913,7 +947,14 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                       fileContent = lines.join('\n');
                       await props.plugin.app.vault.modify(targetFile, fileContent);
                       new Notice(`Due date for "${card.title}" updated in ${targetFile.basename}.`);
-                      handleScanDirectory([...activeFilterTags], [...activeFilterMembers]); // Refresh list
+                      handleScanDirectory(
+                        [...activeFilterTags],
+                        [...activeFilterMembers],
+                        dueDateFilterValue, // PASS STATE
+                        dueDateFilterUnit, // PASS STATE
+                        excludeArchive, // PASS STATE
+                        excludeDone // PASS STATE
+                      ); // Refresh list
                     } else {
                       new Notice(
                         `Could not find block ID ${card.blockId} to update date. Date updated in this view only.`
@@ -960,7 +1001,14 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                       new Notice(
                         `Due date for "${card.title}" updated by line number in ${targetFile.basename}.`
                       );
-                      handleScanDirectory([...activeFilterTags], [...activeFilterMembers]); // Refresh list
+                      handleScanDirectory(
+                        [...activeFilterTags],
+                        [...activeFilterMembers],
+                        dueDateFilterValue, // PASS STATE
+                        dueDateFilterUnit, // PASS STATE
+                        excludeArchive, // PASS STATE
+                        excludeDone // PASS STATE
+                      ); // Refresh list
                     } else {
                       new Notice(
                         `Invalid source line number (${card.sourceStartLine}). Date updated in this view only.`
@@ -1109,7 +1157,14 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                       fileContent = lines.join('\n');
                       await props.plugin.app.vault.modify(targetFile, fileContent);
                       new Notice(`Members for "${card.title}" updated in ${targetFile.basename}.`);
-                      handleScanDirectory([...activeFilterTags], [...activeFilterMembers]); // Refresh list
+                      handleScanDirectory(
+                        [...activeFilterTags],
+                        [...activeFilterMembers],
+                        dueDateFilterValue, // PASS STATE
+                        dueDateFilterUnit, // PASS STATE
+                        excludeArchive, // PASS STATE
+                        excludeDone // PASS STATE
+                      ); // Refresh list
                     } else if (!card.blockId && !card.sourceStartLine) {
                       new Notice(
                         `Cannot update members for "${card.title}": No block ID or source line. Updated in view only.`
@@ -1168,6 +1223,10 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
       setFilteredCards,
       activeFilterTags,
       activeFilterMembers,
+      dueDateFilterValue, // ADD STATE DEPENDENCY
+      dueDateFilterUnit, // ADD STATE DEPENDENCY
+      excludeArchive, // ADD STATE DEPENDENCY
+      excludeDone, // ADD STATE DEPENDENCY
       handleScanDirectory,
       handleToggleCardDoneStatus,
     ] // Added handleToggleCardDoneStatus to dependencies
@@ -1284,6 +1343,92 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     setExcludeDone, // Add to dependencies
   ]);
 
+  // ADDED: Handler for the tag filter dropdown click
+  const handleTagFilterDropdownClick = useCallback(
+    (event: MouseEvent) => {
+      // MODIFIED: Use DOM MouseEvent
+      const menu = new Menu();
+      if (allScannedTags.length === 0) {
+        menu.addItem((item) => item.setTitle('No tags available').setDisabled(true));
+      } else {
+        allScannedTags.forEach((tag) => {
+          // tag is without #
+          menu.addItem((item) => {
+            item
+              .setTitle(tag) // Display WITHOUT # in menu
+              .setChecked(activeFilterTags.includes(tag)) // activeFilterTags stores tags without #
+              .onClick(() => {
+                console.log(
+                  '[TagDropdownClick] Before setActiveFilterTags. Current activeFilterTags:',
+                  JSON.stringify(activeFilterTags),
+                  'Tag to toggle:',
+                  tag
+                );
+                setActiveFilterTags((prevSelectedTags) => {
+                  const newSelectedTags = prevSelectedTags.includes(tag)
+                    ? prevSelectedTags.filter((t) => t !== tag)
+                    : [...prevSelectedTags, tag];
+                  console.log(
+                    '[TagDropdownClick] Inside setActiveFilterTags. New selected tags calculated:',
+                    JSON.stringify(newSelectedTags)
+                  );
+                  return newSelectedTags;
+                });
+                // Note: Logging activeFilterTags immediately after a setState call might not show the updated value due to closure/batching.
+                // The log inside the updater function (prevSelectedTags => ...) is more reliable for the calculated new state.
+              });
+          });
+        });
+      }
+      // Ensure event is of the correct type for showAtMouseEvent
+      // No longer needed to check instance if type is MouseEvent directly
+      menu.showAtMouseEvent(event);
+    },
+    [allScannedTags, activeFilterTags, setActiveFilterTags]
+  );
+  // END ADDED SECTION
+
+  // ADDED: Handler for the member filter dropdown click
+  const handleMemberFilterDropdownClick = useCallback(
+    (event: MouseEvent) => {
+      const menu = new Menu();
+      const availableMembers = props.plugin.settings.teamMembers || [];
+
+      if (availableMembers.length === 0) {
+        menu.addItem((item) =>
+          item.setTitle('No members configured in settings').setDisabled(true)
+        );
+      } else {
+        availableMembers.forEach((member) => {
+          if (typeof member === 'string' && member.trim() !== '') {
+            // Ensure member is a valid string
+            menu.addItem((item) => {
+              item
+                .setTitle(member)
+                .setChecked(activeFilterMembers.includes(member))
+                .onClick(() => {
+                  setActiveFilterMembers((prevSelectedMembers) =>
+                    prevSelectedMembers.includes(member)
+                      ? prevSelectedMembers.filter((m) => m !== member)
+                      : [...prevSelectedMembers, member]
+                  );
+                });
+            });
+          }
+        });
+      }
+      menu.showAtMouseEvent(event);
+    },
+    [props.plugin.settings.teamMembers, activeFilterMembers, setActiveFilterMembers]
+  );
+  // END ADDED SECTION
+
+  // ADDED: Log activeFilterTags right before rendering the display
+  console.log(
+    '[KanbanWorkspaceViewComponent] Rendering activeFilterTags for display:',
+    JSON.stringify(activeFilterTags)
+  );
+
   return (
     <div style={{ padding: '10px' }}>
       <h2>Kanban Workspace - Filters</h2>
@@ -1336,7 +1481,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                 if (newId) {
                   const viewToLoad = savedViews.find((v) => v.id === newId);
                   if (viewToLoad) {
-                    setActiveFilterTags([...viewToLoad.tags]);
+                    setActiveFilterTags(viewToLoad.tags.map((t) => t.replace(/^#/, ''))); // MODIFIED: Ensure tags are stripped of leading '#'
                     setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
                     if (viewToLoad.dueDateFilter) {
                       setDueDateFilterValue(viewToLoad.dueDateFilter.value);
@@ -1390,35 +1535,52 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
           flexWrap: 'wrap', // Allow wrapping on smaller screens
         }}
       >
-        {/* Tag Filter Section */}
+        {/* MODIFIED: Tag Filter Section */}
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '5px' }}>
-          <label htmlFor="workspace-tag-input" style={{ marginBottom: '5px' }}>
+          <label style={{ marginBottom: '5px' }}>
             {' '}
-            {/* Added margin for alignment */}
+            {/* MODIFIED: htmlFor removed */}
             Tag:
           </label>
-          <input
-            type="text"
-            id="workspace-tag-input"
-            value={currentTagInput}
-            onInput={(e) => setCurrentTagInput((e.target as HTMLInputElement).value)}
-            onKeyPress={(e) => {
-              if (e.key === 'Enter') {
-                handleAddTag();
-                e.preventDefault();
-              }
+          {/* REPLACED INPUT WITH DIV FOR DROPDOWN */}
+          <div
+            className="kanban-tag-filter-dropdown-trigger"
+            onClick={handleTagFilterDropdownClick}
+            style={{
+              border: '1px solid var(--input-border, var(--background-modifier-border))',
+              padding: 'var(--size-2-2, 5px) var(--size-2-3, 8px)',
+              borderRadius: 'var(--radius-s, 4px)',
+              cursor: 'pointer',
+              minHeight: 'calc(var(--input-height) - 2px)',
+              display: 'flex',
+              alignItems: 'center',
+              backgroundColor: 'var(--input-background, var(--background-primary))',
+              flexGrow: 1,
+              minWidth: '150px', // Ensure it has some width
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
             }}
-            style={{ padding: '5px' }} // Standardized padding
-            placeholder="e.g. mechanics"
-          />
+            title={
+              activeFilterTags.length > 0
+                ? activeFilterTags.map((t) => t.replace(/^#/, '')).join(', ')
+                : 'Select tags...'
+            } // Tooltip shows selected tags (no #)
+          >
+            Select tags...
+          </div>
+          {/* Original Add Button can be removed or repurposed if tag selection is purely via dropdown */}
+          {/* 
           <button
-            onClick={handleAddTag}
+            onClick={handleAddTag} // This would now be redundant if using dropdown exclusively
             disabled={!currentTagInput.trim()}
             style={{ padding: '5px' }}
           >
             +
-          </button>
+          </button> 
+          */}
         </div>
+        {/* END MODIFIED SECTION */}
 
         {/* Vertical Divider */}
         <div
@@ -1429,34 +1591,35 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
           }}
         ></div>
 
-        {/* Member Filter Section */}
+        {/* MODIFIED: Member Filter Section - Replaced with dropdown */}
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '5px' }}>
-          <label htmlFor="member-filter-select" style={{ marginBottom: '5px' }}>
-            {' '}
-            {/* Added margin for alignment */}
-            Member:
-          </label>
-          <select
-            id="member-filter-select"
-            value={selectedMemberForFilter}
-            onChange={(e) => setSelectedMemberForFilter((e.target as HTMLSelectElement).value)}
-            style={{ minWidth: '150px', padding: '5px' }} // Standardized padding
+          <label style={{ marginBottom: '5px' }}>Member:</label>
+          <div
+            className="kanban-member-filter-dropdown-trigger" // You might want to add specific CSS for this class
+            onClick={handleMemberFilterDropdownClick} // Use the new handler
+            style={{
+              border: '1px solid var(--input-border, var(--background-modifier-border))',
+              padding: 'var(--size-2-2, 5px) var(--size-2-3, 8px)',
+              borderRadius: 'var(--radius-s, 4px)',
+              cursor: 'pointer',
+              minHeight: 'calc(var(--input-height) - 2px)',
+              display: 'flex',
+              alignItems: 'center',
+              backgroundColor: 'var(--input-background, var(--background-primary))',
+              flexGrow: 1,
+              minWidth: '150px', // Ensure it has some width
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+            title={
+              activeFilterMembers.length > 0 ? activeFilterMembers.join(', ') : 'Select members...'
+            }
           >
-            <option value="">Select member...</option> {/* Changed placeholder text */}
-            {availableTeamMembers.map((member) => (
-              <option key={member} value={member}>
-                {member}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={handleAddMemberFilter}
-            disabled={!selectedMemberForFilter.trim()}
-            style={{ padding: '5px' }}
-          >
-            +
-          </button>
+            {activeFilterMembers.length > 0 ? activeFilterMembers.join(', ') : 'Select members...'}
+          </div>
         </div>
+        {/* END MODIFIED MEMBER FILTER SECTION */}
 
         {/* Vertical Divider */}
         <div
