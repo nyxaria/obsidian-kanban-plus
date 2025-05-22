@@ -101,10 +101,12 @@ export function constructMenuDatePickerOnChange({
   const dateFormat = stateManager.getSetting('date-format');
   const shouldLinkDates = stateManager.getSetting('link-date-to-daily-note');
   const dateTrigger = stateManager.getSetting('date-trigger');
-  const contentMatch = shouldLinkDates
-    ? '(?:\\[[^\\]]+\\]\\([^)]+\\)|\\[\\[[^\\]]+\\]\\])'
-    : '{[^}]+}';
-  const dateRegEx = new RegExp(`(^|\\s)${escapeRegExpStr(dateTrigger as string)}${contentMatch}`);
+  const timeTrigger = stateManager.getSetting('time-trigger');
+
+  const dateAndTimePattern =
+    `(${escapeRegExpStr(dateTrigger as string)}(?:{[^}]+}|\[\[[^\]]+\]\]))` +
+    `(\s*${escapeRegExpStr(timeTrigger as string)}{[^}]+})?`;
+  const dateAndTimeRegEx = new RegExp(`(^|\s)${dateAndTimePattern}`, 'gi');
 
   return (dates: Date[]) => {
     const date = dates[0];
@@ -115,11 +117,30 @@ export function constructMenuDatePickerOnChange({
 
     let titleRaw = item.data.titleRaw;
 
-    if (hasDate) {
-      titleRaw = item.data.titleRaw.replace(dateRegEx, `$1${dateTrigger}${wrappedDate}`);
-    } else {
-      titleRaw = `${item.data.titleRaw} ${dateTrigger}${wrappedDate}`;
+    const priorityRegexGlobal = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+    const existingPriorityMatch = priorityRegexGlobal.exec(item.data.titleRaw);
+    const existingPriorityTag = existingPriorityMatch ? existingPriorityMatch[1] : null;
+
+    if (existingPriorityTag) {
+      titleRaw = titleRaw
+        .replace(priorityRegexGlobal, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
     }
+
+    if (hasDate) {
+      titleRaw = titleRaw.replace(dateAndTimeRegEx, `$1${dateTrigger}${wrappedDate}`);
+    } else {
+      titleRaw = `${titleRaw} ${dateTrigger}${wrappedDate}`.trim();
+    }
+
+    if (existingPriorityTag && !titleRaw.includes(existingPriorityTag)) {
+      if (titleRaw.length > 0 && !titleRaw.endsWith(' ')) {
+        titleRaw += ' ';
+      }
+      titleRaw += existingPriorityTag;
+    }
+    titleRaw = titleRaw.replace(/\s{2,}/g, ' ').trim();
 
     boardModifiers.updateItem(path, stateManager.updateItemContent(item, titleRaw));
   };
@@ -257,17 +278,41 @@ export function constructMenuTimePickerOnChange({
   hasTime,
   path,
 }: ConstructMenuTimePickerOnChangeParams) {
+  const timeFormat = stateManager.getSetting('time-format');
   const timeTrigger = stateManager.getSetting('time-trigger');
-  const timeRegEx = new RegExp(`(^|\\s)${escapeRegExpStr(timeTrigger as string)}{([^}]+)}`);
+  const timeRegEx = new RegExp(`(^|\s)${escapeRegExpStr(timeTrigger)}{[^}]+}`, 'gi');
 
-  return (time: string) => {
+  return (selectedTime: string) => {
+    const timeMoment = moment(selectedTime, timeFormat);
+    const formattedTime = timeMoment.format(timeFormat);
+    const wrappedTime = `{${formattedTime}}`;
+
     let titleRaw = item.data.titleRaw;
 
-    if (hasTime) {
-      titleRaw = item.data.titleRaw.replace(timeRegEx, `$1${timeTrigger}{${time}}`);
-    } else {
-      titleRaw = `${item.data.titleRaw} ${timeTrigger}{${time}}`;
+    const priorityRegexGlobal = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+    const existingPriorityMatch = priorityRegexGlobal.exec(item.data.titleRaw);
+    const existingPriorityTag = existingPriorityMatch ? existingPriorityMatch[1] : null;
+
+    if (existingPriorityTag) {
+      titleRaw = titleRaw
+        .replace(priorityRegexGlobal, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
     }
+
+    if (hasTime) {
+      titleRaw = titleRaw.replace(timeRegEx, `$1${timeTrigger}${wrappedTime}`);
+    } else {
+      titleRaw = `${titleRaw} ${timeTrigger}${wrappedTime}`.trim();
+    }
+
+    if (existingPriorityTag && !titleRaw.includes(existingPriorityTag)) {
+      if (titleRaw.length > 0 && !titleRaw.endsWith(' ')) {
+        titleRaw += ' ';
+      }
+      titleRaw += existingPriorityTag;
+    }
+    titleRaw = titleRaw.replace(/\s{2,}/g, ' ').trim();
 
     boardModifiers.updateItem(path, stateManager.updateItemContent(item, titleRaw));
   };

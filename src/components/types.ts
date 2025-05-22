@@ -78,11 +78,16 @@ export interface FileMetadata {
 }
 
 export interface ItemMetadata {
-  dateStr?: string;
+  updated?: moment.Moment;
+  due?: moment.Moment;
+  created?: moment.Moment;
+  completed?: moment.Moment;
   date?: moment.Moment;
-  timeStr?: string;
   time?: moment.Moment;
+  dateStr?: string;
+  timeStr?: string;
   tags?: string[];
+  priority?: 'high' | 'medium' | 'low';
   fileAccessor?: FileAccessor;
   file?: TFile | null;
   fileMetadata?: FileMetadata;

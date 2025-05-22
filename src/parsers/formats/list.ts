@@ -261,6 +261,41 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     title = markRangeForDeletion(title, range);
   }
 
+  // Parse priority !high, !medium, !low from the potentially modified 'title'
+  // This should happen AFTER members and other specific metadata like dates/tags might have been processed and removed from 'title'
+  // but BEFORE the final title is set.
+  const priorityRegEx = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi; // Using the global one from common.ts might be better if settings affect it
+  const titleForPriorityParsing = title; // Use the current state of 'title'
+  const priorityMatch = priorityRegEx.exec(titleForPriorityParsing); // Use exec to get match details for removal
+
+  if (priorityMatch) {
+    const matchedPriorityString = priorityMatch[1]; // e.g., "!low"
+    const priorityValue = matchedPriorityString.substring(1).toLowerCase() as
+      | 'high'
+      | 'medium'
+      | 'low';
+    if (['high', 'medium', 'low'].includes(priorityValue)) {
+      itemData.metadata.priority = priorityValue;
+      console.log(`[listItemToItemData] Extracted priority: ${itemData.metadata.priority}`);
+
+      // Similar to 'moveTags' or 'moveDates', decide if priority string should be removed from visual title
+      // For now, let's assume it should always be removed from the displayed title if parsed into metadata.
+      // The original priorityRegEx had a global flag, so replaceAll could be used, but exec gives us the specific match.
+      // We need to be careful if there are multiple invalid priority tags.
+      // Let's just replace the first valid one found.
+      const startIndexInTitle = priorityMatch.index + (priorityMatch[0].startsWith(' ') ? 1 : 0); // Adjust for leading space
+      const endIndexInTitle = startIndexInTitle + matchedPriorityString.length;
+
+      title = markRangeForDeletion(title, {
+        start: startIndexInTitle,
+        end: endIndexInTitle,
+      });
+      console.log(
+        `[listItemToItemData] Marked priority string "${matchedPriorityString}" for deletion from title.`
+      );
+    }
+  }
+
   itemData.title = preprocessTitle(stateManager, dedentNewLines(executeDeletion(title)));
 
   const firstLineEnd = itemData.title.indexOf('\n');
