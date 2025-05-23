@@ -1819,7 +1819,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
 
   return (
     <div style={{ padding: '10px' }}>
-      <h2>Kanban Workspace - Filters</h2>
+      <h2>Kanban Workspace</h2>
 
       {/* Combined Save/Load Section - MOVED HERE */}
       <div
@@ -2493,7 +2493,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                     textAlign: 'center',
                   }}
                 >
-                  Card Tags
+                  Tags
                 </th>
                 <th
                   style={{
@@ -2548,13 +2548,13 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                 let priorityStyle = {};
                 switch (card.priority) {
                   case 'high':
-                    priorityStyle = { color: 'var(--color-red)', fontWeight: 'bold' };
+                    priorityStyle = { color: '#cd1e00', fontWeight: 'bold' };
                     break;
                   case 'medium':
-                    priorityStyle = { color: 'var(--color-orange)' };
+                    priorityStyle = { color: '#ff9600' };
                     break;
                   case 'low':
-                    priorityStyle = { color: 'var(--color-green)' };
+                    priorityStyle = { color: '#008bff' };
                     break;
                 }
 
