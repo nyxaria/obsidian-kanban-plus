@@ -67,7 +67,7 @@ export function DateAndTime({
 }: DateProps & DateAndTimeProps) {
   const moveDates = stateManager.useSetting('move-dates');
   console.log('[DateAndTime] moveDates setting value:', moveDates); // DEBUG LOG
-  const dateFormat = stateManager.useSetting('date-format');
+  const dateFormat = stateManager.useSetting('date-format'); // User's date format
   const timeFormat = stateManager.useSetting('time-format');
   const dateDisplayFormat = stateManager.useSetting('date-display-format');
   const shouldLinkDate = stateManager.useSetting('link-date-to-daily-note');
@@ -100,7 +100,8 @@ export function DateAndTime({
   const handleDateSearchClick = (e: JSX.TargetedMouseEvent<HTMLSpanElement>) => {
     e.stopPropagation(); // Prevent the parent div's onEditDate from firing
     if (item.data.metadata.date) {
-      const searchDate = item.data.metadata.date.format('YYYY-MM-DD');
+      // Use the user's dateFormat setting for the search query
+      const searchDate = item.data.metadata.date.format(dateFormat);
       // Consistent with Tags/Members, use stateManager.app for global search
       (stateManager.app as any).internalPlugins
         .getPluginById('global-search')
@@ -132,7 +133,7 @@ export function DateAndTime({
         alignItems: 'center',
         backgroundColor: dateColor?.backgroundColor || 'rgba(0,0,0,0)',
         color:
-          dateColor?.text ||
+          dateColor?.color ||
           dateColor?.color ||
           (dateColor?.backgroundColor ? 'var(--text-on-accent)' : 'var(--text-normal)'),
         ...style,
