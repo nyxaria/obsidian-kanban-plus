@@ -135,18 +135,16 @@ function addAssignPriorityOptions(
   boardModifiers: BoardModifiers,
   path: Path
 ) {
-  const priorities: Array<ItemMetadata['priority'] | 'clear'> = ['high', 'medium', 'low', 'clear'];
+  const priorities: Array<ItemMetadata['priority']> = ['high', 'medium', 'low'];
   const priorityToIcon: Record<string, string> = {
     high: 'lucide-flame',
     medium: 'lucide-bar-chart-2',
     low: 'lucide-arrow-down',
-    clear: 'lucide-x-circle',
   };
   const priorityToLabel: Record<string, string> = {
     high: 'High',
     medium: 'Medium',
     low: 'Low',
-    clear: 'Clear',
   };
 
   menu.addItem((menuItem) => {
@@ -157,12 +155,20 @@ function addAssignPriorityOptions(
     priorities.forEach((priority) => {
       subMenu.addItem((subMenuItem: MenuItem) => {
         subMenuItem
-          .setTitle(priorityToLabel[priority || 'clear'])
-          .setIcon(priorityToIcon[priority || 'clear'])
-          .setChecked(priority === currentPriority || (priority === 'clear' && !currentPriority))
+          .setTitle(priorityToLabel[priority])
+          .setIcon(priorityToIcon[priority])
+          .setChecked(priority === currentPriority)
           .onClick(async () => {
             let newTitleRaw = item.data.titleRaw;
-            const newPriority = priority === 'clear' ? undefined : priority;
+            let newPriorityToSet: ItemMetadata['priority'] | undefined;
+
+            if (currentPriority === priority) {
+              // Clicked on the currently set priority, so clear it
+              newPriorityToSet = undefined;
+            } else {
+              // Clicked on a new priority or no priority was set
+              newPriorityToSet = priority;
+            }
 
             // Remove any existing priority tag
             const priorityRegex = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
@@ -172,15 +178,15 @@ function addAssignPriorityOptions(
               .trim();
 
             // Add new priority tag if one is set
-            if (newPriority) {
+            if (newPriorityToSet) {
               if (newTitleRaw.length > 0 && !newTitleRaw.endsWith(' ')) {
                 newTitleRaw += ' ';
               }
-              newTitleRaw += `!${newPriority}`;
+              newTitleRaw += `!${newPriorityToSet}`;
             }
 
             const updatedItemData = update(item.data, {
-              metadata: { priority: { $set: newPriority } },
+              metadata: { priority: { $set: newPriorityToSet } },
               titleRaw: { $set: newTitleRaw.trim() },
             });
             const updatedItem = { ...item, data: updatedItemData };

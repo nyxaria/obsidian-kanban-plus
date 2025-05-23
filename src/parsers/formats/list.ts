@@ -221,10 +221,12 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     }
   });
 
+  // Initialize assignedMembers array
+  itemData.assignedMembers = [];
+
   // Parse @@MemberName for assigned members from the potentially modified 'title'
   const memberRegex = /(?:^|\s)(@@[a-zA-Z0-9_-]+)/g;
   let match;
-  const memberRangesToMark: { start: number; end: number }[] = [];
 
   // Use the 'title' string, which may have been modified by tag/date removal
   // The regex exec method maintains state with lastIndex, so we operate on a stable string for finding matches.
@@ -235,7 +237,8 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     const memberTagString = match[1]; // e.g., "@@Alice"
     const memberName = memberTagString.substring(2); // "Alice"
 
-    if (itemData.assignedMembers && !itemData.assignedMembers.includes(memberName)) {
+    // itemData.assignedMembers is guaranteed to be an array here
+    if (!itemData.assignedMembers.includes(memberName)) {
       itemData.assignedMembers.push(memberName);
     }
 
@@ -246,57 +249,44 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     const prefixLength = fullMatchString.length - memberTagString.length;
     const memberTagStartIndex = match.index + prefixLength;
 
-    memberRangesToMark.push({
+    // Mark the member tag itself (e.g., @@Alice) for deletion from title
+    title = markRangeForDeletion(title, {
       start: memberTagStartIndex,
       end: memberTagStartIndex + memberTagString.length,
     });
   }
 
-  // Sort ranges in reverse order to mark for deletion without affecting subsequent indices
-  memberRangesToMark.sort((a, b) => b.start - a.start);
-
-  for (const range of memberRangesToMark) {
-    // Here, 'title' is updated iteratively. Each call to markRangeForDeletion
-    // returns a new string with the deletion markers.
-    title = markRangeForDeletion(title, range);
-  }
-
-  // Parse priority !high, !medium, !low from the potentially modified 'title'
-  // This should happen AFTER members and other specific metadata like dates/tags might have been processed and removed from 'title'
-  // but BEFORE the final title is set.
-  const priorityRegEx = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi; // Using the global one from common.ts might be better if settings affect it
-  const titleForPriorityParsing = title; // Use the current state of 'title'
-  const priorityMatch = priorityRegEx.exec(titleForPriorityParsing); // Use exec to get match details for removal
+  // Parse !priority from the potentially modified 'title'
+  const priorityRegex = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/i; // Case-insensitive for parsing
+  const priorityMatch = title.match(priorityRegex);
 
   if (priorityMatch) {
-    const matchedPriorityString = priorityMatch[1]; // e.g., "!low"
-    const priorityValue = matchedPriorityString.substring(1).toLowerCase() as
-      | 'high'
-      | 'medium'
-      | 'low';
-    if (['high', 'medium', 'low'].includes(priorityValue)) {
-      itemData.metadata.priority = priorityValue;
-      console.log(`[listItemToItemData] Extracted priority: ${itemData.metadata.priority}`);
+    const fullPriorityString = priorityMatch[0]; // e.g., " !high" or "!high"
+    const priorityTag = priorityMatch[1].toLowerCase() as 'low' | 'medium' | 'high'; // e.g., "!high" -> "high"
 
-      // Similar to 'moveTags' or 'moveDates', decide if priority string should be removed from visual title
-      // For now, let's assume it should always be removed from the displayed title if parsed into metadata.
-      // The original priorityRegEx had a global flag, so replaceAll could be used, but exec gives us the specific match.
-      // We need to be careful if there are multiple invalid priority tags.
-      // Let's just replace the first valid one found.
-      const startIndexInTitle = priorityMatch.index + (priorityMatch[0].startsWith(' ') ? 1 : 0); // Adjust for leading space
-      const endIndexInTitle = startIndexInTitle + matchedPriorityString.length;
+    itemData.metadata.priority = priorityTag.substring(1) as 'low' | 'medium' | 'high';
 
-      title = markRangeForDeletion(title, {
-        start: startIndexInTitle,
-        end: endIndexInTitle,
-      });
-      console.log(
-        `[listItemToItemData] Marked priority string "${matchedPriorityString}" for deletion from title.`
-      );
-    }
+    // Calculate start index for deletion
+    const priorityTagStartIndex =
+      title.indexOf(fullPriorityString) + (fullPriorityString.length - priorityMatch[1].length);
+
+    // Mark the priority tag itself (e.g., !high) for deletion from title
+    title = markRangeForDeletion(title, {
+      start: priorityTagStartIndex,
+      end: priorityTagStartIndex + priorityMatch[1].length,
+    });
+    console.log(`[listItemToItemData] Extracted priority: ${itemData.metadata.priority}`);
+    console.log(
+      `[listItemToItemData] Marked priority string "${priorityMatch[1]}" for deletion from title.`
+    );
   }
 
-  itemData.title = preprocessTitle(stateManager, dedentNewLines(executeDeletion(title)));
+  itemData.title = executeDeletion(title).trim();
+
+  // Last, hydrate the date field for consistency
+  if (itemData.metadata.dateStr) {
+    itemData.metadata.date = moment(itemData.metadata.dateStr, dateFormat);
+  }
 
   const firstLineEnd = itemData.title.indexOf('\n');
   const inlineFields = extractInlineFields(itemData.title, true);
