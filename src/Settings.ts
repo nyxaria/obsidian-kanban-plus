@@ -135,6 +135,7 @@ export interface KanbanSettings {
   teamMemberColors?: Record<string, TeamMemberColorConfig>;
   editable?: boolean;
   memberAssignmentPrefix?: string;
+  'auto-move-done-to-lane'?: boolean;
 }
 
 export interface KanbanViewSettings {
@@ -146,6 +147,7 @@ export interface KanbanViewSettings {
   teamMembers: string[];
   teamMemberColors: Record<string, TeamMemberColorConfig>;
   editable: boolean;
+  'auto-move-done-to-lane': boolean;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -196,6 +198,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'teamMemberColors',
   'editable',
   'memberAssignmentPrefix',
+  'auto-move-done-to-lane',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -569,6 +572,55 @@ export class SettingsManager {
 
                 this.applySettingsUpdate({
                   $unset: ['clickOutsideCardToSaveEdit'],
+                });
+              });
+          });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Automatically move done cards to "Done" lane'))
+      .setDesc(
+        t(
+          'When a card is marked as done, automatically move it to a lane named "Done". If the lane doesn\'t exist, it will be created.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('auto-move-done-to-lane', local);
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['auto-move-done-to-lane'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'auto-move-done-to-lane': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('auto-move-done-to-lane', local);
+                const defaultValue =
+                  globalValue !== undefined
+                    ? globalValue
+                    : DEFAULT_SETTINGS['auto-move-done-to-lane'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['auto-move-done-to-lane'],
                 });
               });
           });
@@ -1967,6 +2019,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   teamMemberColors: {},
   editable: true,
   memberAssignmentPrefix: '@@',
+  'auto-move-done-to-lane': false,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {

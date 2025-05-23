@@ -1,3 +1,5 @@
+import update from 'immutability-helper';
+// Corrected import
 import {
   Heading as MdastHeading,
   List as MdastList,
@@ -23,13 +25,17 @@ import {
 import { render, unmountComponentAtNode } from 'preact/compat';
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 
+// For boardToMd and other parsing utilities
 import { KanbanView, kanbanViewType } from './KanbanView';
 import { DEFAULT_SETTINGS, KanbanSettings, SavedWorkspaceView } from './Settings';
 import { StateManager } from './StateManager';
+import { generateInstanceId } from './components/helpers';
 import { getTagColorFn, getTagSymbolFn } from './components/helpers';
+import { Lane } from './components/types';
 import { ItemData, TagColor, TagSymbolSetting, TeamMemberColorConfig } from './components/types';
 import { hasFrontmatterKey } from './helpers';
 import KanbanPlugin from './main';
+import { ListFormat } from './parsers/List';
 import { listItemToItemData } from './parsers/formats/list';
 import { parseMarkdown } from './parsers/parseMarkdown';
 
@@ -82,6 +88,130 @@ function getHeadingText(node: MdastHeading): string {
 // Utility to escape strings for regex
 function escapeRegExp(string: string): string {
   return string.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&'); // $& means the whole matched string
+}
+
+// Helper function to move a card to the "Done" lane in markdown
+async function moveCardToDoneLaneInMarkdown(
+  plugin: KanbanPlugin, // Pass plugin for settings and app access
+  markdownContent: string,
+  targetFile: TFile, // Pass TFile for StateManager context
+  cardToMove: WorkspaceCard
+): Promise<string> {
+  console.log(
+    '[WorkspaceView] moveCardToDoneLaneInMarkdown: Called with card:',
+    cardToMove.title,
+    'for file:',
+    targetFile.path
+  );
+  const DONE_LANE_NAME = 'Done';
+  // TODO: Implement markdown manipulation logic here
+  // 1. Get a temporary StateManager for the board to use its parser
+  // This is a bit of a hack, ideally parser functions would be standalone
+  const tempStateManager = new StateManager(
+    plugin.app,
+    { file: targetFile } as any,
+    () => {},
+    () => plugin.settings
+  );
+  const parser = new ListFormat(tempStateManager); // Or whichever parser is appropriate
+
+  try {
+    const board = parser.mdToBoard(markdownContent);
+    console.log(
+      '[WorkspaceView] moveCardToDoneLaneInMarkdown: Parsed markdown to board object:',
+      JSON.stringify(board).substring(0, 500) + '...'
+    );
+
+    // Find the card to move
+    let cardItemData: ItemData | null = null; // Renamed for clarity
+    let sourceLaneIndex = -1;
+    let itemIndexInSourceLane = -1;
+
+    for (let i = 0; i < board.children.length; i++) {
+      const lane = board.children[i];
+      // Try to match by blockId first, then by title and original lane if blockId is not present/matched
+      const itemIdx = cardToMove.blockId
+        ? lane.children.findIndex((item) => item.data.blockId === cardToMove.blockId)
+        : lane.children.findIndex(
+            (item) =>
+              item.data.title === cardToMove.title && lane.data.title === cardToMove.laneTitle
+          );
+
+      if (itemIdx !== -1) {
+        sourceLaneIndex = i;
+        itemIndexInSourceLane = itemIdx;
+        cardItemData = lane.children[itemIdx].data; // Get the ItemData
+        console.log(
+          `[WorkspaceView] moveCardToDoneLaneInMarkdown: Found card '${cardItemData.titleRaw}' in lane '${lane.data.title}'`
+        );
+        break;
+      }
+    }
+
+    if (!cardItemData || sourceLaneIndex === -1) {
+      console.warn(
+        '[WorkspaceView] moveCardToDoneLaneInMarkdown: Card not found in parsed board.',
+        cardToMove
+      );
+      return markdownContent; // Card not found, return original content
+    }
+
+    // Find or create "Done" lane
+    let doneLaneIndex = board.children.findIndex((lane) => lane.data.title === DONE_LANE_NAME);
+    let boardForUpdate = board;
+    console.log(
+      `[WorkspaceView] moveCardToDoneLaneInMarkdown: Initial Done lane index: ${doneLaneIndex}`
+    );
+
+    if (doneLaneIndex === -1) {
+      const newLaneId = generateInstanceId(); // Make sure generateInstanceId is available or import
+      const newLane: Lane = {
+        id: newLaneId,
+        type: 'lane', // Added based on linter feedback for Nestable
+        accepts: ['item'], // Added based on linter feedback for Nestable
+        data: {
+          title: DONE_LANE_NAME,
+        },
+        children: [],
+      };
+      boardForUpdate = update(board, { children: { $push: [newLane] } });
+      doneLaneIndex = boardForUpdate.children.length - 1;
+      console.log(
+        `[WorkspaceView] moveCardToDoneLaneInMarkdown: "Done" lane created at index ${doneLaneIndex}. New board structure (first 500 chars):`,
+        JSON.stringify(boardForUpdate).substring(0, 500) + '...'
+      );
+    }
+
+    if (sourceLaneIndex === doneLaneIndex) {
+      console.log(
+        `[WorkspaceView] moveCardToDoneLaneInMarkdown: Card ${cardToMove.title} is already in the Done lane.`
+      );
+      return markdownContent;
+    }
+
+    // Perform the move using immutability-helper on the board structure
+    const itemToMoveFromBoard =
+      boardForUpdate.children[sourceLaneIndex].children[itemIndexInSourceLane];
+    console.log(
+      `[WorkspaceView] moveCardToDoneLaneInMarkdown: Moving item from source lane ${sourceLaneIndex} to done lane ${doneLaneIndex}`
+    );
+    const movedBoard = update(boardForUpdate, {
+      children: {
+        [sourceLaneIndex]: {
+          children: { $splice: [[itemIndexInSourceLane, 1]] },
+        },
+        [doneLaneIndex]: {
+          children: { $push: [itemToMoveFromBoard] },
+        },
+      },
+    });
+
+    // Convert the modified board structure back to markdown
+    return parser.boardToMd(movedBoard);
+  } catch (e) {
+    console.error('[WorkspaceView] Error in moveCardToDoneLaneInMarkdown:', e);
+    return markdownContent; // Return original content on error
+  }
 }
 
 // --- Simple Modal for Date Input ---
@@ -693,6 +823,21 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
           new Notice(
             `"${card.title}" marked as ${newCheckedStatus ? 'Done' : 'Undone'} in ${targetFile.basename}.`
           );
+
+          // If card was marked as Done, and auto-move setting is on, move it in markdown
+          if (newCheckedStatus && props.plugin.settings['auto-move-done-to-lane']) {
+            const updatedMarkdown = await moveCardToDoneLaneInMarkdown(
+              props.plugin,
+              fileContent, // Use the fileContent that was just confirmed to be a task
+              targetFile,
+              card
+            );
+            if (updatedMarkdown !== fileContent) {
+              await props.plugin.app.vault.modify(targetFile, updatedMarkdown);
+              new Notice(`Moved "${card.title}" to Done lane in ${targetFile.basename}.`);
+            }
+          }
+
           handleScanDirectory(
             [...activeFilterTags],
             [...activeFilterMembers],

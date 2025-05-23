@@ -45,19 +45,7 @@ export const ItemCheckbox = memo(function ItemCheckbox({
 
       boardModifiers.replaceItem(path, replacements);
     } else {
-      boardModifiers.updateItem(
-        path,
-        update(item, {
-          data: {
-            checkChar: {
-              $apply: (v) => {
-                return v === ' ' ? getTaskStatusDone() : ' ';
-              },
-            },
-            $toggle: ['checked'],
-          },
-        })
-      );
+      stateManager.setCardChecked(item, !item.data.checked);
     }
   }, [item, stateManager, boardModifiers, ...path]);
 
