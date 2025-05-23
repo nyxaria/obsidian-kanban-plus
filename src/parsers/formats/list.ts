@@ -125,6 +125,36 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     },
   };
 
+  // Regex for !priority tags
+  const priorityRegEx = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+  let priorityMatch;
+
+  // Iterate over the title string to find priority tags BEFORE AST traversal
+  // This is because priority tags are not specific AST nodes themselves yet
+  let tempTitleForPriorityExtraction = title; // Use a temporary copy for regex exec
+  while ((priorityMatch = priorityRegEx.exec(tempTitleForPriorityExtraction)) !== null) {
+    const matchedPriorityTag = priorityMatch[0]; // e.g., " !high" or "!high"
+    const priorityValue = priorityMatch[1].substring(1) as 'low' | 'medium' | 'high'; // "low", "medium", or "high"
+
+    if (!itemData.metadata.priority) {
+      // Take the first one found
+      itemData.metadata.priority = priorityValue;
+      console.log(`[listItemToItemData] Extracted priority: ${priorityValue}`);
+    }
+
+    // Mark the original matched tag (including leading space if present) for deletion from the main 'title'
+    const matchStartIndex = priorityMatch.index;
+    const matchEndIndex = matchStartIndex + matchedPriorityTag.length;
+
+    title = markRangeForDeletion(title, {
+      start: matchStartIndex,
+      end: matchEndIndex,
+    });
+    console.log(
+      `[listItemToItemData] Marked priority string "${matchedPriorityTag}" for deletion from title.`
+    );
+  }
+
   visit(item, (node, i, parent) => {
     const genericNode = node as ValueNode;
 
@@ -256,32 +286,20 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     });
   }
 
-  // Parse !priority from the potentially modified 'title'
-  const priorityRegex = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/i; // Case-insensitive for parsing
-  const priorityMatch = title.match(priorityRegex);
-
-  if (priorityMatch) {
-    const fullPriorityString = priorityMatch[0]; // e.g., " !high" or "!high"
-    const priorityTag = priorityMatch[1].toLowerCase() as 'low' | 'medium' | 'high'; // e.g., "!high" -> "high"
-
-    itemData.metadata.priority = priorityTag.substring(1) as 'low' | 'medium' | 'high';
-
-    // Calculate start index for deletion
-    const priorityTagStartIndex =
-      title.indexOf(fullPriorityString) + (fullPriorityString.length - priorityMatch[1].length);
-
-    // Mark the priority tag itself (e.g., !high) for deletion from title
-    title = markRangeForDeletion(title, {
-      start: priorityTagStartIndex,
-      end: priorityTagStartIndex + priorityMatch[1].length,
-    });
-    console.log(`[listItemToItemData] Extracted priority: ${itemData.metadata.priority}`);
-    console.log(
-      `[listItemToItemData] Marked priority string "${priorityMatch[1]}" for deletion from title.`
-    );
-  }
-
+  // Finalize title after all deletions (including priority, tags, dates)
   itemData.title = executeDeletion(title).trim();
+  itemData.titleRaw = removeBlockId(dedentNewLines(replaceBrs(itemContent))); // Keep original raw title separate
+
+  // If the title is now empty after removing metadata, it might have only contained metadata.
+  // In such cases, we might want to revert to a less aggressively cleaned title or a placeholder.
+  // For now, we'll leave it as potentially empty.
+
+  console.log(
+    '[listItemToItemData] Final itemData.title:',
+    `'${itemData.title}'`,
+    'itemData.metadata.priority:',
+    itemData.metadata.priority
+  );
 
   // Last, hydrate the date field for consistency
   if (itemData.metadata.dateStr) {

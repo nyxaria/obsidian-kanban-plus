@@ -1292,89 +1292,102 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                     const existingMembers: string[] = [];
                     let existingDateString: string | null = null;
                     let existingTimeString: string | null = null;
-                    // Block ID must be preserved if present
                     let blockIdSuffix: string | null = null;
+
+                    // --- 1. Extract and Store All Existing Metadata ---
+
+                    // Extract and store Block ID first, as it's at the end
                     const blockIdMatch = textContent.match(/\s(\^[a-zA-Z0-9]+)$/);
                     if (blockIdMatch) {
                       blockIdSuffix = blockIdMatch[0]; // e.g., " ^blockid"
+                      // Temporarily remove from textContent to avoid interference
                       textContent = textContent.substring(
                         0,
                         textContent.length - blockIdSuffix.length
                       );
                     }
 
-                    // 1. Extract and remove members
-                    textContent = textContent
-                      .replace(memberRegex, (match, memberTag) => {
-                        existingMembers.push(memberTag); // Store with @@
-                        return '';
-                      })
-                      .trim();
+                    // Extract and store Members
+                    let memberMatch;
+                    while ((memberMatch = memberRegex.exec(textContent)) !== null) {
+                      existingMembers.push(memberMatch[1]); // Store with @@
+                    }
+                    // Remove all member tags from textContent
+                    textContent = textContent.replace(memberRegex, '').trim();
 
-                    // 2. Extract and remove date/time (Plugin format)
-                    textContent = textContent
-                      .replace(pluginDatePattern, (match) => {
-                        if (!existingDateString) existingDateString = match.trim();
-                        return '';
-                      })
-                      .trim();
-
-                    // 3. Extract and remove date (Tasks plugin format)
-                    if (!existingDateString) {
-                      textContent = textContent
-                        .replace(tasksPluginDatePattern, (match) => {
-                          if (!existingDateString) existingDateString = match.trim();
-                          return '';
-                        })
-                        .trim();
+                    // Extract and store Date (Plugin format)
+                    const pluginDateMatch = textContent.match(pluginDatePattern);
+                    if (pluginDateMatch && pluginDateMatch[0]) {
+                      existingDateString = pluginDateMatch[0].trim();
+                      textContent = textContent.replace(pluginDatePattern, '').trim();
                     }
 
-                    // 4. Extract and remove time (Plugin format)
-                    textContent = textContent
-                      .replace(pluginTimePattern, (match, timeContent) => {
-                        if (!existingTimeString && /^[0-2]?[0-9]:[0-5][0-9]$/.test(timeContent)) {
-                          existingTimeString = match.trim();
-                        }
-                        return '';
-                      })
-                      .trim();
+                    // Extract and store Date (Tasks plugin format) - only if not already found
+                    if (!existingDateString) {
+                      const tasksDateMatch = textContent.match(tasksPluginDatePattern);
+                      if (tasksDateMatch && tasksDateMatch[0]) {
+                        existingDateString = tasksDateMatch[0].trim();
+                        textContent = textContent.replace(tasksPluginDatePattern, '').trim();
+                      }
+                    }
 
-                    // 5. Remove old priority tag
-                    textContent = textContent.replace(priorityRegex, '').trim();
+                    // Extract and store Time (Plugin format)
+                    const pluginTimeMatch = textContent.match(pluginTimePattern);
+                    if (pluginTimeMatch && pluginTimeMatch[0]) {
+                      // Basic validation to ensure it's a time string
+                      const timeContentMatch = pluginTimeMatch[0].match(/\{([^}]+?)\}/);
+                      if (
+                        timeContentMatch &&
+                        /^[0-2]?[0-9]:[0-5][0-9]$/.test(timeContentMatch[1])
+                      ) {
+                        existingTimeString = pluginTimeMatch[0].trim();
+                        textContent = textContent.replace(pluginTimePattern, '').trim();
+                      }
+                    }
+
+                    // --- 2. Clean Text Content ---
+                    // Remove any old priority tag (full or partial to be safe)
+                    // This regex matches "!high", "!medium", "!low", or "!h", "!med", etc.
+                    const comprehensivePriorityCleanRegex = /(?:^|\s)![a-zA-Z]+(?=\s|$)/g;
+                    textContent = textContent.replace(comprehensivePriorityCleanRegex, '').trim();
 
                     // Clean up multiple spaces that might have been left from replacements
                     textContent = textContent.replace(/\s{2,}/g, ' ').trim();
 
-                    // Reconstruct the line: Text !priority @@Member1 @@Member2 @{Date} @{Time} ^blockId
-                    let newLine = textContent;
+                    // --- 3. Reconstruct the Line ---
+                    let reconstructedLine = textContent;
 
+                    // Add new priority (if any)
                     if (newPriority) {
                       console.log(
                         '[WorkspaceView] updateLineWithPriority: Constructing priority tag. newPriority value:',
                         newPriority
-                      ); // DIAGNOSTIC LOG
-                      newLine = `${newLine} !${newPriority}`.trim();
-                    }
-                    if (existingMembers.length > 0) {
-                      // Ensure members are appended with a single space prefix if newLine is not empty
-                      const membersString = existingMembers.join(' ');
-                      newLine = newLine ? `${newLine} ${membersString}` : membersString;
-                      newLine = newLine.trim(); // Trim after adding members
-                    }
-                    if (existingDateString) {
-                      newLine = newLine ? `${newLine} ${existingDateString}` : existingDateString;
-                      newLine = newLine.trim();
-                    }
-                    if (existingTimeString) {
-                      newLine = newLine ? `${newLine} ${existingTimeString}` : existingTimeString;
-                      newLine = newLine.trim();
-                    }
-                    if (blockIdSuffix) {
-                      // blockIdSuffix already contains its leading space if matched, or is null
-                      newLine = `${newLine}${blockIdSuffix}`.trim();
+                      );
+                      reconstructedLine = `${reconstructedLine} !${newPriority}`;
                     }
 
-                    return newLine.replace(/\s{2,}/g, ' ').trim();
+                    // Add Members
+                    if (existingMembers.length > 0) {
+                      reconstructedLine = `${reconstructedLine} ${existingMembers.join(' ')}`;
+                    }
+
+                    // Add Date
+                    if (existingDateString) {
+                      reconstructedLine = `${reconstructedLine} ${existingDateString}`;
+                    }
+
+                    // Add Time
+                    if (existingTimeString) {
+                      reconstructedLine = `${reconstructedLine} ${existingTimeString}`;
+                    }
+
+                    // Add Block ID (already includes leading space if it existed)
+                    if (blockIdSuffix) {
+                      reconstructedLine = `${reconstructedLine}${blockIdSuffix}`;
+                    }
+
+                    // Final clean up of spaces and trim
+                    return reconstructedLine.replace(/\s{2,}/g, ' ').trim();
                   };
 
                   if (card.blockId) {
