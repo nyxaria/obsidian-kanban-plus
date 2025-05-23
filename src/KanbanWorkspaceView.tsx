@@ -2837,6 +2837,9 @@ export class KanbanWorkspaceView extends ItemView {
       `[KanbanWorkspaceView] setViewConfigurationForLeaf: Name: ${name}, ID: ${id}. Current this.currentLeafSavedViewId is now ${this.currentLeafSavedViewId}`
     );
 
+    // After updating the state that getState() will use, request the workspace layout to be saved.
+    this.app.workspace.requestSaveLayout();
+
     // Call refreshHeader BEFORE renderReactComponent
     this.refreshHeader();
     // Pass the 'id' directly to renderReactComponent to ensure it uses the freshest value for the prop and key
