@@ -25,7 +25,7 @@ import {
 import { Kanban } from './components/Kanban';
 import { BasicMarkdownRenderer } from './components/MarkdownRenderer/MarkdownRenderer';
 import { c } from './components/helpers';
-import { Board, ItemData } from './components/types';
+import { Board, Item, ItemData } from './components/types';
 import { DndContext } from './dnd/components/DndContext';
 import { getParentWindow } from './dnd/util/getWindow';
 import {
@@ -1001,46 +1001,105 @@ export class KanbanView extends TextFileView implements HoverParent {
     if (this.targetHighlightLocation.match && !blockIdToSearch && !cardTitleForSearch) {
       const matchData = this.targetHighlightLocation.match;
       console.log('[KanbanView] applyHighlight: Processing global search match:', matchData);
-      if (matchData.content && matchData.matches && matchData.matches.length > 0) {
-        const content = matchData.content as string;
-        const firstMatchOffsets = matchData.matches[0] as [number, number];
-        const matchedText = content.substring(firstMatchOffsets[0], firstMatchOffsets[1]);
+
+      // Attempt to get blockId from matchData.subpath if it exists
+      if (matchData.subpath && matchData.subpath.startsWith('#^')) {
+        blockIdToSearch = matchData.subpath.substring(2); // Remove #^
         console.log(
-          `[KanbanView] applyHighlight: Extracted matchedText from global search: '${matchedText}'`
+          `[KanbanView] applyHighlight: Extracted blockId '${blockIdToSearch}' from matchData.subpath.`
+        );
+        cardTitleForSearch = undefined; // Prioritize blockId from subpath
+        listNameForSearch = undefined;
+      } else if (
+        matchData.matches &&
+        matchData.matches.length > 0 &&
+        matchData.matches[0].length === 2
+      ) {
+        // Use character offsets from the search match to find the correct card
+        const matchStartOffset = matchData.matches[0][0] as number;
+        const matchEndOffset = matchData.matches[0][1] as number;
+        console.log(
+          `[KanbanView] applyHighlight: Using match offsets: start=${matchStartOffset}, end=${matchEndOffset}`
         );
 
-        let foundCard = null;
+        let foundItemViaOffset: Item | null = null; // Changed from ItemData to Item
         for (const lane of board.children) {
           for (const item of lane.children) {
-            // Check against titleRaw first, then title if no match
-            if (item.data.titleRaw?.toLowerCase().includes(matchedText.toLowerCase())) {
-              foundCard = item;
-              break;
-            }
-            if (!foundCard && item.data.title?.toLowerCase().includes(matchedText.toLowerCase())) {
-              foundCard = item;
-              break;
+            // item here is of type Item
+            if (
+              item.data.position &&
+              item.data.position.start &&
+              item.data.position.end &&
+              typeof item.data.position.start.offset === 'number' &&
+              typeof item.data.position.end.offset === 'number'
+            ) {
+              if (
+                matchStartOffset >= item.data.position.start.offset &&
+                matchEndOffset <= item.data.position.end.offset
+              ) {
+                foundItemViaOffset = item; // Store the whole Item
+                break;
+              }
             }
           }
-          if (foundCard) break;
+          if (foundItemViaOffset) break;
         }
 
-        if (foundCard) {
-          blockIdToSearch = foundCard.data.blockId || foundCard.id;
-          cardTitleForSearch = undefined; // Prioritize blockId/id found from search match
+        if (foundItemViaOffset) {
+          blockIdToSearch = foundItemViaOffset.data.blockId || foundItemViaOffset.id; // Use Item.data.blockId or Item.id
+          cardTitleForSearch = undefined;
           listNameForSearch = undefined;
           console.log(
-            `[KanbanView] applyHighlight: Found card from global search. ID/BlockID to use: '${blockIdToSearch}' from card title: '${foundCard.data.titleRaw}'`
+            `[KanbanView] applyHighlight: Found card from global search via OFFSET. ID/BlockID to use: '${blockIdToSearch}' for card title: '${foundItemViaOffset.data.titleRaw}'`
           );
         } else {
           console.warn(
-            `[KanbanView] applyHighlight: Global search matchedText '${matchedText}' not found in any card title on the board.`
+            `[KanbanView] applyHighlight: Global search match offsets (start: ${matchStartOffset}, end: ${matchEndOffset}) did not fall within any card's position offsets.`
           );
-          // Fall through to allow blockId/title/list if they were somehow set along with match
+          // Fallback to old text matching if offset matching fails
+          if (matchData.content && matchData.matches && matchData.matches.length > 0) {
+            const content = matchData.content as string;
+            const firstMatchOffsets = matchData.matches[0] as [number, number];
+            const matchedText = content.substring(firstMatchOffsets[0], firstMatchOffsets[1]);
+            console.log(
+              `[KanbanView] applyHighlight: FALLBACK - Extracted matchedText from global search: '${matchedText}'`
+            );
+
+            let foundCard = null;
+            for (const lane of board.children) {
+              for (const item of lane.children) {
+                if (item.data.titleRaw?.toLowerCase().includes(matchedText.toLowerCase())) {
+                  foundCard = item;
+                  break;
+                }
+                if (
+                  !foundCard &&
+                  item.data.title?.toLowerCase().includes(matchedText.toLowerCase())
+                ) {
+                  foundCard = item;
+                  break;
+                }
+              }
+              if (foundCard) break;
+            }
+
+            if (foundCard) {
+              blockIdToSearch = foundCard.data.blockId || foundCard.id;
+              cardTitleForSearch = undefined;
+              listNameForSearch = undefined;
+              console.log(
+                `[KanbanView] applyHighlight: FALLBACK - Found card from global search via matchedText. ID/BlockID: '${blockIdToSearch}' from card title: '${foundCard.data.titleRaw}'`
+              );
+            } else {
+              console.warn(
+                `[KanbanView] applyHighlight: FALLBACK - Global search matchedText '${matchedText}' not found in any card title.`
+              );
+            }
+          }
         }
       } else {
         console.warn(
-          '[KanbanView] applyHighlight: Malformed global search match data in targetHighlightLocation:',
+          '[KanbanView] applyHighlight: Malformed global search match data in targetHighlightLocation (missing matches, or matches[0] is not an array of two numbers):',
           matchData
         );
       }
