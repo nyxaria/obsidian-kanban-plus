@@ -2844,11 +2844,14 @@ export class KanbanWorkspaceView extends ItemView {
   }
 
   public refreshHeader() {
-    this.leaf.onResize(); // Use onResize to suggest Obsidian re-renders the tab, which should call getDisplayText()
-    // ADDED: Stronger signal to Obsidian to update UI elements like tab titles.
-    this.app.workspace.requestSaveLayout();
     console.log(
-      '[KanbanWorkspaceView] refreshHeader: Called this.leaf.onResize() and this.app.workspace.requestSaveLayout().'
+      `[KanbanWorkspaceView] refreshHeader START for leaf: ${(this.leaf as any).id}. Current display name: '${this.activeSavedViewNameForDisplay}'`
+    );
+    this.app.workspace.trigger('layout-change');
+    this.app.workspace.trigger('layout-ready'); // Added this event
+    (this.leaf as any).updateHeader?.(); // More direct attempt to update the header
+    console.log(
+      "[KanbanWorkspaceView] refreshHeader END: Called app.workspace.trigger('layout-change'), app.workspace.trigger('layout-ready'), and (leaf as any).updateHeader()."
     );
   }
 
@@ -2857,9 +2860,18 @@ export class KanbanWorkspaceView extends ItemView {
   }
 
   getDisplayText() {
+    const leafId = (this.leaf as any).id ?? 'N/A_LEAF_ID';
+    console.log(
+      `[KanbanWorkspaceView] getDisplayText START for leaf: ${leafId}. activeSavedViewNameForDisplay: '${this.activeSavedViewNameForDisplay}', currentLeafSavedViewId: '${this.currentLeafSavedViewId}'`
+    );
+
     if (this.activeSavedViewNameForDisplay) {
       const name = this.activeSavedViewNameForDisplay;
-      return `${name.charAt(0).toUpperCase() + name.slice(1)}`;
+      const displayText = `${name.charAt(0).toUpperCase() + name.slice(1)}`;
+      console.log(
+        `[KanbanWorkspaceView] getDisplayText RETURNING (from activeSavedViewNameForDisplay): '${displayText}' for leaf: ${leafId}`
+      );
+      return displayText;
     }
     // Fallback if no specific view is active in this instance (e.g., on initial load before state is fully processed)
     // We can still check the global lastSelectedWorkspaceViewId as a very temporary display before state kicks in.
@@ -2868,9 +2880,16 @@ export class KanbanWorkspaceView extends ItemView {
     if (lastViewId) {
       const activeView = savedViews.find((v) => v.id === lastViewId);
       if (activeView && activeView.name) {
-        return `${activeView.name.charAt(0).toUpperCase() + activeView.name.slice(1)}`;
+        const displayText = `${activeView.name.charAt(0).toUpperCase() + activeView.name.slice(1)}`;
+        console.log(
+          `[KanbanWorkspaceView] getDisplayText RETURNING (from global fallback): '${displayText}' for leaf: ${leafId}`
+        );
+        return displayText;
       }
     }
+    console.log(
+      `[KanbanWorkspaceView] getDisplayText RETURNING (default 'Workspace') for leaf: ${leafId}`
+    );
     return 'Workspace';
   }
 
