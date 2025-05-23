@@ -3,9 +3,14 @@ import { App, TFile, moment } from 'obsidian';
 import { useEffect, useState } from 'preact/compat';
 
 import { KanbanView } from './KanbanView';
-import { KanbanSettings, SettingRetrievers } from './Settings';
-import { getDefaultDateFormat, getDefaultTimeFormat } from './components/helpers';
-import { Board, BoardTemplate, Item } from './components/types';
+import { DEFAULT_SETTINGS, KanbanSettings, SettingRetrievers } from './Settings';
+import {
+  c,
+  generateInstanceId,
+  getDefaultDateFormat,
+  getDefaultTimeFormat,
+} from './components/helpers';
+import { Board, BoardTemplate, Item, ItemData, Lane } from './components/types';
 import { ListFormat } from './parsers/List';
 import { BaseFormat, frontmatterKey, shouldRefreshBoard } from './parsers/common';
 import { getTaskStatusDone } from './parsers/helpers/inlineMetadata';
@@ -609,5 +614,178 @@ export class StateManager {
     console.log(
       `[StateManager] setLaneBackgroundColor: Color set for lane ${laneId} to ${color}. State updated.`
     );
+  }
+
+  // Helper function to handle auto-moving done cards
+  private handleAutoMoveDoneCard(board: Board, itemId: string, isChecked: boolean): Board {
+    console.log(
+      `[StateManager] handleAutoMoveDoneCard: Called for item ${itemId}, isChecked: ${isChecked}`
+    );
+    const autoMoveEnabled = this.getSetting('auto-move-done-to-lane');
+    console.log(`[StateManager] handleAutoMoveDoneCard: autoMoveEnabled is ${autoMoveEnabled}`);
+
+    if (!autoMoveEnabled || !isChecked) {
+      console.log(
+        '[StateManager] handleAutoMoveDoneCard: Auto-move not enabled or item not checked. Returning original board.'
+      );
+      return board; // No move needed
+    }
+
+    const DONE_LANE_NAME = 'Done';
+    let sourceLaneIndex = -1;
+    let itemIndexInSourceLane = -1;
+    let itemToMove: Item | null = null;
+
+    // Find the item and its source lane
+    for (let i = 0; i < board.children.length; i++) {
+      const lane = board.children[i];
+      const itemIdx = lane.children.findIndex((item) => item.id === itemId);
+      if (itemIdx !== -1) {
+        sourceLaneIndex = i;
+        itemIndexInSourceLane = itemIdx;
+        itemToMove = lane.children[itemIdx];
+        break;
+      }
+    }
+
+    if (!itemToMove || sourceLaneIndex === -1) {
+      console.warn(
+        `[StateManager] Auto-move: Item ${itemId} not found in board structure for move. Original board state:`,
+        JSON.stringify(board)
+      );
+      return board; // Item not found, should not happen if called after item update
+    }
+    console.log(
+      `[StateManager] handleAutoMoveDoneCard: Found item '${itemToMove.data.titleRaw}' in lane '${board.children[sourceLaneIndex].data.title}'`
+    );
+
+    let doneLaneIndex = board.children.findIndex((lane) => lane.data.title === DONE_LANE_NAME);
+    let newBoard = board;
+    console.log(`[StateManager] handleAutoMoveDoneCard: Initial Done lane index: ${doneLaneIndex}`);
+
+    // If "Done" lane doesn't exist, create it
+    if (doneLaneIndex === -1) {
+      const newLaneId = generateInstanceId();
+      const newLane: Lane = {
+        id: newLaneId,
+        type: 'lane', // Required by Nestable
+        accepts: ['item'], // Required by Nestable
+        data: {
+          title: DONE_LANE_NAME,
+          // No other properties like collapsed, maxLimit, backgroundColor here for data
+        },
+        children: [],
+        // No 'edit' property here
+      };
+      newBoard = update(board, {
+        children: { $push: [newLane] },
+      });
+      doneLaneIndex = newBoard.children.length - 1; // New lane is at the end
+      console.log(
+        `[StateManager] handleAutoMoveDoneCard: "Done" lane created at index ${doneLaneIndex}`
+      );
+    }
+
+    // Move the item
+    // Ensure itemToMove is correctly updated if its checked status changed in the calling function
+    const updatedItemToMove = { ...itemToMove, data: { ...itemToMove.data, checked: true } };
+
+    if (sourceLaneIndex === doneLaneIndex) {
+      // Item is already in the Done lane, potentially reorder to the end if behavior is desired
+      // For now, if it's already in Done, we do nothing further to prevent loops or needless shuffles.
+      // If it was just marked done and was already in Done, it just stays.
+      console.log(
+        `[StateManager] handleAutoMoveDoneCard: Item ${itemId} is already in the "Done" lane. No move performed.`
+      );
+      return newBoard;
+    }
+
+    console.log(
+      `[StateManager] handleAutoMoveDoneCard: Attempting to move item ${itemId} from lane ${sourceLaneIndex} to lane ${doneLaneIndex}`
+    );
+    newBoard = update(newBoard, {
+      children: {
+        [sourceLaneIndex]: {
+          children: { $splice: [[itemIndexInSourceLane, 1]] }, // Remove from source lane
+        },
+        [doneLaneIndex]: {
+          children: { $push: [updatedItemToMove] }, // Add to the end of Done lane
+        },
+      },
+    });
+
+    return newBoard;
+  }
+
+  updateItem(itemId: string, data: Partial<ItemData>, lanes: Lane[], pos?: number) {
+    console.log(
+      `[StateManager] updateItem: Called for itemId: ${itemId}, full data payload:`,
+      JSON.stringify(data)
+    );
+    const laneIdx = lanes.findIndex((lane) => lane.children.some((item) => item.id === itemId));
+    if (laneIdx === -1) {
+      console.warn('[StateManager] updateItem: Lane not found for item', itemId);
+      return;
+    }
+
+    const itemIdx = lanes[laneIdx].children.findIndex((item) => item.id === itemId);
+    if (itemIdx === -1) {
+      console.warn('[StateManager] updateItem: Item not found in lane for item', itemId);
+      return;
+    }
+
+    let newBoard = update(this.state, {
+      children: {
+        [laneIdx]: {
+          children: {
+            [itemIdx]: {
+              data: { $merge: data },
+            },
+          },
+        },
+      },
+    });
+
+    // Handle auto-move if the card is marked as done
+    if (data.checked === true) {
+      newBoard = this.handleAutoMoveDoneCard(newBoard, itemId, true);
+    }
+
+    this.setState(newBoard);
+  }
+
+  setCardChecked(item: Item, checked: boolean) {
+    if (!this.state) {
+      console.error(
+        '[StateManager] setCardChecked: Cannot set checked status, state is not initialized.'
+      );
+      return;
+    }
+
+    // Find the lane containing the item
+    const laneIdx = this.state.children.findIndex((lane) =>
+      lane.children.some((childItem) => childItem.id === item.id)
+    );
+
+    if (laneIdx === -1) {
+      console.warn(`[StateManager] setCardChecked: Lane not found for item ${item.id}`);
+      return;
+    }
+
+    const itemIdx = this.state.children[laneIdx].children.findIndex(
+      (childItem) => childItem.id === item.id
+    );
+
+    if (itemIdx === -1) {
+      console.warn(
+        `[StateManager] setCardChecked: Item ${item.id} not found in lane ${this.state.children[laneIdx].data.title}`
+      );
+      return;
+    }
+
+    const newCheckChar = checked ? getTaskStatusDone() : ' '; // ' ' for not done, or specific char if needed
+
+    // Call updateItem to make the change and trigger auto-move if applicable
+    this.updateItem(item.id, { checked, checkChar: newCheckChar }, this.state.children);
   }
 }

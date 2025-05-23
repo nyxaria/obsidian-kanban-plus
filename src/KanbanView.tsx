@@ -97,7 +97,8 @@ export class KanbanView extends TextFileView implements HoverParent {
       hideHashForTagsWithoutSymbols: DEFAULT_SETTINGS.hideHashForTagsWithoutSymbols || false,
       teamMembers: DEFAULT_SETTINGS.teamMembers || [],
       teamMemberColors: DEFAULT_SETTINGS.teamMemberColors || {},
-      editable: DEFAULT_SETTINGS.editable !== undefined ? DEFAULT_SETTINGS.editable : true,
+      editable: DEFAULT_SETTINGS.editable || false,
+      'auto-move-done-to-lane': DEFAULT_SETTINGS['auto-move-done-to-lane'] || false,
     };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));
