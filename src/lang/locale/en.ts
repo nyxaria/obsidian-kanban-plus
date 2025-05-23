@@ -300,6 +300,17 @@ const en = {
 
   // Workspace View Specific
   'Kanban Workspace': 'Kanban Workspace',
+
+  // Added for "auto-move-done-to-lane" setting
+  'Automatically move done cards to "Done" lane': 'Automatically move done cards to "Done" lane',
+  'When a card is marked as done, automatically move it to a lane named "Done". If the lane doesn\'t exist, it will be created.':
+    'When a card is marked as done, automatically move it to a lane named "Done". If the lane doesn\'t exist, it will be created.',
+  // Potentially missing strings flagged by linter earlier (might be duplicates or already exist, adding defensively)
+  'Kanban board settings': 'Kanban board settings',
+  'Team Members': 'Team Members',
+  'Add team member': 'Add team member',
+  'Enter member name': 'Enter member name',
+  Add: 'Add',
 };
 
 export type Lang = typeof en;
