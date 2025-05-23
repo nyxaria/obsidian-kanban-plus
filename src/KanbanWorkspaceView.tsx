@@ -271,7 +271,12 @@ class DateInputModal extends Modal {
 // --- End Date Input Modal ---
 
 // Basic React component for the workspace view
-function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents: Events }) {
+function KanbanWorkspaceViewComponent(props: {
+  plugin: KanbanPlugin;
+  viewEvents: Events;
+  refreshViewHeader: () => void; // Added prop
+  view: KanbanWorkspaceView; // Added prop
+}) {
   const [currentTagInput, setCurrentTagInput] = useState('');
   const [activeFilterTags, setActiveFilterTags] = useState<string[]>([]);
   const [selectedMemberForFilter, setSelectedMemberForFilter] = useState('');
@@ -301,13 +306,16 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
   // Load saved views from settings
   useEffect(() => {
     const loadedSavedViews = props.plugin.settings.savedWorkspaceViews || [];
-    setSavedViews(loadedSavedViews);
+    setSavedViews(loadedSavedViews); // Keep the list of all saved views up to date
 
-    // Attempt to load the last selected view on initial mount
-    const lastViewId = props.plugin.settings.lastSelectedWorkspaceViewId;
-    if (lastViewId) {
-      const viewToLoad = loadedSavedViews.find((v) => v.id === lastViewId);
+    // Only load from global lastSelectedWorkspaceViewId if this component instance
+    // doesn't currently have a view selected (selectedViewId is null/empty).
+    // This prevents a tab from having its view changed by another tab's activity.
+    if (!selectedViewId && props.plugin.settings.lastSelectedWorkspaceViewId) {
+      const globalLastViewId = props.plugin.settings.lastSelectedWorkspaceViewId;
+      const viewToLoad = loadedSavedViews.find((v) => v.id === globalLastViewId);
       if (viewToLoad) {
+        // Apply this globally preferred view to THIS instance as its initial/default view
         setActiveFilterTags(viewToLoad.tags.map((t) => t.replace(/^#/, '')));
         setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
         if (viewToLoad.dueDateFilter) {
@@ -319,14 +327,55 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         }
         setExcludeArchive(viewToLoad.excludeArchive ?? true);
         setExcludeDone(viewToLoad.excludeDone ?? true);
-        setSortCriteria((viewToLoad as any).sortCriteria || 'default'); // Cast to any to bypass linter for now
-        setSortDirection((viewToLoad as any).sortDirection || 'asc'); // Cast to any to bypass linter for now
-        setSelectedViewId(viewToLoad.id);
+        setSortCriteria((viewToLoad as any).sortCriteria || 'default');
+        setSortDirection((viewToLoad as any).sortDirection || 'asc');
+
+        setSelectedViewId(viewToLoad.id); // Set this component instance's selected view
+        props.view.setActiveViewNameForDisplay(viewToLoad.name); // Update parent ItemView's display name
+        // We also need to manually trigger a header refresh here if we set a default view
+        // because the refreshHeader in the dropdown onChange won't run in this path.
+        props.refreshViewHeader();
+      }
+    } else if (selectedViewId) {
+      // If a view IS selected for this instance, ensure its name is correctly displayed
+      // This handles cases where the component might re-render for other reasons
+      const currentView = loadedSavedViews.find((v) => v.id === selectedViewId);
+      if (currentView) {
+        props.view.setActiveViewNameForDisplay(currentView.name);
+        // It might be beneficial to refresh the header here too, to ensure consistency
+        // props.refreshViewHeader(); // Debatable if needed every time, but could help
+      } else {
+        // SelectedViewId exists but points to a non-existent view (e.g., deleted)
+        // Clear it out to avoid issues and revert to a default state or no view selected state
+        setSelectedViewId(null);
+        props.view.setActiveViewNameForDisplay(null);
+        props.refreshViewHeader();
+        // Potentially clear filters here too
       }
     }
+
+    // NOTE: props.plugin.settings.lastSelectedWorkspaceViewId is INTENTIONALLY OMITTED
+    // from the dependency array. This effect should update the list of savedViews,
+    // and conditionally apply a default view if this instance doesn't have one, but it
+    // should NOT re-run and change this instance's view just because the global
+    // lastSelectedWorkspaceViewId changed due to another tab's interaction.
   }, [
-    props.plugin.settings.savedWorkspaceViews,
-    props.plugin.settings.lastSelectedWorkspaceViewId,
+    props.plugin.settings.savedWorkspaceViews, // To keep the dropdown list of views fresh
+    props.view,
+    selectedViewId,
+    // Include all setters to satisfy the linter for exhaustive-deps, as they are used conditionally
+    // Also include props.refreshViewHeader as it's called conditionally
+    setActiveFilterTags,
+    setActiveFilterMembers,
+    setDueDateFilterValue,
+    setDueDateFilterUnit,
+    setExcludeArchive,
+    setExcludeDone,
+    setSortCriteria,
+    setSortDirection,
+    setSelectedViewId,
+    setSavedViews,
+    props.refreshViewHeader,
   ]);
 
   // console.log('[WorkspaceView] Raw tag-colors setting:', JSON.stringify(props.plugin.settings['tag-colors'], null, 2));
@@ -1869,7 +1918,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                 if (newId) {
                   const viewToLoad = savedViews.find((v) => v.id === newId);
                   if (viewToLoad) {
-                    setActiveFilterTags(viewToLoad.tags.map((t) => t.replace(/^#/, ''))); // MODIFIED: Ensure tags are stripped of leading '#'
+                    setActiveFilterTags(viewToLoad.tags.map((t) => t.replace(/^#/, '')));
                     setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
                     if (viewToLoad.dueDateFilter) {
                       setDueDateFilterValue(viewToLoad.dueDateFilter.value);
@@ -1878,15 +1927,29 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                       setDueDateFilterValue('');
                       setDueDateFilterUnit('days');
                     }
-                    // Load new toggles, defaulting to true
                     setExcludeArchive(viewToLoad.excludeArchive ?? true);
                     setExcludeDone(viewToLoad.excludeDone ?? true);
-                    // Load sort preferences, defaulting if not present
                     setSortCriteria(viewToLoad.sortCriteria || 'default');
                     setSortDirection(viewToLoad.sortDirection || 'asc');
                     props.plugin.settings.lastSelectedWorkspaceViewId = viewToLoad.id;
                     await props.plugin.saveSettings();
+                    props.view.setActiveViewNameForDisplay(viewToLoad.name); // ADDED: Set instance display name
+                    props.refreshViewHeader();
+                  } else {
+                    // If viewToLoad is not found (e.g., "Select a view" is chosen or ID is invalid)
+                    props.view.setActiveViewNameForDisplay(null); // Clear instance display name
+                    props.refreshViewHeader();
                   }
+                } else {
+                  // If newId is empty (e.g., "Select a view" is chosen)
+                  props.plugin.settings.lastSelectedWorkspaceViewId = undefined; // Clear global last selected
+                  await props.plugin.saveSettings();
+                  props.view.setActiveViewNameForDisplay(null); // Clear instance display name
+                  props.refreshViewHeader();
+                  // Optionally, also clear local filters here if desired
+                  // setActiveFilterTags([]);
+                  // setActiveFilterMembers([]);
+                  // ... etc.
                 }
               }}
               style={{ flexGrow: 1, padding: '5px' }}
@@ -2764,6 +2827,7 @@ export class KanbanWorkspaceView extends ItemView {
   plugin: KanbanPlugin;
   private viewEvents = new Events();
   private boundHandleActiveLeafChange: (leaf: WorkspaceLeaf | null) => void;
+  private activeSavedViewNameForDisplay: string | null = null; // Added
 
   constructor(leaf: WorkspaceLeaf, plugin: KanbanPlugin) {
     super(leaf);
@@ -2771,12 +2835,41 @@ export class KanbanWorkspaceView extends ItemView {
     this.boundHandleActiveLeafChange = this.handleActiveLeafChange.bind(this);
   }
 
+  public setActiveViewNameForDisplay(name: string | null) {
+    // Added method
+    this.activeSavedViewNameForDisplay = name;
+    // Note: refreshHeader will be called separately by the component
+    // to trigger the actual UI update for the tab.
+  }
+
+  public refreshHeader() {
+    // Get the current view state and set it again to force a refresh
+    const currentViewState = this.leaf.getViewState();
+    this.leaf.setViewState(currentViewState);
+  }
+
   getViewType() {
     return KANBAN_WORKSPACE_VIEW_TYPE;
   }
 
   getDisplayText() {
-    return 'Kanban Workspace';
+    if (this.activeSavedViewNameForDisplay) {
+      const name = this.activeSavedViewNameForDisplay;
+      return `${name.charAt(0).toUpperCase() + name.slice(1)}`;
+    }
+    // Fallback if no specific view is active in this instance,
+    // or keep your existing logic if preferred for the "no specific view" case.
+    // For now, let's check the global lastSelectedWorkspaceViewId as a secondary fallback.
+    const lastViewId = this.plugin.settings.lastSelectedWorkspaceViewId;
+    const savedViews = this.plugin.settings.savedWorkspaceViews || [];
+    if (lastViewId) {
+      const activeView = savedViews.find((v) => v.id === lastViewId);
+      if (activeView && activeView.name) {
+        // return `Workspace - ${activeView.name}`; // Your original formatting
+        return `${activeView.name.charAt(0).toUpperCase() + activeView.name.slice(1)}`; // Your current formatting
+      }
+    }
+    return 'Workspace'; // Default if nothing else applies
   }
 
   getIcon() {
@@ -2786,7 +2879,12 @@ export class KanbanWorkspaceView extends ItemView {
   async onload() {
     super.onload();
     render(
-      <KanbanWorkspaceViewComponent plugin={this.plugin} viewEvents={this.viewEvents} />,
+      <KanbanWorkspaceViewComponent
+        plugin={this.plugin}
+        viewEvents={this.viewEvents}
+        refreshViewHeader={this.refreshHeader.bind(this)}
+        view={this} // Pass the KanbanWorkspaceView instance to the component
+      />,
       this.contentEl
     );
     this.app.workspace.on('active-leaf-change', this.boundHandleActiveLeafChange);
