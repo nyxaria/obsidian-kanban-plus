@@ -23,7 +23,7 @@ import {
 import { render, unmountComponentAtNode } from 'preact/compat';
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 
-import { KanbanView } from './KanbanView';
+import { KanbanView, kanbanViewType } from './KanbanView';
 import { DEFAULT_SETTINGS, KanbanSettings, SavedWorkspaceView } from './Settings';
 import { StateManager } from './StateManager';
 import { getTagColorFn, getTagSymbolFn } from './components/helpers';
@@ -164,6 +164,10 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
   // ADDED: New state for all available tags (stored WITHOUT #)
   const [allScannedTags, setAllScannedTags] = useState<string[]>([]);
 
+  // ADDED: New state for sorting
+  const [sortCriteria, setSortCriteria] = useState<'default' | 'priority' | 'dueDate'>('default');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
   // Load saved views from settings
   useEffect(() => {
     const loadedSavedViews = props.plugin.settings.savedWorkspaceViews || [];
@@ -174,7 +178,6 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     if (lastViewId) {
       const viewToLoad = loadedSavedViews.find((v) => v.id === lastViewId);
       if (viewToLoad) {
-        // MODIFIED: Ensure tags loaded from saved view are stripped of leading '#'
         setActiveFilterTags(viewToLoad.tags.map((t) => t.replace(/^#/, '')));
         setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
         if (viewToLoad.dueDateFilter) {
@@ -184,9 +187,10 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
           setDueDateFilterValue('');
           setDueDateFilterUnit('days');
         }
-        // Load new toggles, defaulting to true if not present
         setExcludeArchive(viewToLoad.excludeArchive ?? true);
         setExcludeDone(viewToLoad.excludeDone ?? true);
+        setSortCriteria((viewToLoad as any).sortCriteria || 'default'); // Cast to any to bypass linter for now
+        setSortDirection((viewToLoad as any).sortDirection || 'asc'); // Cast to any to bypass linter for now
         setSelectedViewId(viewToLoad.id);
       }
     }
@@ -241,10 +245,12 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     async (
       tagsToFilterBy: string[],
       membersToFilterBy: string[],
-      currentDueDateValue: number | '', // ADDED PARAM
-      currentDueDateUnit: 'days' | 'weeks' | 'months', // ADDED PARAM
-      currentExcludeArchive: boolean, // ADDED PARAM
-      currentExcludeDone: boolean // ADDED PARAM
+      currentDueDateValue: number | '',
+      currentDueDateUnit: 'days' | 'weeks' | 'months',
+      currentExcludeArchive: boolean,
+      currentExcludeDone: boolean,
+      currentSortCriteria: 'default' | 'priority' | 'dueDate', // Added sort params
+      currentSortDirection: 'asc' | 'desc' // Added sort params
     ) => {
       console.log(
         '[WorkspaceView] handleScanDirectory called with:',
@@ -253,13 +259,17 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         'Members:',
         membersToFilterBy,
         'Due Value:',
-        currentDueDateValue, // USE PARAM
+        currentDueDateValue,
         'Due Unit:',
-        currentDueDateUnit, // USE PARAM
+        currentDueDateUnit,
         'Exclude Archive:',
-        currentExcludeArchive, // USE PARAM
+        currentExcludeArchive,
         'Exclude Done:',
-        currentExcludeDone // USE PARAM
+        currentExcludeDone,
+        'Sort Criteria:',
+        currentSortCriteria,
+        'Sort Direction:',
+        currentSortDirection
       );
       setIsLoading(true);
       setError(null);
@@ -453,6 +463,54 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
           }
         }
 
+        // --- SORTING LOGIC ---
+        if (currentSortCriteria !== 'default') {
+          allCards.sort((a, b) => {
+            let valA: any, valB: any;
+            if (currentSortCriteria === 'priority') {
+              const priorityOrder: Record<string, number> = {
+                low: 3,
+                medium: 2,
+                high: 1,
+                undefined: 4,
+              }; // undefined/null last
+              valA = priorityOrder[a.priority || 'undefined'];
+              valB = priorityOrder[b.priority || 'undefined'];
+            } else if (currentSortCriteria === 'dueDate') {
+              // Handle undefined dates: sort them to the end when ascending, start when descending
+              const aDate = a.date ? moment(a.date) : null;
+              const bDate = b.date ? moment(b.date) : null;
+
+              if (!aDate && !bDate) {
+                valA = 0;
+                valB = 0;
+              } else if (!aDate) {
+                valA = currentSortDirection === 'asc' ? Infinity : -Infinity;
+                valB = bDate!.valueOf();
+              } // valB needs a value if valA is Inf
+              else if (!bDate) {
+                valB = currentSortDirection === 'asc' ? Infinity : -Infinity;
+                valA = aDate!.valueOf();
+              } // valA needs a value if valB is Inf
+              else {
+                valA = aDate.valueOf();
+                valB = bDate.valueOf();
+              }
+            }
+
+            if (valA < valB) return currentSortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return currentSortDirection === 'asc' ? 1 : -1;
+
+            // Secondary sort by title if primary criteria are equal
+            const titleA = a.title.toLowerCase();
+            const titleB = b.title.toLowerCase();
+            if (titleA < titleB) return -1;
+            if (titleA > titleB) return 1;
+            return 0;
+          });
+        }
+        // --- END SORTING LOGIC ---
+
         if (allCards.length > 0 && !(error && error.startsWith('Error processing'))) {
           setError(null);
         } else if (allCards.length === 0 && !error) {
@@ -479,6 +537,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
       // excludeDone,
       setAllScannedTags,
       // handleScanDirectory, // ADDED BACK
+      sortCriteria, // ADD DEPENDENCY
+      sortDirection, // ADD DEPENDENCY
     ]
   );
 
@@ -494,7 +554,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
       dueDateFilterValue, // PASS STATE
       dueDateFilterUnit, // PASS STATE
       excludeArchive, // PASS STATE
-      excludeDone // PASS STATE
+      excludeDone, // PASS STATE
+      sortCriteria, // PASS STATE
+      sortDirection // PASS STATE
     );
   }, [
     activeFilterTags,
@@ -503,6 +565,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     dueDateFilterUnit,
     excludeArchive,
     excludeDone,
+    sortCriteria, // ADD DEPENDENCY
+    sortDirection, // ADD DEPENDENCY
     handleScanDirectory, // ADD handleScanDirectory to this useEffect's dependency array
   ]);
 
@@ -519,7 +583,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         dueDateFilterValue, // PASS STATE
         dueDateFilterUnit, // PASS STATE
         excludeArchive, // PASS STATE
-        excludeDone // PASS STATE
+        excludeDone, // PASS STATE
+        sortCriteria, // PASS STATE
+        sortDirection // PASS STATE
       );
     };
 
@@ -532,7 +598,14 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         props.viewEvents.off('refresh-data', refresher);
       }
     };
-  }, [props.viewEvents, handleScanDirectory, activeFilterTags, activeFilterMembers]);
+  }, [
+    props.viewEvents,
+    handleScanDirectory,
+    activeFilterTags,
+    activeFilterMembers,
+    sortCriteria,
+    sortDirection,
+  ]);
 
   const handleToggleCardDoneStatus = useCallback(
     async (card: WorkspaceCard, newCheckedStatus: boolean) => {
@@ -626,7 +699,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
             dueDateFilterValue, // PASS STATE
             dueDateFilterUnit, // PASS STATE
             excludeArchive, // PASS STATE
-            excludeDone // PASS STATE
+            excludeDone, // PASS STATE
+            sortCriteria, // PASS STATE
+            sortDirection // PASS STATE
           ); // Refresh list
         } else if (!card.blockId && !card.sourceStartLine) {
           new Notice(
@@ -674,181 +749,57 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
       excludeArchive, // ADD STATE DEPENDENCY
       excludeDone, // ADD STATE DEPENDENCY
       handleScanDirectory,
+      sortCriteria, // ADD STATE DEPENDENCY
+      sortDirection, // ADD STATE DEPENDENCY
     ]
   );
 
   const handleRowClick = useCallback(
     async (card: WorkspaceCard) => {
       const { app } = props.plugin;
-      const targetPath = card.sourceBoardPath;
-      console.log(`[WorkspaceView] handleRowClick: Target path from card: '${targetPath}'`);
-      let existingLeaf: WorkspaceLeaf | null = null;
-
-      // Normalize targetPath. It should be normalized already as it comes from TFile.path,
-      // but this ensures consistency.
-      const normalizedTargetPath = normalizePath(targetPath);
-      console.log(
-        `[WorkspaceView] Normalized target path for comparison: '${normalizedTargetPath}'`
-      );
-
-      // const leaves = app.workspace.getLeavesOfType('markdown'); // Previous approach
-      // console.log(`[WorkspaceView] Found ${leaves.length} markdown leaves to check.`);
-
-      const allLeaves: WorkspaceLeaf[] = [];
-      app.workspace.iterateAllLeaves((leaf) => {
-        allLeaves.push(leaf);
-      });
-      console.log(`[WorkspaceView] Found ${allLeaves.length} total leaves to check.`);
-
-      for (const leaf of allLeaves) {
-        // Iterate over all leaves
-        let currentLeafPath: string | undefined = undefined;
-        const view = leaf.view;
-
-        if (view instanceof KanbanView) {
-          // For KanbanView, get the file path from the view's file property
-          if (view.file) {
-            currentLeafPath = view.file.path;
-            console.log(
-              `[WorkspaceView] Leaf (type: kanban) is KanbanView. Path from .file.path: '${currentLeafPath}'`
-            );
-          }
-        } else if (view instanceof FileView) {
-          // For other FileViews (like markdown editor), get path from .file.path
-          if ((view as FileView).file) {
-            currentLeafPath = (view as FileView).file.path;
-            console.log(
-              `[WorkspaceView] Leaf (type: ${view.getViewType()}) is FileView. Path from .file.path: '${currentLeafPath}'`
-            );
-          }
-        }
-
-        // Fallback or alternative: check getViewState if path not found yet
-        if (!currentLeafPath) {
-          const leafState = leaf.getViewState();
-          const fileFromState = leafState.state?.file;
-          if (typeof fileFromState === 'string') {
-            currentLeafPath = fileFromState;
-            console.log(
-              `[WorkspaceView] Leaf (type: ${view.getViewType()}) path from .getViewState().state.file: '${currentLeafPath}'`
-            );
-          } else {
-            console.log(
-              `[WorkspaceView] Leaf (type: ${view.getViewType()}) path from .getViewState().state.file is not a string or is undefined. Value:`,
-              fileFromState
-            );
-          }
-        }
-
-        if (currentLeafPath) {
-          const normalizedLeafPath = normalizePath(currentLeafPath);
-          console.log(
-            `[WorkspaceView] Checking leaf: Type: ${view.getViewType()}, ` +
-              `Orig Path: '${currentLeafPath}', Norm Path: '${normalizedLeafPath}'`
-          );
-
-          if (normalizedLeafPath === normalizedTargetPath) {
-            console.log('[WorkspaceView] Found existing leaf for path:', normalizedTargetPath);
-            existingLeaf = leaf;
-            break; // Exit loop as we found a matching leaf
-          }
-        } else {
-          console.log(
-            `[WorkspaceView] Checking leaf: Type: ${view.getViewType()}, Path: undefined (cannot compare)`
-          );
-        }
-      }
-
-      console.log(
-        '[WorkspaceView] Existing leaf found?',
-        existingLeaf
-          ? `${existingLeaf.view?.getViewType()} was found (View exists: ${!!existingLeaf.view})`
-          : 'No'
-      );
 
       const navigationState = {
-        // Ensure the file path is part of the state for existing views
         file: card.sourceBoardPath,
         eState: {
-          filePath: card.sourceBoardPath, // Use original path for state consistency
+          filePath: card.sourceBoardPath,
           blockId: card.blockId,
           cardTitle: !card.blockId ? card.title : undefined,
           listName: !card.blockId ? card.laneTitle : undefined,
         },
       };
 
-      if (existingLeaf && existingLeaf.view) {
-        // <-- ADDED CHECK for existingLeaf.view
+      let linkPath = card.sourceBoardPath;
+      if (card.blockId) {
+        linkPath = `${card.sourceBoardPath}#^${card.blockId}`;
+      }
+
+      // Check for an existing Kanban view for this file
+      let existingLeaf: WorkspaceLeaf | null = null;
+      app.workspace.getLeavesOfType(kanbanViewType).forEach((leaf) => {
+        if (leaf.view instanceof KanbanView && leaf.view.file?.path === card.sourceBoardPath) {
+          existingLeaf = leaf;
+        }
+      });
+
+      if (existingLeaf) {
         console.log(
-          `[WorkspaceView] Activating existing leaf (view exists). View type: ${existingLeaf.view.getViewType()}`
+          `[WorkspaceView] handleRowClick: Found existing Kanban view for ${card.sourceBoardPath}. Activating and setting state.`,
+          navigationState
         );
         app.workspace.setActiveLeaf(existingLeaf, { focus: true });
-
-        // Check if the view in the existing leaf is a KanbanView
-        if (existingLeaf.view instanceof KanbanView) {
-          console.log('[WorkspaceView] Existing leaf is KanbanView instance. Calling setState.');
-          // *** MODIFICATION HERE ***
-          const stateForExistingLeaf = {
-            file: card.sourceBoardPath, // Keep passing the file
-            eState: {
-              filePath: card.sourceBoardPath,
-              blockId: card.blockId,
-              cardTitle: !card.blockId ? card.title : undefined,
-              listName: !card.blockId ? card.laneTitle : undefined,
-              preventSetViewData: true, // Add this line
-            },
-          };
-          (existingLeaf.view as KanbanView).setState(stateForExistingLeaf, { history: false });
-          console.log('[WorkspaceView] setState called on existing KanbanView instance.');
-        } else if (existingLeaf.view.getViewType() === 'kanban') {
-          // ... (similar modification for the fallback cast) ...
-          const stateForExistingLeafFallback = {
-            file: card.sourceBoardPath,
-            eState: {
-              filePath: card.sourceBoardPath,
-              blockId: card.blockId,
-              cardTitle: !card.blockId ? card.title : undefined,
-              listName: !card.blockId ? card.laneTitle : undefined,
-              preventSetViewData: true, // Add this line
-            },
-          };
-          (existingLeaf.view as unknown as KanbanView).setState(stateForExistingLeafFallback, {
-            history: false,
-          });
-          // ...
-        } else {
-          // ...
-        }
-      } else {
-        if (existingLeaf && !existingLeaf.view) {
-          console.log(
-            '[WorkspaceView] Existing leaf found, but its view is null (likely closed/detached). Opening new link instead.'
-          );
-        } else {
-          console.log('[WorkspaceView] No existing active leaf found. Opening new link.');
-        }
-        // When opening in a NEW leaf, preventSetViewData should be false or absent
-        const navigationStateForNewLeaf = {
-          file: card.sourceBoardPath, // Still needed by KanbanView's setState
-          eState: {
-            filePath: card.sourceBoardPath,
-            blockId: card.blockId,
-            cardTitle: !card.blockId ? card.title : undefined,
-            listName: !card.blockId ? card.laneTitle : undefined,
-            // No preventSetViewData: true here
-          },
-        };
-        console.log('[WorkspaceView] No existing leaf found. Opening new link.');
-        let linkPath = card.sourceBoardPath;
-        if (card.blockId) {
-          linkPath = `${card.sourceBoardPath}#^${card.blockId}`;
-        }
-        console.log(
-          `[WorkspaceView] Opening link: '${linkPath}' with state:`,
-          navigationStateForNewLeaf
+        // It's important that the existing view's setState can handle this structure
+        (existingLeaf.view as KanbanView).setState(
+          { eState: navigationState.eState },
+          { history: true }
         );
-        await app.workspace.openLinkText(linkPath, card.sourceBoardPath, false, {
-          state: navigationStateForNewLeaf, // Pass the state for new leaf
+      } else {
+        console.log(
+          `[WorkspaceView] handleRowClick: No existing Kanban view found for ${card.sourceBoardPath}. Opening link '${linkPath}' with newLeaf: 'tab' and state:`,
+          navigationState
+        );
+        // Fallback to opening a new tab if no existing view is found or suitable
+        await app.workspace.openLinkText(linkPath, card.sourceBoardPath, 'tab', {
+          state: navigationState,
         });
       }
     },
@@ -965,7 +916,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                         dueDateFilterValue, // PASS STATE
                         dueDateFilterUnit, // PASS STATE
                         excludeArchive, // PASS STATE
-                        excludeDone // PASS STATE
+                        excludeDone, // PASS STATE
+                        sortCriteria, // PASS STATE
+                        sortDirection // PASS STATE
                       ); // Refresh list
                     } else {
                       new Notice(
@@ -1019,7 +972,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                         dueDateFilterValue, // PASS STATE
                         dueDateFilterUnit, // PASS STATE
                         excludeArchive, // PASS STATE
-                        excludeDone // PASS STATE
+                        excludeDone, // PASS STATE
+                        sortCriteria, // PASS STATE
+                        sortDirection // PASS STATE
                       ); // Refresh list
                     } else {
                       new Notice(
@@ -1175,7 +1130,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                         dueDateFilterValue, // PASS STATE
                         dueDateFilterUnit, // PASS STATE
                         excludeArchive, // PASS STATE
-                        excludeDone // PASS STATE
+                        excludeDone, // PASS STATE
+                        sortCriteria, // PASS STATE
+                        sortDirection // PASS STATE
                       ); // Refresh list
                     } else if (!card.blockId && !card.sourceStartLine) {
                       new Notice(
@@ -1465,7 +1422,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                     dueDateFilterValue,
                     dueDateFilterUnit,
                     excludeArchive,
-                    excludeDone
+                    excludeDone,
+                    sortCriteria, // PASS STATE
+                    sortDirection // PASS STATE
                   );
                 }
               });
@@ -1497,6 +1456,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
       dueDateFilterUnit, // ADD STATE DEPENDENCY
       excludeArchive, // ADD STATE DEPENDENCY
       excludeDone, // ADD STATE DEPENDENCY
+      sortCriteria, // ADD STATE DEPENDENCY
+      sortDirection, // ADD STATE DEPENDENCY
       handleScanDirectory,
       handleToggleCardDoneStatus,
     ] // Added handleToggleCardDoneStatus to dependencies
@@ -1519,7 +1480,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
           : undefined,
       excludeArchive: excludeArchive, // Save new toggle
       excludeDone: excludeDone, // Save new toggle
-    };
+      sortCriteria: sortCriteria, // Save sort criteria
+      sortDirection: sortDirection, // Save sort direction
+    } as SavedWorkspaceView; // Cast to allow extra properties for now
 
     const currentSavedViews = props.plugin.settings.savedWorkspaceViews || [];
     const updatedViews = [...currentSavedViews, newSavedView];
@@ -1544,6 +1507,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     dueDateFilterUnit,
     excludeArchive, // Add to dependencies
     excludeDone, // Add to dependencies
+    sortCriteria, // Add to dependency array
+    sortDirection, // Add to dependency array
   ]); // Added activeFilterMembers and setters to deps
 
   const handleDeleteView = useCallback(async () => {
@@ -1572,6 +1537,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
       setDueDateFilterUnit('days');
       setExcludeArchive(true); // Reset new toggle
       setExcludeDone(true); // Reset new toggle
+      setSortCriteria('default'); // Reset sort
+      setSortDirection('asc'); // Reset sort
     }
 
     await props.plugin.saveSettings();
@@ -1591,6 +1558,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     setDueDateFilterUnit,
     setExcludeArchive, // Add to dependencies
     setExcludeDone, // Add to dependencies
+    setSortCriteria, // ADD DEPENDENCY
+    setSortDirection, // ADD DEPENDENCY
   ]); // Added setters to deps
 
   const availableTeamMembers = useMemo(() => {
@@ -1604,6 +1573,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     setDueDateFilterUnit('days');
     setExcludeArchive(true); // Reset new toggle
     setExcludeDone(true); // Reset new toggle
+    setSortCriteria('default'); // Reset sort
+    setSortDirection('asc'); // Reset sort
   }, [
     setActiveFilterTags,
     setActiveFilterMembers,
@@ -1611,6 +1582,8 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
     setDueDateFilterUnit,
     setExcludeArchive, // Add to dependencies
     setExcludeDone, // Add to dependencies
+    setSortCriteria, // ADD DEPENDENCY
+    setSortDirection, // ADD DEPENDENCY
   ]);
 
   // ADDED: Handler for the tag filter dropdown click
@@ -1763,6 +1736,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                     // Load new toggles, defaulting to true
                     setExcludeArchive(viewToLoad.excludeArchive ?? true);
                     setExcludeDone(viewToLoad.excludeDone ?? true);
+                    // Load sort preferences, defaulting if not present
+                    setSortCriteria(viewToLoad.sortCriteria || 'default');
+                    setSortDirection(viewToLoad.sortDirection || 'asc');
                     props.plugin.settings.lastSelectedWorkspaceViewId = viewToLoad.id;
                     await props.plugin.saveSettings();
                   }
@@ -1901,7 +1877,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         ></div>
 
         {/* Due Date, Archive, and Done Filter Section Group - CHANGED TO ROW LAYOUT */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
+          {' '}
+          {/* Added flexWrap here */}
           {/* Due Date Filter Section (remains as a sub-group) */}
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: '5px' }}>
             <label
@@ -1937,7 +1915,6 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
               <option value="months">Months</option>
             </select>
           </div>
-
           {/* NEW Vertical Divider */}
           <div
             style={{
@@ -1946,7 +1923,6 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
               alignSelf: 'flex-end',
             }}
           ></div>
-
           {/* Exclude Archive Toggle */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '5px' }}>
             <label
@@ -1994,6 +1970,53 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
               style={{ height: '16px', width: '16px' }}
             />
           </div>
+          {/* NEW Vertical Divider */}
+          <div
+            style={{
+              borderLeft: '1px solid var(--background-modifier-border)',
+              height: '30px',
+              alignSelf: 'flex-end',
+            }}
+          ></div>
+          {/* Sort Criteria Dropdown */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '5px' }}>
+            <label htmlFor="sort-criteria-select" style={{ marginBottom: '5px' }}>
+              Sort by:
+            </label>
+            <select
+              id="sort-criteria-select"
+              value={sortCriteria}
+              onChange={(e) =>
+                setSortCriteria(
+                  (e.target as HTMLSelectElement).value as 'default' | 'priority' | 'dueDate'
+                )
+              }
+              style={{ padding: '5px' }}
+            >
+              <option value="default">Default</option>
+              <option value="priority">Priority</option>
+              <option value="dueDate">Due Date</option>
+            </select>
+          </div>
+          {/* Sort Direction Dropdown (only show if not default sort) */}
+          {sortCriteria !== 'default' && (
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '5px' }}>
+              <label htmlFor="sort-direction-select" style={{ marginBottom: '5px' }}>
+                Direction:
+              </label>
+              <select
+                id="sort-direction-select"
+                value={sortDirection}
+                onChange={(e) =>
+                  setSortDirection((e.target as HTMLSelectElement).value as 'asc' | 'desc')
+                }
+                style={{ padding: '5px' }}
+              >
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
