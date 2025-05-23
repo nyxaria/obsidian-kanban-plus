@@ -911,7 +911,7 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
                     : '';
 
                   const pluginDatePattern = new RegExp(
-                    `(?:^|\\s)${escapeRegExp(dateTrigger)}\\{[^}]+\\}(?:\\s|$)`,
+                    `(?:^|\\s)ESCAPED_TRIGGER(?:{([^}]+?)}|\\[\\[([^\\]]+?)\\]\\])`,
                     'g'
                   );
                   const wikilinkDatePattern = /\s*\[\[\d{4}-\d{2}-\d{2}\]\]\s*/g;
@@ -1205,6 +1205,251 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
       }
 
       // --- End Assign Members ---
+
+      // --- Assign Priority ---
+      const priorities: Array<'high' | 'medium' | 'low'> = ['high', 'medium', 'low'];
+      const priorityToIcon: Record<string, string> = {
+        high: 'lucide-flame',
+        medium: 'lucide-bar-chart-2',
+        low: 'lucide-arrow-down',
+      };
+      const priorityToLabel: Record<string, string> = {
+        high: 'High',
+        medium: 'Medium',
+        low: 'Low',
+      };
+
+      menu.addItem((item) => {
+        item.setTitle('Assign Priority').setIcon('lucide-star');
+        const subMenu = (item as any).setSubmenu();
+        const currentCardPriority = card.priority;
+
+        priorities.forEach((priorityValue) => {
+          subMenu.addItem((subMenuItem: MenuItem) => {
+            subMenuItem
+              .setTitle(priorityToLabel[priorityValue])
+              .setIcon(priorityToIcon[priorityValue])
+              .setChecked(priorityValue === currentCardPriority)
+              .onClick(async () => {
+                const newPriority =
+                  currentCardPriority === priorityValue ? undefined : priorityValue;
+                console.log(
+                  '[WorkspaceView] Assign Priority onClick: currentCardPriority:',
+                  currentCardPriority,
+                  'priorityValue:',
+                  priorityValue,
+                  'NEW_PRIORITY_VALUE:',
+                  newPriority
+                ); // DIAGNOSTIC LOG
+
+                // 1. Optimistic UI update
+                setFilteredCards((prevCards) =>
+                  prevCards.map((c) => (c.id === card.id ? { ...c, priority: newPriority } : c))
+                );
+
+                // 2. Update source file
+                const targetFile = props.plugin.app.vault.getAbstractFileByPath(
+                  card.sourceBoardPath
+                ) as TFile;
+                if (!targetFile || !(targetFile instanceof TFile)) {
+                  new Notice(
+                    `Error: Could not find file ${card.sourceBoardPath} or it is a folder.`
+                  );
+                  // Revert optimistic update if file not found
+                  setFilteredCards((prevCards) =>
+                    prevCards.map((c) =>
+                      c.id === card.id ? { ...c, priority: currentCardPriority } : c
+                    )
+                  );
+                  return;
+                }
+
+                try {
+                  let fileContent = await props.plugin.app.vault.cachedRead(targetFile);
+                  const lines = fileContent.split('\n');
+                  let foundAndReplaced = false;
+                  const priorityRegex = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+                  const memberRegex = /(?:^|\s)(@@[a-zA-Z0-9_-]+)/g;
+                  const dateTrigger = props.plugin.settings['date-trigger'] || '@';
+                  const timeTrigger = props.plugin.settings['time-trigger'] || '@'; // Assuming same trigger for time for simplicity, adjust if different
+                  const dateFormat = props.plugin.settings['date-format'] || 'DD-MM-YYYY';
+
+                  // Regex for plugin's date format @{date} or @[[date]]
+                  const escapedDateTrigger = escapeRegExp(dateTrigger);
+                  const datePatternString = `(?:^|\\\\s)${escapedDateTrigger}(?:\\\\{([^}]+?)\\\\}|\\[\\[([^\\]]+?)\\]\\])`;
+                  const pluginDatePattern = new RegExp(datePatternString, 'g');
+
+                  // Regex for Tasks plugin style dates 📅 YYYY-MM-DD
+                  const tasksPluginDatePattern = /\s*📅\s*\d{4}-\d{2}-\d{2}\s*/g;
+
+                  // Regex for plugin's time format @{time}
+                  const escapedTimeTrigger = escapeRegExp(timeTrigger);
+                  const timePatternString = `(?:^|\\\\s)${escapedTimeTrigger}\\\\{([^}]+?)\\}`;
+                  const pluginTimePattern = new RegExp(timePatternString, 'g');
+
+                  const updateLineWithPriority = (line: string): string => {
+                    let textContent = line;
+                    const existingMembers: string[] = [];
+                    let existingDateString: string | null = null;
+                    let existingTimeString: string | null = null;
+                    // Block ID must be preserved if present
+                    let blockIdSuffix: string | null = null;
+                    const blockIdMatch = textContent.match(/\s(\^[a-zA-Z0-9]+)$/);
+                    if (blockIdMatch) {
+                      blockIdSuffix = blockIdMatch[0]; // e.g., " ^blockid"
+                      textContent = textContent.substring(
+                        0,
+                        textContent.length - blockIdSuffix.length
+                      );
+                    }
+
+                    // 1. Extract and remove members
+                    textContent = textContent
+                      .replace(memberRegex, (match, memberTag) => {
+                        existingMembers.push(memberTag); // Store with @@
+                        return '';
+                      })
+                      .trim();
+
+                    // 2. Extract and remove date/time (Plugin format)
+                    textContent = textContent
+                      .replace(pluginDatePattern, (match) => {
+                        if (!existingDateString) existingDateString = match.trim();
+                        return '';
+                      })
+                      .trim();
+
+                    // 3. Extract and remove date (Tasks plugin format)
+                    if (!existingDateString) {
+                      textContent = textContent
+                        .replace(tasksPluginDatePattern, (match) => {
+                          if (!existingDateString) existingDateString = match.trim();
+                          return '';
+                        })
+                        .trim();
+                    }
+
+                    // 4. Extract and remove time (Plugin format)
+                    textContent = textContent
+                      .replace(pluginTimePattern, (match, timeContent) => {
+                        if (!existingTimeString && /^[0-2]?[0-9]:[0-5][0-9]$/.test(timeContent)) {
+                          existingTimeString = match.trim();
+                        }
+                        return '';
+                      })
+                      .trim();
+
+                    // 5. Remove old priority tag
+                    textContent = textContent.replace(priorityRegex, '').trim();
+
+                    // Clean up multiple spaces that might have been left from replacements
+                    textContent = textContent.replace(/\s{2,}/g, ' ').trim();
+
+                    // Reconstruct the line: Text !priority @@Member1 @@Member2 @{Date} @{Time} ^blockId
+                    let newLine = textContent;
+
+                    if (newPriority) {
+                      console.log(
+                        '[WorkspaceView] updateLineWithPriority: Constructing priority tag. newPriority value:',
+                        newPriority
+                      ); // DIAGNOSTIC LOG
+                      newLine = `${newLine} !${newPriority}`.trim();
+                    }
+                    if (existingMembers.length > 0) {
+                      // Ensure members are appended with a single space prefix if newLine is not empty
+                      const membersString = existingMembers.join(' ');
+                      newLine = newLine ? `${newLine} ${membersString}` : membersString;
+                      newLine = newLine.trim(); // Trim after adding members
+                    }
+                    if (existingDateString) {
+                      newLine = newLine ? `${newLine} ${existingDateString}` : existingDateString;
+                      newLine = newLine.trim();
+                    }
+                    if (existingTimeString) {
+                      newLine = newLine ? `${newLine} ${existingTimeString}` : existingTimeString;
+                      newLine = newLine.trim();
+                    }
+                    if (blockIdSuffix) {
+                      // blockIdSuffix already contains its leading space if matched, or is null
+                      newLine = `${newLine}${blockIdSuffix}`.trim();
+                    }
+
+                    return newLine.replace(/\s{2,}/g, ' ').trim();
+                  };
+
+                  if (card.blockId) {
+                    const blockIdSuffix = `^${card.blockId}`;
+                    for (let i = 0; i < lines.length; i++) {
+                      if (lines[i].endsWith(blockIdSuffix)) {
+                        lines[i] = updateLineWithPriority(lines[i]);
+                        foundAndReplaced = true;
+                        break;
+                      }
+                    }
+                  } else if (card.sourceStartLine) {
+                    const targetLineIndex = card.sourceStartLine - 1;
+                    if (targetLineIndex >= 0 && targetLineIndex < lines.length) {
+                      const titleSnippet =
+                        card.title.length > 20 ? card.title.substring(0, 20) : card.title;
+                      if (
+                        lines[targetLineIndex].toLowerCase().includes(titleSnippet.toLowerCase())
+                      ) {
+                        lines[targetLineIndex] = updateLineWithPriority(lines[targetLineIndex]);
+                        foundAndReplaced = true;
+                      } else {
+                        new Notice(
+                          `Line content at ${card.sourceStartLine} seems to have changed for "${card.title}". Priority updated in view only.`
+                        );
+                      }
+                    }
+                  }
+
+                  if (foundAndReplaced) {
+                    fileContent = lines.join('\n');
+                    await props.plugin.app.vault.modify(targetFile, fileContent);
+                    new Notice(
+                      `Priority for "${card.title}" updated to ${newPriority || 'None'} in ${targetFile.basename}.`
+                    );
+                  } else if (!card.blockId && !card.sourceStartLine) {
+                    new Notice(
+                      `Cannot update priority for "${card.title}": No block ID or source line. Updated in view only.`
+                    );
+                  } else if (card.blockId && !foundAndReplaced) {
+                    new Notice(
+                      `Could not find block ID ${card.blockId} for "${card.title}" to update priority. Updated in view only.`
+                    );
+                  } else if (card.sourceStartLine && !foundAndReplaced) {
+                    // Notice for title mismatch already shown
+                  } else {
+                    new Notice(
+                      `Could not update priority for "${card.title}" in source file. Updated in view only.`
+                    );
+                  }
+                } catch (e) {
+                  console.error('Error updating card priority in source file:', e);
+                  new Notice('Error updating priority. See console.');
+                  // Revert optimistic update on error
+                  setFilteredCards((prevCards) =>
+                    prevCards.map((c) =>
+                      c.id === card.id ? { ...c, priority: currentCardPriority } : c
+                    )
+                  );
+                } finally {
+                  // Always refresh from source after attempting to modify file
+                  await handleScanDirectory(
+                    [...activeFilterTags],
+                    [...activeFilterMembers],
+                    dueDateFilterValue,
+                    dueDateFilterUnit,
+                    excludeArchive,
+                    excludeDone
+                  );
+                }
+              });
+          });
+        });
+      });
+      // --- End Assign Priority ---
 
       // --- Mark as Done/Undone ---
       menu.addItem((item) => {
