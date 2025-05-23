@@ -12,8 +12,8 @@ import {
   debounce,
   normalizePath,
 } from 'obsidian';
-import * as React from 'react';
-import * as ReactDOM from 'react-dom';
+import { createElement } from 'preact';
+import { render, unmountComponentAtNode } from 'preact/compat';
 
 import {
   DEFAULT_SETTINGS,
@@ -748,7 +748,7 @@ export class KanbanView extends TextFileView implements HoverParent {
   };
 
   clear() {
-    ReactDOM.unmountComponentAtNode(this.contentEl);
+    unmountComponentAtNode(this.contentEl);
   }
 
   async setReactState(newState?: any) {
@@ -831,7 +831,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         );
 
         if (this.contentEl) {
-          const unmounted = ReactDOM.unmountComponentAtNode(this.contentEl);
+          const unmounted = unmountComponentAtNode(this.contentEl);
           console.log(
             `[KanbanView] setReactState (renderBoardCallback): Attempted unmount. Was component unmounted? ${unmounted}. contentEl children after unmount: ${this.contentEl.children.length}`
           );
@@ -850,11 +850,11 @@ export class KanbanView extends TextFileView implements HoverParent {
         }
 
         if (currentBoardState) {
-          ReactDOM.render(
-            React.createElement(
+          render(
+            createElement(
               DndContext,
               { win: this.getWindow(), onDrop: this.handleDrop.bind(this) },
-              React.createElement(Kanban, {
+              createElement(Kanban, {
                 key: `${this.file?.path}-${currentBoardState?.data?.frontmatter?.['kanban-plugin']}`,
                 plugin: this.plugin,
                 view: this,

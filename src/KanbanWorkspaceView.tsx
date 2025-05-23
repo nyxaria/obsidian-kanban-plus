@@ -19,11 +19,14 @@ import {
   Setting,
   TFile,
   TFolder,
+  ViewStateResult, // Added import
   WorkspaceLeaf,
   normalizePath,
 } from 'obsidian';
+import { createElement } from 'preact';
+// ADDED: Import createElement
 import { render, unmountComponentAtNode } from 'preact/compat';
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 // For boardToMd and other parsing utilities
 import { KanbanView, kanbanViewType } from './KanbanView';
@@ -276,6 +279,7 @@ function KanbanWorkspaceViewComponent(props: {
   viewEvents: Events;
   refreshViewHeader: () => void; // Added prop
   view: KanbanWorkspaceView; // Added prop
+  initialLeafSavedViewId?: string | null; // Added prop
 }) {
   const [currentTagInput, setCurrentTagInput] = useState('');
   const [activeFilterTags, setActiveFilterTags] = useState<string[]>([]);
@@ -294,7 +298,13 @@ function KanbanWorkspaceViewComponent(props: {
   // New state for saved views
   const [savedViews, setSavedViews] = useState<SavedWorkspaceView[]>([]);
   const [newViewName, setNewViewName] = useState('');
-  const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
+  // Initialize selectedViewId with initialLeafSavedViewId if available, then fallback to global
+  // MODIFIED: Simplified initialization. props.initialLeafSavedViewId is for INITIAL value only.
+  const [selectedViewId, setSelectedViewId] = useState<string | null>(() => {
+    return (
+      props.initialLeafSavedViewId || props.plugin.settings.lastSelectedWorkspaceViewId || null
+    );
+  });
 
   // ADDED: New state for all available tags (stored WITHOUT #)
   const [allScannedTags, setAllScannedTags] = useState<string[]>([]);
@@ -303,19 +313,21 @@ function KanbanWorkspaceViewComponent(props: {
   const [sortCriteria, setSortCriteria] = useState<'default' | 'priority' | 'dueDate'>('default');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
-  // Load saved views from settings
-  useEffect(() => {
-    const loadedSavedViews = props.plugin.settings.savedWorkspaceViews || [];
-    setSavedViews(loadedSavedViews); // Keep the list of all saved views up to date
+  // ADDED: Ref to track mounted state
+  const isMounted = useRef(true);
 
-    // Only load from global lastSelectedWorkspaceViewId if this component instance
-    // doesn't currently have a view selected (selectedViewId is null/empty).
-    // This prevents a tab from having its view changed by another tab's activity.
-    if (!selectedViewId && props.plugin.settings.lastSelectedWorkspaceViewId) {
-      const globalLastViewId = props.plugin.settings.lastSelectedWorkspaceViewId;
-      const viewToLoad = loadedSavedViews.find((v) => v.id === globalLastViewId);
+  // Load saved views and apply initial/selected view configuration
+  useEffect(() => {
+    const currentPluginSettings = props.plugin.settings; // Get a reference
+    const loadedSavedViews = currentPluginSettings.savedWorkspaceViews || [];
+    setSavedViews(loadedSavedViews); // Update local copy of views for dropdowns etc.
+
+    let newGlobalLastSelectedId: string | undefined =
+      currentPluginSettings.lastSelectedWorkspaceViewId; // Start with current
+
+    if (selectedViewId) {
+      const viewToLoad = loadedSavedViews.find((v) => v.id === selectedViewId);
       if (viewToLoad) {
-        // Apply this globally preferred view to THIS instance as its initial/default view
         setActiveFilterTags(viewToLoad.tags.map((t) => t.replace(/^#/, '')));
         setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
         if (viewToLoad.dueDateFilter) {
@@ -330,53 +342,49 @@ function KanbanWorkspaceViewComponent(props: {
         setSortCriteria((viewToLoad as any).sortCriteria || 'default');
         setSortDirection((viewToLoad as any).sortDirection || 'asc');
 
-        setSelectedViewId(viewToLoad.id); // Set this component instance's selected view
-        props.view.setActiveViewNameForDisplay(viewToLoad.name); // Update parent ItemView's display name
-        // We also need to manually trigger a header refresh here if we set a default view
-        // because the refreshHeader in the dropdown onChange won't run in this path.
-        props.refreshViewHeader();
-      }
-    } else if (selectedViewId) {
-      // If a view IS selected for this instance, ensure its name is correctly displayed
-      // This handles cases where the component might re-render for other reasons
-      const currentView = loadedSavedViews.find((v) => v.id === selectedViewId);
-      if (currentView) {
-        props.view.setActiveViewNameForDisplay(currentView.name);
-        // It might be beneficial to refresh the header here too, to ensure consistency
-        // props.refreshViewHeader(); // Debatable if needed every time, but could help
+        // newGlobalLastSelectedId is still important for global settings
+        newGlobalLastSelectedId = viewToLoad.id;
       } else {
-        // SelectedViewId exists but points to a non-existent view (e.g., deleted)
-        // Clear it out to avoid issues and revert to a default state or no view selected state
-        setSelectedViewId(null);
-        props.view.setActiveViewNameForDisplay(null);
-        props.refreshViewHeader();
-        // Potentially clear filters here too
+        // selectedViewId is invalid
+        setActiveFilterTags([]);
+        setActiveFilterMembers([]);
+        setDueDateFilterValue('');
+        setDueDateFilterUnit('days');
+        setExcludeArchive(true);
+        setExcludeDone(true);
+        setSortCriteria('default');
+        setSortDirection('asc');
+        newGlobalLastSelectedId = undefined;
       }
+    } else {
+      // No view is selected
+      setActiveFilterTags([]);
+      setActiveFilterMembers([]);
+      setDueDateFilterValue('');
+      setDueDateFilterUnit('days');
+      setExcludeArchive(true);
+      setExcludeDone(true);
+      setSortCriteria('default');
+      setSortDirection('asc');
+      newGlobalLastSelectedId = undefined;
     }
 
-    // NOTE: props.plugin.settings.lastSelectedWorkspaceViewId is INTENTIONALLY OMITTED
-    // from the dependency array. This effect should update the list of savedViews,
-    // and conditionally apply a default view if this instance doesn't have one, but it
-    // should NOT re-run and change this instance's view just because the global
-    // lastSelectedWorkspaceViewId changed due to another tab's interaction.
-  }, [
-    props.plugin.settings.savedWorkspaceViews, // To keep the dropdown list of views fresh
-    props.view,
-    selectedViewId,
-    // Include all setters to satisfy the linter for exhaustive-deps, as they are used conditionally
-    // Also include props.refreshViewHeader as it's called conditionally
-    setActiveFilterTags,
-    setActiveFilterMembers,
-    setDueDateFilterValue,
-    setDueDateFilterUnit,
-    setExcludeArchive,
-    setExcludeDone,
-    setSortCriteria,
-    setSortDirection,
-    setSelectedViewId,
-    setSavedViews,
-    props.refreshViewHeader,
-  ]);
+    // Update global plugin settings only if the lastSelectedWorkspaceViewId has changed
+    if (currentPluginSettings.lastSelectedWorkspaceViewId !== newGlobalLastSelectedId) {
+      props.plugin.settings.lastSelectedWorkspaceViewId = newGlobalLastSelectedId;
+      props.plugin.saveSettings(); // Save the settings
+    }
+
+    props.refreshViewHeader(); // Refresh tab title based on the currently loaded config
+  }, [selectedViewId, JSON.stringify(props.plugin.settings.savedWorkspaceViews)]);
+
+  // ADDED: useEffect to update isMounted ref
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   // console.log('[WorkspaceView] Raw tag-colors setting:', JSON.stringify(props.plugin.settings['tag-colors'], null, 2));
   // console.log('[WorkspaceView] Raw tag-symbols setting:', JSON.stringify(props.plugin.settings['tag-symbols'], null, 2));
@@ -450,7 +458,9 @@ function KanbanWorkspaceViewComponent(props: {
         'Sort Direction:',
         currentSortDirection
       );
+      if (!isMounted.current) return;
       setIsLoading(true);
+      if (!isMounted.current) return;
       setError(null);
       // setFilteredCards([]); // Keep existing cards while loading new ones, or clear if preferred
       const app = props.plugin.app;
@@ -475,7 +485,9 @@ function KanbanWorkspaceViewComponent(props: {
       }
 
       if (!targetFolder) {
+        if (!isMounted.current) return;
         setError('Could not determine a directory to scan.');
+        if (!isMounted.current) return;
         setIsLoading(false);
         return;
       }
@@ -555,7 +567,9 @@ function KanbanWorkspaceViewComponent(props: {
           });
         });
         const sortedUniqueTags = Array.from(uniqueTagsFromAllPossibleCards).sort();
-        setAllScannedTags(sortedUniqueTags);
+        if (isMounted.current) {
+          setAllScannedTags(sortedUniqueTags);
+        }
         console.log('[WorkspaceView] All scanned tags (for dropdown):', sortedUniqueTags);
 
         // Now, filter from allCardsDataPreFilter to populate the final allCards array for display
@@ -691,17 +705,17 @@ function KanbanWorkspaceViewComponent(props: {
         // --- END SORTING LOGIC ---
 
         if (allCards.length > 0 && !(error && error.startsWith('Error processing'))) {
-          setError(null);
+          if (isMounted.current) setError(null);
         } else if (allCards.length === 0 && !error) {
           // UI will show "No cards found..." if filteredCards is empty and no error is set
         }
-        setFilteredCards(allCards);
+        if (isMounted.current) setFilteredCards(allCards);
       } catch (e) {
         console.error('[WorkspaceView] Error scanning directory (outer catch):', e);
-        setError(`Error scanning directory: ${e.message}`);
-        setFilteredCards([]);
+        if (isMounted.current) setError(`Error scanning directory: ${e.message}`);
+        if (isMounted.current) setFilteredCards([]);
       }
-      setIsLoading(false);
+      if (isMounted.current) setIsLoading(false);
     },
     [
       props.plugin,
@@ -725,28 +739,28 @@ function KanbanWorkspaceViewComponent(props: {
   useEffect(() => {
     console.log(
       '[EffectUpdate] Filters changed. activeFilterTags before calling handleScanDirectory:',
-      JSON.stringify(activeFilterTags)
-    ); // ADDED LOG
+      JSON.stringify(activeFilterTags) // Log the current value of activeFilterTags for this effect run
+    );
     handleScanDirectory(
-      [...activeFilterTags],
-      [...activeFilterMembers],
-      dueDateFilterValue, // PASS STATE
-      dueDateFilterUnit, // PASS STATE
-      excludeArchive, // PASS STATE
-      excludeDone, // PASS STATE
-      sortCriteria, // PASS STATE
-      sortDirection // PASS STATE
+      activeFilterTags, // Pass directly
+      activeFilterMembers, // Pass directly
+      dueDateFilterValue,
+      dueDateFilterUnit,
+      excludeArchive,
+      excludeDone,
+      sortCriteria,
+      sortDirection
     );
   }, [
-    activeFilterTags,
+    activeFilterTags, // This being a dependency means the effect re-runs when it changes
     activeFilterMembers,
     dueDateFilterValue,
     dueDateFilterUnit,
     excludeArchive,
     excludeDone,
-    sortCriteria, // ADD DEPENDENCY
-    sortDirection, // ADD DEPENDENCY
-    handleScanDirectory, // ADD handleScanDirectory to this useEffect's dependency array
+    sortCriteria,
+    sortDirection,
+    handleScanDirectory, // handleScanDirectory itself is memoized
   ]);
 
   // Effect to listen for refresh events from the parent ItemView
@@ -1912,45 +1926,23 @@ function KanbanWorkspaceViewComponent(props: {
             <select
               value={selectedViewId || ''}
               onChange={async (e) => {
-                // Make onChange async
                 const newId = (e.target as HTMLSelectElement).value;
-                setSelectedViewId(newId);
+                setSelectedViewId(newId); // Update child's own state first
+
+                // Find the selected view object to get its name
+                const selectedViewObject = savedViews.find((v) => v.id === newId);
+                const viewName = selectedViewObject ? selectedViewObject.name : null;
+
+                // Directly tell the parent ItemView to set this configuration for the leaf
                 if (newId) {
-                  const viewToLoad = savedViews.find((v) => v.id === newId);
-                  if (viewToLoad) {
-                    setActiveFilterTags(viewToLoad.tags.map((t) => t.replace(/^#/, '')));
-                    setActiveFilterMembers(viewToLoad.members ? [...viewToLoad.members] : []);
-                    if (viewToLoad.dueDateFilter) {
-                      setDueDateFilterValue(viewToLoad.dueDateFilter.value);
-                      setDueDateFilterUnit(viewToLoad.dueDateFilter.unit);
-                    } else {
-                      setDueDateFilterValue('');
-                      setDueDateFilterUnit('days');
-                    }
-                    setExcludeArchive(viewToLoad.excludeArchive ?? true);
-                    setExcludeDone(viewToLoad.excludeDone ?? true);
-                    setSortCriteria(viewToLoad.sortCriteria || 'default');
-                    setSortDirection(viewToLoad.sortDirection || 'asc');
-                    props.plugin.settings.lastSelectedWorkspaceViewId = viewToLoad.id;
-                    await props.plugin.saveSettings();
-                    props.view.setActiveViewNameForDisplay(viewToLoad.name); // ADDED: Set instance display name
-                    props.refreshViewHeader();
-                  } else {
-                    // If viewToLoad is not found (e.g., "Select a view" is chosen or ID is invalid)
-                    props.view.setActiveViewNameForDisplay(null); // Clear instance display name
-                    props.refreshViewHeader();
-                  }
+                  // Only call if a valid view is selected
+                  props.view.setViewConfigurationForLeaf(viewName, newId);
                 } else {
-                  // If newId is empty (e.g., "Select a view" is chosen)
-                  props.plugin.settings.lastSelectedWorkspaceViewId = undefined; // Clear global last selected
-                  await props.plugin.saveSettings();
-                  props.view.setActiveViewNameForDisplay(null); // Clear instance display name
-                  props.refreshViewHeader();
-                  // Optionally, also clear local filters here if desired
-                  // setActiveFilterTags([]);
-                  // setActiveFilterMembers([]);
-                  // ... etc.
+                  props.view.setViewConfigurationForLeaf(null, null); // Clear view if "Select a view..." is chosen
                 }
+                // The parent's setViewConfigurationForLeaf will handle re-rendering the child component,
+                // which will then pick up the new newId via props.initialLeafSavedViewId.
+                // The useEffect above will then react to this selectedViewId (from initial state) to load filters.
               }}
               style={{ flexGrow: 1, padding: '5px' }}
             >
@@ -2827,7 +2819,8 @@ export class KanbanWorkspaceView extends ItemView {
   plugin: KanbanPlugin;
   private viewEvents = new Events();
   private boundHandleActiveLeafChange: (leaf: WorkspaceLeaf | null) => void;
-  private activeSavedViewNameForDisplay: string | null = null; // Added
+  private activeSavedViewNameForDisplay: string | null = null;
+  private currentLeafSavedViewId: string | null = null; // Added for leaf-specific state
 
   constructor(leaf: WorkspaceLeaf, plugin: KanbanPlugin) {
     super(leaf);
@@ -2835,17 +2828,28 @@ export class KanbanWorkspaceView extends ItemView {
     this.boundHandleActiveLeafChange = this.handleActiveLeafChange.bind(this);
   }
 
-  public setActiveViewNameForDisplay(name: string | null) {
-    // Added method
+  // Updated method to set both name and ID for the current leaf
+  public setViewConfigurationForLeaf(name: string | null, id: string | null) {
     this.activeSavedViewNameForDisplay = name;
-    // Note: refreshHeader will be called separately by the component
-    // to trigger the actual UI update for the tab.
+    this.currentLeafSavedViewId = id; // Set the instance property
+
+    console.log(
+      `[KanbanWorkspaceView] setViewConfigurationForLeaf: Name: ${name}, ID: ${id}. Current this.currentLeafSavedViewId is now ${this.currentLeafSavedViewId}`
+    );
+
+    // Call refreshHeader BEFORE renderReactComponent
+    this.refreshHeader();
+    // Pass the 'id' directly to renderReactComponent to ensure it uses the freshest value for the prop and key
+    this.renderReactComponent(id); // MODIFIED to pass id
   }
 
   public refreshHeader() {
-    // Get the current view state and set it again to force a refresh
-    const currentViewState = this.leaf.getViewState();
-    this.leaf.setViewState(currentViewState);
+    this.leaf.onResize(); // Use onResize to suggest Obsidian re-renders the tab, which should call getDisplayText()
+    // ADDED: Stronger signal to Obsidian to update UI elements like tab titles.
+    this.app.workspace.requestSaveLayout();
+    console.log(
+      '[KanbanWorkspaceView] refreshHeader: Called this.leaf.onResize() and this.app.workspace.requestSaveLayout().'
+    );
   }
 
   getViewType() {
@@ -2857,36 +2861,129 @@ export class KanbanWorkspaceView extends ItemView {
       const name = this.activeSavedViewNameForDisplay;
       return `${name.charAt(0).toUpperCase() + name.slice(1)}`;
     }
-    // Fallback if no specific view is active in this instance,
-    // or keep your existing logic if preferred for the "no specific view" case.
-    // For now, let's check the global lastSelectedWorkspaceViewId as a secondary fallback.
+    // Fallback if no specific view is active in this instance (e.g., on initial load before state is fully processed)
+    // We can still check the global lastSelectedWorkspaceViewId as a very temporary display before state kicks in.
     const lastViewId = this.plugin.settings.lastSelectedWorkspaceViewId;
     const savedViews = this.plugin.settings.savedWorkspaceViews || [];
     if (lastViewId) {
       const activeView = savedViews.find((v) => v.id === lastViewId);
       if (activeView && activeView.name) {
-        // return `Workspace - ${activeView.name}`; // Your original formatting
-        return `${activeView.name.charAt(0).toUpperCase() + activeView.name.slice(1)}`; // Your current formatting
+        return `${activeView.name.charAt(0).toUpperCase() + activeView.name.slice(1)}`;
       }
     }
-    return 'Workspace'; // Default if nothing else applies
+    return 'Workspace';
   }
 
   getIcon() {
     return KANBAN_WORKSPACE_ICON;
   }
 
+  // Override getState to include our leaf-specific view ID
+  getState() {
+    const state = super.getState();
+    state.currentLeafSavedViewId = this.currentLeafSavedViewId;
+    console.log(
+      `[KanbanWorkspaceView] getState: Saving currentLeafSavedViewId: ${this.currentLeafSavedViewId} for leaf: ${(this.leaf as any).id}`
+    );
+    return state;
+  }
+
+  // Override setState to restore our leaf-specific view ID
+  async setState(state: any, result: ViewStateResult) {
+    console.log(
+      `[KanbanWorkspaceView] setState: Received state for leaf ${(this.leaf as any).id}:`,
+      JSON.stringify(state) // Log the full state, be cautious with large states in production
+    );
+
+    if (state && Object.prototype.hasOwnProperty.call(state, 'currentLeafSavedViewId')) {
+      // The key 'currentLeafSavedViewId' IS PRESENT in the incoming state
+      const incomingLeafId = state.currentLeafSavedViewId;
+      if (typeof incomingLeafId === 'string' && incomingLeafId.length > 0) {
+        this.currentLeafSavedViewId = incomingLeafId;
+        const savedView = (this.plugin.settings.savedWorkspaceViews || []).find(
+          (v) => v.id === this.currentLeafSavedViewId
+        );
+        if (savedView) {
+          this.activeSavedViewNameForDisplay = savedView.name;
+          console.log(
+            `[KanbanWorkspaceView] setState: Restored currentLeafSavedViewId: ${this.currentLeafSavedViewId}, Name: ${savedView.name} for leaf: ${(this.leaf as any).id}`
+          );
+        } else {
+          console.warn(
+            `[KanbanWorkspaceView] setState: currentLeafSavedViewId '${this.currentLeafSavedViewId}' provided in state, but no matching saved view found. Clearing leaf-specific view.`
+          );
+          this.currentLeafSavedViewId = null;
+          this.activeSavedViewNameForDisplay = null;
+        }
+      } else {
+        // currentLeafSavedViewId is present in state but is null, undefined, or empty string
+        console.log(
+          `[KanbanWorkspaceView] setState: currentLeafSavedViewId is present in state but null/empty: '${incomingLeafId}'. Clearing leaf-specific view for leaf: ${(this.leaf as any).id}`
+        );
+        this.currentLeafSavedViewId = null;
+        this.activeSavedViewNameForDisplay = null;
+      }
+    } else {
+      // The key 'currentLeafSavedViewId' IS NOT PRESENT in the incoming state.
+      // In this case, we do NOT modify this.currentLeafSavedViewId or this.activeSavedViewNameForDisplay.
+      // This prevents generic state updates (e.g., from onResize or other plugins) from wiping our leaf-specific view.
+      console.log(
+        `[KanbanWorkspaceView] setState: Incoming state for leaf ${(this.leaf as any).id} does NOT contain 'currentLeafSavedViewId'. Preserving existing values: ID=${this.currentLeafSavedViewId}, Name=${this.activeSavedViewNameForDisplay}`
+      );
+    }
+
+    await super.setState(state, result); // Pass original state to super
+
+    this.refreshHeader(); // For tab title, uses activeSavedViewNameForDisplay which might have been updated
+    // ADDED: Explicitly call renderReactComponent to ensure child updates with restored leaf-specific ID
+    this.renderReactComponent(this.currentLeafSavedViewId);
+  }
+
+  private renderReactComponent(explicitInitialId?: string | null | undefined) {
+    const idToUseForKeyAndProp =
+      explicitInitialId === undefined ? this.currentLeafSavedViewId : explicitInitialId;
+
+    console.log(
+      `[KanbanWorkspaceView] renderReactComponent: Rendering for leaf ${(this.leaf as any).id}. ID for key/prop: ${idToUseForKeyAndProp}, Name for display: ${this.activeSavedViewNameForDisplay}`
+    );
+
+    if (this.contentEl) {
+      // Use Preact's unmountComponentAtNode
+      const unmounted = unmountComponentAtNode(this.contentEl);
+      console.log(
+        `[KanbanWorkspaceView] renderReactComponent: Attempted unmount. Was component unmounted? ${unmounted}. contentEl children after unmount: ${this.contentEl.children.length}`
+      );
+      // Aggressive cleanup if unmount fails or leaves children
+      if (!unmounted || this.contentEl.children.length > 0) {
+        console.log(
+          `[KanbanWorkspaceView] renderReactComponent: Unmount returned ${unmounted} or children still exist. Clearing innerHTML.`
+        );
+        this.contentEl.innerHTML = '';
+      }
+
+      // Use Preact's render and createElement instead of JSX
+      render(
+        createElement(KanbanWorkspaceViewComponent, {
+          key: idToUseForKeyAndProp || 'no-view-selected', // Use the resolved ID for the key
+          plugin: this.plugin,
+          viewEvents: this.viewEvents,
+          refreshViewHeader: this.refreshHeader.bind(this),
+          view: this,
+          initialLeafSavedViewId: idToUseForKeyAndProp, // Pass the resolved ID as prop
+        }),
+        this.contentEl
+      );
+      console.log(
+        '[KanbanWorkspaceView] renderReactComponent: Preact component rendered/updated using createElement.'
+      );
+    } else {
+      console.warn('[KanbanWorkspaceView] renderReactComponent: contentEl is null, cannot render.');
+    }
+  }
+
   async onload() {
     super.onload();
-    render(
-      <KanbanWorkspaceViewComponent
-        plugin={this.plugin}
-        viewEvents={this.viewEvents}
-        refreshViewHeader={this.refreshHeader.bind(this)}
-        view={this} // Pass the KanbanWorkspaceView instance to the component
-      />,
-      this.contentEl
-    );
+    this.renderReactComponent(); // Initial render call
     this.app.workspace.on('active-leaf-change', this.boundHandleActiveLeafChange);
 
     // Initial refresh when view is first loaded.
