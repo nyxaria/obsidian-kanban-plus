@@ -51,8 +51,8 @@ export function ItemPriority({ priority, style, assignedMembersCount = 0 }: Item
         borderRadius: '4px',
         fontSize: '0.85em',
         fontWeight: '500',
-        marginLeft: '0px', // Space from members
-        marginRight: '6px', // Added padding to the right
+        marginLeft: '-2px', // Space from members
+        marginRight: '7px', // Added padding to the right
         textTransform: 'capitalize',
         ...style,
       }}
