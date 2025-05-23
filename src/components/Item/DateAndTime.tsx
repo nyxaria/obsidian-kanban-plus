@@ -118,7 +118,7 @@ export function DateAndTime({
   ); // DEBUG LOG
 
   const dateProps: HTMLAttributes<HTMLSpanElement> = {}; // This seems to be for the main div for editing
-  dateProps['aria-label'] = t('Change date/time');
+  dateProps['aria-label'] = t('Edit card');
   // dateProps.onClick = onEditDate; // This is now on the parent div
 
   return (
@@ -134,12 +134,11 @@ export function DateAndTime({
         backgroundColor: dateColor?.backgroundColor || 'rgba(0,0,0,0)',
         color:
           dateColor?.color ||
-          dateColor?.color ||
           (dateColor?.backgroundColor ? 'var(--text-on-accent)' : 'var(--text-normal)'),
         ...style,
       }}
       className={classcat([c('item-metadata-date-lozenge')])}
-      aria-label={t('Change date/time')}
+      aria-label={t('Edit card')}
     >
       {/* MODIFIED: Render date and time in separate spans */}
       <span onClick={handleDateSearchClick} style={{ cursor: 'pointer' }}>
