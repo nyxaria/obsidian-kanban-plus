@@ -66,6 +66,8 @@ export interface SavedWorkspaceView {
   dueDateFilter?: DueDateFilterConfig;
   excludeArchive?: boolean;
   excludeDone?: boolean;
+  sortCriteria?: 'default' | 'priority' | 'dueDate';
+  sortDirection?: 'asc' | 'desc';
 }
 
 export interface TeamMemberColorConfig {
