@@ -761,7 +761,9 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
 
       console.log(
         '[WorkspaceView] Existing leaf found?',
-        existingLeaf ? `${existingLeaf.view.getViewType()} was found` : 'No'
+        existingLeaf
+          ? `${existingLeaf.view?.getViewType()} was found (View exists: ${!!existingLeaf.view})`
+          : 'No'
       );
 
       const navigationState = {
@@ -775,9 +777,10 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
         },
       };
 
-      if (existingLeaf) {
+      if (existingLeaf && existingLeaf.view) {
+        // <-- ADDED CHECK for existingLeaf.view
         console.log(
-          `[WorkspaceView] Activating existing leaf. View type: ${existingLeaf.view.getViewType()}`
+          `[WorkspaceView] Activating existing leaf (view exists). View type: ${existingLeaf.view.getViewType()}`
         );
         app.workspace.setActiveLeaf(existingLeaf, { focus: true });
 
@@ -817,6 +820,13 @@ function KanbanWorkspaceViewComponent(props: { plugin: KanbanPlugin; viewEvents:
           // ...
         }
       } else {
+        if (existingLeaf && !existingLeaf.view) {
+          console.log(
+            '[WorkspaceView] Existing leaf found, but its view is null (likely closed/detached). Opening new link instead.'
+          );
+        } else {
+          console.log('[WorkspaceView] No existing active leaf found. Opening new link.');
+        }
         // When opening in a NEW leaf, preventSetViewData should be false or absent
         const navigationStateForNewLeaf = {
           file: card.sourceBoardPath, // Still needed by KanbanView's setState
