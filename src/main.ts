@@ -1296,7 +1296,13 @@ export default class KanbanPlugin extends Plugin {
         const sender = this.settings.automaticEmailSenderAddress;
         const appPass = this.settings.automaticEmailAppPassword;
         const timeframeDays = this.settings.dueDateReminderTimeframeDays ?? 1;
-        const timeframeText = timeframeDays === 1 ? 'day' : `${timeframeDays} days`;
+        let timeframeText = '';
+        if (timeframeDays % 7 === 0) {
+          const weeks = timeframeDays / 7;
+          timeframeText = weeks === 1 ? 'week' : `${weeks} weeks`;
+        } else {
+          timeframeText = timeframeDays === 1 ? 'day' : `${timeframeDays} days`;
+        }
 
         for (const emailAddress in tasksByEmail) {
           const userTasks = tasksByEmail[emailAddress];
