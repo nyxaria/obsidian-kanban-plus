@@ -263,6 +263,9 @@ function KanbanWorkspaceViewComponent(props: {
   const [sortCriteria, setSortCriteria] = useState<'default' | 'priority' | 'dueDate'>('default');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
+  // ADDED: New state for the scan root path
+  const [scanRootPath, setScanRootPath] = useState<string>('');
+
   // ADDED: Ref to track mounted state
   const isMounted = useRef(true);
 
@@ -291,6 +294,7 @@ function KanbanWorkspaceViewComponent(props: {
         setExcludeDone(viewToLoad.excludeDone ?? true);
         setSortCriteria((viewToLoad as any).sortCriteria || 'default');
         setSortDirection((viewToLoad as any).sortDirection || 'asc');
+        setScanRootPath(viewToLoad.scanRootPath || ''); // ADDED: Load scanRootPath
 
         // newGlobalLastSelectedId is still important for global settings
         newGlobalLastSelectedId = viewToLoad.id;
@@ -304,6 +308,7 @@ function KanbanWorkspaceViewComponent(props: {
         setExcludeDone(true);
         setSortCriteria('default');
         setSortDirection('asc');
+        setScanRootPath(''); // ADDED: Reset scanRootPath
         newGlobalLastSelectedId = undefined;
       }
     } else {
@@ -316,6 +321,7 @@ function KanbanWorkspaceViewComponent(props: {
       setExcludeDone(true);
       setSortCriteria('default');
       setSortDirection('asc');
+      setScanRootPath(''); // ADDED: Reset scanRootPath
       newGlobalLastSelectedId = undefined;
     }
 
@@ -386,8 +392,9 @@ function KanbanWorkspaceViewComponent(props: {
       currentDueDateUnit: 'days' | 'weeks' | 'months',
       currentExcludeArchive: boolean,
       currentExcludeDone: boolean,
-      currentSortCriteria: 'default' | 'priority' | 'dueDate', // Added sort params
-      currentSortDirection: 'asc' | 'desc' // Added sort params
+      currentSortCriteria: 'default' | 'priority' | 'dueDate',
+      currentSortDirection: 'asc' | 'desc',
+      currentScanRootPath: string // ADDED: New parameter
     ) => {
       console.log(
         '[WorkspaceView] handleScanDirectory called with:',
@@ -406,7 +413,9 @@ function KanbanWorkspaceViewComponent(props: {
         'Sort Criteria:',
         currentSortCriteria,
         'Sort Direction:',
-        currentSortDirection
+        currentSortDirection,
+        'Scan Root Path:', // ADDED: Log new parameter
+        currentScanRootPath // ADDED: Log new parameter
       );
       if (!isMounted.current) return;
       setIsLoading(true);
@@ -425,6 +434,7 @@ function KanbanWorkspaceViewComponent(props: {
         currentExcludeDone,
         currentSortCriteria,
         currentSortDirection,
+        currentScanRootPath, // ADDED to log
       });
       // --- END DEBUG LOG ---
 
@@ -439,13 +449,31 @@ function KanbanWorkspaceViewComponent(props: {
 
       const currentFile = app.workspace.getActiveFile();
       let targetFolder: TFolder | null = null;
-      if (currentFile && currentFile.parent) {
-        targetFolder = currentFile.parent;
-      } else if (app.vault.getRoot().children.length > 0) {
-        targetFolder = app.vault.getRoot();
+
+      // MODIFIED: Determine targetFolder based on currentScanRootPath
+      if (currentScanRootPath && currentScanRootPath.trim() !== '') {
+        const abstractFile = app.vault.getAbstractFileByPath(currentScanRootPath.trim());
+        if (abstractFile instanceof TFolder) {
+          targetFolder = abstractFile;
+          console.log(`[WorkspaceView] Scanning user-defined root path: ${targetFolder.path}`);
+        } else {
+          if (isMounted.current) {
+            setError(
+              `Invalid scan root path: '${currentScanRootPath}'. Path is not a folder or does not exist. Falling back to vault root.`
+            );
+            // Fallback to vault root if specified path is invalid
+            targetFolder = app.vault.getRoot();
+            console.warn(
+              `[WorkspaceView] Invalid scan root path '${currentScanRootPath}'. Falling back to vault root.`
+            );
+          }
+        }
       } else {
-        // console.log('[WorkspaceView] No suitable target folder found initially.');
+        // Default to vault root if no path is specified
+        targetFolder = app.vault.getRoot();
+        console.log('[WorkspaceView] Scanning from vault root (no specific path provided).');
       }
+      // END MODIFIED
 
       if (!targetFolder) {
         if (!isMounted.current) return;
@@ -727,6 +755,7 @@ function KanbanWorkspaceViewComponent(props: {
       // handleScanDirectory, // ADDED BACK
       sortCriteria, // ADD DEPENDENCY
       sortDirection, // ADD DEPENDENCY
+      scanRootPath, // No longer a direct dependency here, passed as arg
     ]
   );
 
@@ -744,7 +773,8 @@ function KanbanWorkspaceViewComponent(props: {
       excludeArchive,
       excludeDone,
       sortCriteria,
-      sortDirection
+      sortDirection,
+      scanRootPath // ADDED: Pass current scanRootPath state
     );
   }, [
     activeFilterTags, // This being a dependency means the effect re-runs when it changes
@@ -755,6 +785,7 @@ function KanbanWorkspaceViewComponent(props: {
     excludeDone,
     sortCriteria,
     sortDirection,
+    scanRootPath, // ADDED: Add scanRootPath as a dependency
     handleScanDirectory, // handleScanDirectory itself is memoized
   ]);
 
@@ -773,7 +804,8 @@ function KanbanWorkspaceViewComponent(props: {
         excludeArchive, // PASS STATE
         excludeDone, // PASS STATE
         sortCriteria, // PASS STATE
-        sortDirection // PASS STATE
+        sortDirection, // PASS STATE
+        scanRootPath // ADDED: Pass current scanRootPath state
       );
     };
 
@@ -791,8 +823,14 @@ function KanbanWorkspaceViewComponent(props: {
     handleScanDirectory,
     activeFilterTags,
     activeFilterMembers,
+    // ADDED: scanRootPath dependency for refresher
+    dueDateFilterValue,
+    dueDateFilterUnit,
+    excludeArchive,
+    excludeDone,
     sortCriteria,
     sortDirection,
+    scanRootPath,
   ]);
 
   const handleToggleCardDoneStatus = useCallback(
@@ -908,6 +946,7 @@ function KanbanWorkspaceViewComponent(props: {
               excludeDone,
               sortCriteria,
               sortDirection,
+              scanRootPath, // ADDED: Pass current scanRootPath state
             }
           );
           // --- END DEBUG LOG ---
@@ -920,7 +959,8 @@ function KanbanWorkspaceViewComponent(props: {
             excludeArchive, // PASS STATE
             excludeDone, // PASS STATE
             sortCriteria, // PASS STATE
-            sortDirection // PASS STATE
+            sortDirection, // PASS STATE
+            scanRootPath // ADDED: Pass current scanRootPath state
           ); // Refresh list
         } else if (!card.blockId && !card.sourceStartLine) {
           new Notice(
@@ -970,6 +1010,7 @@ function KanbanWorkspaceViewComponent(props: {
       handleScanDirectory,
       sortCriteria, // ADD STATE DEPENDENCY
       sortDirection, // ADD STATE DEPENDENCY
+      scanRootPath, // ADDED: Add scanRootPath as a dependency
     ]
   );
 
@@ -1139,7 +1180,8 @@ function KanbanWorkspaceViewComponent(props: {
                         excludeArchive,
                         excludeDone,
                         sortCriteria,
-                        sortDirection
+                        sortDirection,
+                        scanRootPath // ADDED: Pass current scanRootPath state
                       );
                     } else {
                       new Notice(
@@ -1189,7 +1231,8 @@ function KanbanWorkspaceViewComponent(props: {
                         excludeArchive,
                         excludeDone,
                         sortCriteria,
-                        sortDirection
+                        sortDirection,
+                        scanRootPath // ADDED: Pass current scanRootPath state
                       );
                     } else {
                       new Notice(
@@ -1353,7 +1396,8 @@ function KanbanWorkspaceViewComponent(props: {
                         excludeArchive, // PASS STATE
                         excludeDone, // PASS STATE
                         sortCriteria, // PASS STATE
-                        sortDirection // PASS STATE
+                        sortDirection, // PASS STATE
+                        scanRootPath // ADDED: Pass current scanRootPath state
                       ); // Refresh list
                     } else if (!card.blockId && !card.sourceStartLine) {
                       new Notice(
@@ -1651,7 +1695,8 @@ function KanbanWorkspaceViewComponent(props: {
                     excludeArchive,
                     excludeDone,
                     sortCriteria, // PASS STATE
-                    sortDirection // PASS STATE
+                    sortDirection, // PASS STATE
+                    scanRootPath // ADDED: Pass current scanRootPath state
                   );
                 }
               });
@@ -1685,6 +1730,7 @@ function KanbanWorkspaceViewComponent(props: {
       excludeDone, // ADD STATE DEPENDENCY
       sortCriteria, // ADD STATE DEPENDENCY
       sortDirection, // ADD STATE DEPENDENCY
+      scanRootPath, // ADDED: Add scanRootPath as a dependency
       handleScanDirectory,
       handleToggleCardDoneStatus,
     ] // Added handleToggleCardDoneStatus to dependencies
@@ -1709,6 +1755,7 @@ function KanbanWorkspaceViewComponent(props: {
       excludeDone: excludeDone, // Save new toggle
       sortCriteria: sortCriteria, // Save sort criteria
       sortDirection: sortDirection, // Save sort direction
+      scanRootPath: scanRootPath, // ADDED: Save scanRootPath
     } as SavedWorkspaceView; // Cast to allow extra properties for now
 
     const currentSavedViews = props.plugin.settings.savedWorkspaceViews || [];
@@ -1736,6 +1783,7 @@ function KanbanWorkspaceViewComponent(props: {
     excludeDone, // Add to dependencies
     sortCriteria, // Add to dependency array
     sortDirection, // Add to dependency array
+    scanRootPath, // ADDED: Add scanRootPath as a dependency
   ]); // Added activeFilterMembers and setters to deps
 
   const handleDeleteView = useCallback(async () => {
@@ -1766,6 +1814,7 @@ function KanbanWorkspaceViewComponent(props: {
       setExcludeDone(true); // Reset new toggle
       setSortCriteria('default'); // Reset sort
       setSortDirection('asc'); // Reset sort
+      setScanRootPath(''); // ADDED: Reset scanRootPath
     }
 
     await props.plugin.saveSettings();
@@ -1787,6 +1836,7 @@ function KanbanWorkspaceViewComponent(props: {
     setExcludeDone, // Add to dependencies
     setSortCriteria, // ADD DEPENDENCY
     setSortDirection, // ADD DEPENDENCY
+    setScanRootPath, // ADDED: Add setScanRootPath as a dependency
   ]); // Added setters to deps
 
   const availableTeamMembers = useMemo(() => {
@@ -1802,6 +1852,7 @@ function KanbanWorkspaceViewComponent(props: {
     setExcludeDone(true); // Reset new toggle
     setSortCriteria('default'); // Reset sort
     setSortDirection('asc'); // Reset sort
+    setScanRootPath(''); // ADDED: Reset scanRootPath
   }, [
     setActiveFilterTags,
     setActiveFilterMembers,
@@ -1811,6 +1862,7 @@ function KanbanWorkspaceViewComponent(props: {
     setExcludeDone, // Add to dependencies
     setSortCriteria, // ADD DEPENDENCY
     setSortDirection, // ADD DEPENDENCY
+    setScanRootPath, // ADDED: Add setScanRootPath as a dependency
   ]);
 
   // ADDED: Handler for the tag filter dropdown click
@@ -1902,94 +1954,110 @@ function KanbanWorkspaceViewComponent(props: {
   return (
     <div style={{ padding: '10px' }}>
       <h2>Kanban Workspace</h2>
-
-      {/* Combined Save/Load Section - MOVED HERE */}
-      <div
-        style={{
-          marginTop: '10px',
-          marginBottom: '20px',
-          padding: '10px',
-          border: '1px solid var(--background-modifier-border-hover)',
-          borderRadius: '4px',
-          maxWidth: '320px',
-        }}
-      >
-        {/* Save View Controls */}
+      {/* Parent Flex Container for Save/Load and Root Path */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '20px', marginBottom: '20px' }}>
+        {/* Combined Save/Load Section */}
         <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            marginBottom: savedViews.length > 0 ? '10px' : '0',
+            // No longer needs individual top/bottom margins if parent handles it
+            padding: '10px',
+            border: '1px solid var(--background-modifier-border-hover)',
+            borderRadius: '4px',
+            maxWidth: '320px',
           }}
         >
-          <input
-            type="text"
-            placeholder="Enter view name to save"
-            value={newViewName}
-            onInput={(e) => setNewViewName((e.target as HTMLInputElement).value)}
-            style={{ flexGrow: 1, padding: '5px' }}
-          />
-          <button
-            onClick={handleSaveView}
-            disabled={!newViewName.trim()}
-            style={{ minWidth: '65px' }}
+          {/* Save View Controls */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              marginBottom: savedViews.length > 0 ? '10px' : '0',
+            }}
           >
-            Save
-          </button>
-        </div>
-
-        {/* Load View Controls - only render if there are saved views */}
-        {savedViews.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <select
-              value={selectedViewId || ''}
-              onChange={async (e) => {
-                const newId = (e.target as HTMLSelectElement).value;
-                setSelectedViewId(newId); // Update child's own state first
-
-                // Find the selected view object to get its name
-                const selectedViewObject = savedViews.find((v) => v.id === newId);
-                const viewName = selectedViewObject ? selectedViewObject.name : null;
-
-                // Directly tell the parent ItemView to set this configuration for the leaf
-                if (newId) {
-                  // Only call if a valid view is selected
-                  props.view.setViewConfigurationForLeaf(viewName, newId);
-                } else {
-                  props.view.setViewConfigurationForLeaf(null, null); // Clear view if "Select a view..." is chosen
-                }
-                // The parent's setViewConfigurationForLeaf will handle re-rendering the child component,
-                // which will then pick up the new newId via props.initialLeafSavedViewId.
-                // The useEffect above will then react to this selectedViewId (from initial state) to load filters.
-              }}
+            <input
+              type="text"
+              placeholder="Enter view name to save"
+              value={newViewName}
+              onInput={(e) => setNewViewName((e.target as HTMLInputElement).value)}
               style={{ flexGrow: 1, padding: '5px' }}
-            >
-              <option value="" disabled>
-                Select a view to load...
-              </option>
-              {savedViews.map((view) => (
-                <option key={view.id} value={view.id}>
-                  {view.name}
-                </option>
-              ))}
-            </select>
+            />
             <button
-              onClick={handleDeleteView}
-              disabled={!selectedViewId}
-              style={{
-                minWidth: '65px',
-                backgroundColor: 'var(--background-modifier-error)',
-                color: 'var(--text-on-accent)',
-              }} // Adjusted width and added styling
-              title="Delete selected view"
+              onClick={handleSaveView}
+              disabled={!newViewName.trim()}
+              style={{ minWidth: '65px' }}
             >
-              Delete
+              Save
             </button>
           </div>
-        )}
-      </div>
 
+          {/* Load View Controls - only render if there are saved views */}
+          {savedViews.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <select
+                value={selectedViewId || ''}
+                onChange={async (e) => {
+                  const newId = (e.target as HTMLSelectElement).value;
+                  setSelectedViewId(newId); // Update child's own state first
+
+                  const selectedViewObject = savedViews.find((v) => v.id === newId);
+                  const viewName = selectedViewObject ? selectedViewObject.name : null;
+
+                  if (newId) {
+                    props.view.setViewConfigurationForLeaf(viewName, newId);
+                  } else {
+                    props.view.setViewConfigurationForLeaf(null, null);
+                  }
+                }}
+                style={{ flexGrow: 1, padding: '5px' }}
+              >
+                <option value="" disabled>
+                  Select a view to load...
+                </option>
+                {savedViews.map((view) => (
+                  <option key={view.id} value={view.id}>
+                    {view.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleDeleteView}
+                disabled={!selectedViewId}
+                style={{
+                  minWidth: '65px',
+                  backgroundColor: 'var(--background-modifier-error)',
+                  color: 'var(--text-on-accent)',
+                }}
+                title="Delete selected view"
+              >
+                Delete
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Scan Root Path Input */}
+        <div
+          style={
+            {
+              // marginTop: '10px' // Removed, parent alignItems: 'flex-start' should handle alignment
+            }
+          }
+        >
+          <label htmlFor="scan-root-path-input" style={{ display: 'block', marginBottom: '5px' }}>
+            Scan Root Path:
+          </label>
+          <input
+            type="text"
+            id="scan-root-path-input"
+            placeholder="Vault root if empty"
+            value={scanRootPath}
+            onInput={(e) => setScanRootPath((e.target as HTMLInputElement).value.trim())}
+            style={{ width: '300px', padding: '5px' }}
+          />
+        </div>
+      </div>{' '}
+      {/* Closing tag for the parent flex container */}
       {/* Combined Filter Input Sections */}
       <div
         style={{
@@ -2238,7 +2306,6 @@ function KanbanWorkspaceViewComponent(props: {
           )}
         </div>
       </div>
-
       {/* Active Member Filters Display */}
       {(activeFilterTags.length > 0 ||
         activeFilterMembers.length > 0 ||
@@ -2477,7 +2544,6 @@ function KanbanWorkspaceViewComponent(props: {
           )}
         </div>
       )}
-
       {/* Error and Table display - REMAINS AT THE BOTTOM */}
       {error && <div style={{ color: 'red', marginTop: '10px' }}>Error: {error}</div>}
       <div
