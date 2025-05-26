@@ -73,6 +73,7 @@ export interface SavedWorkspaceView {
 export interface TeamMemberColorConfig {
   background: string;
   text: string;
+  email?: string;
 }
 
 export interface KanbanSettings {
@@ -1872,7 +1873,7 @@ export class KanbanSettingsTab extends PluginSettingTab {
 
         const memberSetting = new Setting(memberColorSettingContainer)
           .setName(member)
-          .setDesc('Set background and text colors for this member.');
+          .setDesc('Set background, text colors, and email for this member.');
 
         memberSetting.controlEl.addClass('kanban-member-color-controls');
 
@@ -1909,6 +1910,31 @@ export class KanbanSettingsTab extends PluginSettingTab {
               freshMemberColors[member] = {
                 ...(freshMemberColors[member] || { background: '' }),
                 text: value,
+              };
+              this.plugin.settings.teamMemberColors = freshMemberColors;
+              await this.plugin.saveSettings();
+            });
+        });
+
+        // Email Input
+        const emailLabel = memberSetting.controlEl.createEl('span', {
+          text: 'Email:',
+          cls: 'kanban-color-picker-label',
+        });
+        emailLabel.style.marginLeft = '10px';
+
+        let emailInput: HTMLInputElement;
+        memberSetting.addText((text) => {
+          emailInput = text.inputEl;
+          emailInput.style.marginLeft = '5px';
+          text
+            .setValue(currentMemberConfig.email || '')
+            .setPlaceholder('Enter email (optional)')
+            .onChange(async (value) => {
+              const freshMemberColors = { ...(this.plugin.settings.teamMemberColors || {}) };
+              freshMemberColors[member] = {
+                ...(freshMemberColors[member] || { background: '', text: '' }),
+                email: value.trim(),
               };
               this.plugin.settings.teamMemberColors = freshMemberColors;
               await this.plugin.saveSettings();
