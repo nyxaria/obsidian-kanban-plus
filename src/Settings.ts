@@ -137,6 +137,9 @@ export interface KanbanSettings {
   editable?: boolean;
   memberAssignmentPrefix?: string;
   'auto-move-done-to-lane'?: boolean;
+  enableDueDateEmailReminders?: boolean;
+  dueDateReminderLastRun?: number;
+  dueDateReminderTimeframeDays?: number;
 }
 
 export interface KanbanViewSettings {
@@ -149,6 +152,10 @@ export interface KanbanViewSettings {
   teamMemberColors: Record<string, TeamMemberColorConfig>;
   editable: boolean;
   'auto-move-done-to-lane': boolean;
+  memberAssignmentPrefix: '@@';
+  enableDueDateEmailReminders: false;
+  dueDateReminderLastRun: 0;
+  dueDateReminderTimeframeDays: 1;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -200,6 +207,9 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'editable',
   'memberAssignmentPrefix',
   'auto-move-done-to-lane',
+  'enableDueDateEmailReminders',
+  'dueDateReminderLastRun',
+  'dueDateReminderTimeframeDays',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -1813,6 +1823,61 @@ export class KanbanSettingsTab extends PluginSettingTab {
     this.renderTagSymbolSettings(containerEl);
     this.renderMetadataSettings(containerEl);
     this.renderTagSortSettings(containerEl);
+
+    // Add new section for Email Reminders
+    containerEl.createEl('h3', { text: t('Email Reminders') });
+
+    new Setting(containerEl)
+      .setName(t('Enable Due Date Email Reminders'))
+      .setDesc(
+        t(
+          'If enabled, the plugin will help prepare email reminders for tasks due in 1 day or less.'
+        )
+      )
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.enableDueDateEmailReminders || false)
+          .onChange(async (value) => {
+            this.plugin.settings.enableDueDateEmailReminders = value;
+            // Reset last run time if reminders are disabled, so it runs immediately if re-enabled.
+            if (!value) {
+              this.plugin.settings.dueDateReminderLastRun = 0;
+            }
+            await this.plugin.saveSettings();
+            this.display(); // Refresh settings tab to show/hide related options if any were added
+          });
+      });
+
+    new Setting(containerEl)
+      .setName(t('Reminder Timeframe (Days)'))
+      .setDesc(
+        t(
+          'Set the number of days in advance to send due date reminders (e.g., 1 for tasks due today or tomorrow).'
+        )
+      )
+      .addText((text) => {
+        text
+          .setValue(this.plugin.settings.dueDateReminderTimeframeDays?.toString() || '1')
+          .setPlaceholder('1')
+          .onChange(async (value) => {
+            const numValue = parseInt(value);
+            if (!isNaN(numValue) && numValue >= 0) {
+              this.plugin.settings.dueDateReminderTimeframeDays = numValue;
+              text.inputEl.removeClass('error');
+            } else {
+              // Optionally, handle invalid input, e.g., by not saving or showing an error
+              // For now, if invalid, it won't update the setting to a non-number
+              // or could default back or show an error.
+              text.inputEl.addClass('error'); // Indicate error on the input
+              // Fallback to default if input is cleared or invalid to prevent NaN issues
+              this.plugin.settings.dueDateReminderTimeframeDays =
+                DEFAULT_SETTINGS.dueDateReminderTimeframeDays;
+            }
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = 'number'; // Set input type to number for better UX
+        text.inputEl.min = '0'; // Minimum value for the timeframe
+      });
   }
 
   renderTeamMembersSetting(containerEl: HTMLElement) {
@@ -2046,6 +2111,9 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   editable: true,
   memberAssignmentPrefix: '@@',
   'auto-move-done-to-lane': false,
+  enableDueDateEmailReminders: false,
+  dueDateReminderLastRun: 0,
+  dueDateReminderTimeframeDays: 1,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {

@@ -198,6 +198,8 @@ const en = {
 
   Priority: 'Priority',
   Start: 'Start',
+  End: 'End',
+  Effort: 'Effort',
   Created: 'Created',
   Scheduled: 'Scheduled',
   Due: 'Due',
@@ -311,6 +313,15 @@ const en = {
   'Add team member': 'Add team member',
   'Enter member name': 'Enter member name',
   Add: 'Add',
+
+  // Settings for Email Reminders (NEW)
+  'Email Reminders': 'Email Reminders',
+  'Enable Due Date Email Reminders': 'Enable Due Date Email Reminders',
+  'If enabled, the plugin will help prepare email reminders for tasks due in 1 day or less.':
+    'If enabled, the plugin will help prepare email reminders for tasks due in 1 day or less.',
+  'Reminder Timeframe (Days)': 'Reminder Timeframe (Days)',
+  'Set the number of days in advance to send due date reminders (e.g., 1 for tasks due today or tomorrow).':
+    'Set the number of days in advance to send due date reminders (e.g., 1 for tasks due today or tomorrow).',
 };
 
 export type Lang = typeof en;

@@ -1,4 +1,5 @@
 // Import the compiled stylesheet
+import moment from 'moment';
 import { around } from 'monkey-around';
 import {
   MarkdownView,
@@ -27,10 +28,12 @@ import {
 } from './Settings';
 import { StateManager } from './StateManager';
 import { DateSuggest, TimeSuggest } from './components/Editor/suggest';
-import { Item } from './components/types';
+import { ReminderModal } from './components/ReminderModal';
+import { Item, ItemData } from './components/types';
 import { getParentWindow } from './dnd/util/getWindow';
 import { hasFrontmatterKey } from './helpers';
 import { t } from './lang/helpers';
+import { ListFormat } from './parsers/List';
 import { basicFrontmatter, frontmatterKey } from './parsers/common';
 import './styles.less';
 
@@ -197,6 +200,7 @@ export default class KanbanPlugin extends Plugin {
         const kanbanView = activeLeaf.view as KanbanView;
         if (kanbanView.file !== file) {
           // kanbanView.clearActiveSearchHighlight(); // This was part of the previous strategy
+          // kanbanView.processHighlightFromExternal(null); // todo: this line causes a linter error, commenting out
           return;
         }
         let eStateToUse: any = null;
@@ -238,6 +242,12 @@ export default class KanbanPlugin extends Plugin {
         type: KANBAN_WORKSPACE_VIEW_TYPE,
         active: true,
       });
+    });
+
+    // Call processDueDateReminders on load
+    this.app.workspace.onLayoutReady(async () => {
+      // Wait for layout to be ready to ensure settings are loaded and workspace is available
+      await this.processDueDateReminders();
     });
   }
 
@@ -1109,4 +1119,184 @@ export default class KanbanPlugin extends Plugin {
       })
     );
   }
+
+  // --- BEGIN ADDED METHOD for Due Date Reminders ---
+  async processDueDateReminders() {
+    console.log('[KanbanPlugin] processDueDateReminders called');
+    if (!this.settings.enableDueDateEmailReminders) {
+      console.log('[KanbanPlugin] Due date email reminders are disabled in settings.');
+      return;
+    }
+
+    const now = new Date().getTime();
+    const twentyFourHours = 24 * 60 * 60 * 1000;
+    const lastRun = this.settings.dueDateReminderLastRun || 0;
+
+    // Check if 24 hours have passed since the last run
+    if (now - lastRun < twentyFourHours) {
+      const timeSinceLastRun = now - lastRun;
+      const hoursSinceLastRun = (timeSinceLastRun / (1000 * 60 * 60)).toFixed(1);
+      console.log(
+        `[KanbanPlugin] Due date reminders run too recently (${hoursSinceLastRun} hours ago). Skipping.`
+      );
+      return;
+    }
+
+    console.log('[KanbanPlugin] Processing due date reminders...');
+
+    // Structure to hold tasks grouped by email
+    // { "email@example.com": [{ title: "Task 1", board: "Board A" }, { title: "Task 2", board: "Board B" }] }
+    const tasksByEmail: Record<
+      string,
+      Array<{
+        title: string;
+        boardName: string;
+        boardPath: string;
+        dueDate: string;
+        tags?: string[];
+        priority?: 'high' | 'medium' | 'low';
+      }>
+    > = {};
+
+    const allMarkdownFiles = this.app.vault.getMarkdownFiles();
+    const kanbanBoards: TFile[] = [];
+
+    for (const file of allMarkdownFiles) {
+      // A simple check for a kanban board, can be refined
+      // This assumes a board is a markdown file with a frontmatter key specific to kanban
+      // or that it would be opened by KanbanView. For a more robust check,
+      // we might need to parse frontmatter more deeply or check if it has kanban content.
+      // For now, we'll use hasFrontmatterKey as a proxy.
+      const fileCache = this.app.metadataCache.getFileCache(file);
+      if (fileCache?.frontmatter && fileCache.frontmatter[frontmatterKey]) {
+        kanbanBoards.push(file);
+      }
+    }
+
+    console.log(`[KanbanPlugin] Found ${kanbanBoards.length} potential Kanban boards to scan.`);
+
+    for (const boardFile of kanbanBoards) {
+      try {
+        const fileContent = await this.app.vault.cachedRead(boardFile);
+        // We need a way to parse the board content to get cards, their due dates, and assigned members.
+        // This is non-trivial and would ideally reuse parsing logic from KanbanView or StateManager.
+        // For this initial step, we'll represent this with a placeholder.
+        // TODO: Implement proper board parsing logic here.
+
+        // Placeholder: Simulate finding cards
+        // In a real implementation, this would involve parsing the markdown content of boardFile
+        // similar to how KanbanWorkspaceView does it, to extract ItemData for each card.
+
+        // Example of how to get a StateManager (though we need settings for it)
+        // This might be tricky without a view context, but essential for using existing parsers.
+        let tempStateManager: StateManager | null = null;
+        try {
+          tempStateManager = new StateManager(
+            this.app,
+            { file: boardFile } as any, // Cast to avoid type errors for missing view properties
+            () => {
+              /* onDbChange, can be no-op for this purpose */
+            },
+            () => this.settings // Provide global settings
+          );
+        } catch (e) {
+          console.warn(
+            `[KanbanPlugin] Could not create temporary StateManager for ${boardFile.path}:`,
+            e
+          );
+          continue; // Skip this board if StateManager fails
+        }
+
+        if (!tempStateManager) continue;
+
+        // const { board } = tempStateManager.parseBoard(fileContent) as any; // Assuming parseBoard exists and returns a board structure
+        // Corrected parsing:
+        let board;
+        try {
+          const parser = new ListFormat(tempStateManager); // Assuming ListFormat is the default or most common
+          const parsedResult = parser.mdToBoard(fileContent);
+          board = parsedResult; // mdToBoard returns the board directly
+        } catch (e) {
+          console.warn(`[KanbanPlugin] Error parsing board ${boardFile.path} with ListFormat:`, e);
+          continue; // Skip this board if parsing fails
+        }
+
+        if (board && board.children) {
+          for (const lane of board.children) {
+            if (lane.children) {
+              for (const cardNode of lane.children) {
+                const cardItemData = cardNode.data as ItemData; // Correct: cardNode.data is ItemData
+
+                if (cardItemData?.metadata?.date) {
+                  const dueDate = moment(cardItemData.metadata.date);
+                  const timeframeDays =
+                    this.settings.dueDateReminderTimeframeDays !== undefined
+                      ? this.settings.dueDateReminderTimeframeDays
+                      : 1;
+                  const targetDueDate = moment().add(timeframeDays, 'day').endOf('day');
+
+                  if (
+                    dueDate.isValid() &&
+                    dueDate.isSameOrBefore(targetDueDate) &&
+                    !cardItemData.checked
+                  ) {
+                    const assignedMembers = cardItemData.assignedMembers || [];
+                    if (assignedMembers.length > 0) {
+                      console.log(
+                        `[KanbanPlugin] Task "${cardItemData.title}" in board "${boardFile.basename}" is due soon: ${dueDate.format('YYYY-MM-DD')}`
+                      );
+                      for (const memberName of assignedMembers) {
+                        const memberConfig = this.settings.teamMemberColors?.[memberName];
+                        if (memberConfig?.email) {
+                          if (!tasksByEmail[memberConfig.email]) {
+                            tasksByEmail[memberConfig.email] = [];
+                          }
+                          tasksByEmail[memberConfig.email].push({
+                            title: cardItemData.titleRaw || cardItemData.title,
+                            boardName: boardFile.basename,
+                            boardPath: boardFile.path,
+                            dueDate: dueDate.format('YYYY-MM-DD'),
+                            tags: cardItemData.metadata?.tags || [],
+                            priority: cardItemData.metadata?.priority,
+                          });
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[KanbanPlugin] Error processing board ${boardFile.path} for reminders:`, e);
+      }
+    }
+
+    if (Object.keys(tasksByEmail).length > 0) {
+      console.log('[KanbanPlugin] Tasks due soon found:', tasksByEmail);
+      // TODO: Present these tasks to the user (e.g., in a modal) with mailto: links
+      // For now, just log them.
+      new Notification('Kanban Plugin', {
+        body: `You have ${Object.values(tasksByEmail).reduce((sum, tasks) => sum + tasks.length, 0)} Kanban tasks due soon. Check console for details.`,
+        silent: true,
+      });
+
+      // Display in a modal (basic example)
+      const reminderModal = new ReminderModal(
+        this.app,
+        tasksByEmail,
+        this.settings.dueDateReminderTimeframeDays ?? 1
+      );
+      reminderModal.open();
+    } else {
+      console.log('[KanbanPlugin] No tasks due soon for members with emails configured.');
+    }
+
+    // Update the last run timestamp
+    this.settings.dueDateReminderLastRun = now;
+    await this.saveSettings();
+    console.log('[KanbanPlugin] Due date reminders processing finished.');
+  }
+  // --- END ADDED METHOD for Due Date Reminders ---
 }
