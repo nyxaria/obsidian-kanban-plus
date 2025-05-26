@@ -5,6 +5,7 @@ import {
   MarkdownView,
   Platform,
   Plugin,
+  TAbstractFile,
   TFile,
   TFolder,
   ViewState,
@@ -685,11 +686,23 @@ export default class KanbanPlugin extends Plugin {
     );
 
     this.registerEvent(
-      this.app.vault.on('rename', (file: TFile, oldPath: string) => {
+      this.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
+        // Handle KanbanView leaves
         const kanbanLeaves = this.app.workspace.getLeavesOfType(kanbanViewType);
-
         kanbanLeaves.forEach((leaf: WorkspaceLeaf) => {
-          (leaf.view as KanbanView).handleRename(file.path, oldPath);
+          const view = leaf.view as KanbanView;
+          if (view && typeof view.handleRename === 'function') {
+            view.handleRename(file, oldPath);
+          }
+        });
+
+        // Handle KanbanWorkspaceView leaves
+        const workspaceLeaves = this.app.workspace.getLeavesOfType(KANBAN_WORKSPACE_VIEW_TYPE);
+        workspaceLeaves.forEach((leaf: WorkspaceLeaf) => {
+          const view = leaf.view as KanbanWorkspaceView;
+          if (view && typeof view.handleRename === 'function') {
+            view.handleRename(file, oldPath);
+          }
         });
       })
     );
