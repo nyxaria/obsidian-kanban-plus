@@ -231,6 +231,14 @@ export const Kanban = ({
     setIsSearching
   );
 
+  // ADDED: Logic to filter out "Done" lane if setting is enabled
+  const hideDoneLane = stateManager.getSetting('hideDoneLane');
+  let filteredLanes = boardData.children;
+  if (hideDoneLane) {
+    filteredLanes = boardData.children.filter((lane) => lane.data.title?.toLowerCase() !== 'done');
+  }
+  // END ADDED
+
   useEffect(() => {
     console.log(
       '[Kanban Component] useEffect for initialSearch: view.initialSearchQuery is:',
@@ -312,7 +320,7 @@ export const Kanban = ({
                 <div>
                   <Sortable axis={axis}>
                     <Lanes
-                      lanes={boardData.children}
+                      lanes={filteredLanes}
                       collapseDir={axis}
                       targetHighlight={reactState?.targetHighlight ?? null}
                       cancelEditCounter={cancelEditCounter}

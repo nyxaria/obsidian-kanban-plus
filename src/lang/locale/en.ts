@@ -337,6 +337,12 @@ const en = {
   'Automatic Sending Frequency (Days)': 'Automatic Sending Frequency (Days)',
   'How often to automatically send reminder emails (e.g., 1 for daily, 7 for weekly). Minimum is 1 day.':
     'How often to automatically send reminder emails (e.g., 1 for daily, 7 for weekly). Minimum is 1 day.',
+  "Hide 'Done' lane": "Hide 'Done' lane",
+  'If enabled, lanes with the exact title "Done" (case-insensitive) will be hidden from the board view.':
+    'If enabled, lanes with the exact title "Done" (case-insensitive) will be hidden from the board view.',
+  'Display card count in list header': 'Display card count in list header',
+  'When toggled, the number of cards in a list will be displayed in the list header':
+    'When toggled, the number of cards in a list will be displayed in the list header',
 };
 
 export type Lang = typeof en;
