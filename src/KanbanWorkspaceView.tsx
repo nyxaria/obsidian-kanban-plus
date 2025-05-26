@@ -334,6 +334,18 @@ function KanbanWorkspaceViewComponent(props: {
     props.refreshViewHeader(); // Refresh tab title based on the currently loaded config
   }, [selectedViewId, JSON.stringify(props.plugin.settings.savedWorkspaceViews)]);
 
+  // ADDED: useEffect to pre-fill newViewName when a view is selected
+  useEffect(() => {
+    if (selectedViewId) {
+      const currentView = savedViews.find((v) => v.id === selectedViewId);
+      if (currentView) {
+        setNewViewName(currentView.name);
+      }
+    } else {
+      setNewViewName(''); // Clear if no view is selected
+    }
+  }, [selectedViewId, savedViews, setNewViewName]);
+
   // ADDED: useEffect to update isMounted ref
   useEffect(() => {
     isMounted.current = true;
@@ -1737,54 +1749,122 @@ function KanbanWorkspaceViewComponent(props: {
   );
 
   const handleSaveView = useCallback(async () => {
-    if (!newViewName.trim()) {
+    const trimmedNewViewName = newViewName.trim();
+    if (!trimmedNewViewName) {
       console.warn('[WorkspaceView] Cannot save view: name is empty.');
+      new Notice('View name cannot be empty.'); // User feedback
       return;
     }
-    const newId = Date.now().toString();
-    const newSavedView: SavedWorkspaceView = {
-      id: newId,
-      name: newViewName.trim(),
-      tags: [...activeFilterTags],
-      members: [...activeFilterMembers], // Save active member filters
-      dueDateFilter:
-        dueDateFilterValue !== ''
-          ? { value: dueDateFilterValue, unit: dueDateFilterUnit }
-          : undefined,
-      excludeArchive: excludeArchive, // Save new toggle
-      excludeDone: excludeDone, // Save new toggle
-      sortCriteria: sortCriteria, // Save sort criteria
-      sortDirection: sortDirection, // Save sort direction
-      scanRootPath: scanRootPath, // ADDED: Save scanRootPath
-    } as SavedWorkspaceView; // Cast to allow extra properties for now
 
     const currentSavedViews = props.plugin.settings.savedWorkspaceViews || [];
-    const updatedViews = [...currentSavedViews, newSavedView];
+    // MODIFIED: Changed let to const as updatedViews is modified by index or push, not reassigned.
+    const updatedViews = [...currentSavedViews];
+    let viewIdToSelect = selectedViewId; // Keep track of which view ID should be active
+
+    // Check for overwrite condition
+    const selectedViewObject = selectedViewId
+      ? savedViews.find((v) => v.id === selectedViewId)
+      : null;
+    if (selectedViewObject && selectedViewObject.name === trimmedNewViewName) {
+      // Attempting to save with the same name as the currently loaded view
+      if (
+        confirm(
+          `A view named "${trimmedNewViewName}" already exists. Do you want to overwrite it with the current settings?`
+        )
+      ) {
+        const viewIndex = updatedViews.findIndex((v) => v.id === selectedViewId);
+        if (viewIndex !== -1) {
+          const updatedView: SavedWorkspaceView = {
+            ...updatedViews[viewIndex], // Preserve ID and other potential fields
+            name: trimmedNewViewName,
+            tags: [...activeFilterTags],
+            members: [...activeFilterMembers],
+            dueDateFilter:
+              dueDateFilterValue !== ''
+                ? { value: dueDateFilterValue, unit: dueDateFilterUnit }
+                : undefined,
+            excludeArchive: excludeArchive,
+            excludeDone: excludeDone,
+            sortCriteria: sortCriteria,
+            sortDirection: sortDirection,
+            scanRootPath: scanRootPath,
+          };
+          updatedViews[viewIndex] = updatedView;
+          viewIdToSelect = selectedViewId; // Keep the overwritten view selected
+          new Notice(`View "${trimmedNewViewName}" overwritten.`);
+        } else {
+          // Should not happen if selectedViewId is valid, but handle defensively
+          new Notice('Error: Could not find the selected view to overwrite.');
+          return;
+        }
+      } else {
+        // User chose not to overwrite
+        new Notice('Save cancelled.');
+        return;
+      }
+    } else {
+      // This is either a new view name or no view was selected, so create a new view
+      // Check if the name (trimmedNewViewName) already exists, even if it's not the selected one
+      const existingViewWithSameName = updatedViews.find((v) => v.name === trimmedNewViewName);
+      if (existingViewWithSameName) {
+        new Notice(
+          `A view named "${trimmedNewViewName}" already exists. Please choose a different name to save as a new view.`
+        );
+        return;
+      }
+
+      const newId = Date.now().toString();
+      const newSavedView: SavedWorkspaceView = {
+        id: newId,
+        name: trimmedNewViewName,
+        tags: [...activeFilterTags],
+        members: [...activeFilterMembers],
+        dueDateFilter:
+          dueDateFilterValue !== ''
+            ? { value: dueDateFilterValue, unit: dueDateFilterUnit }
+            : undefined,
+        excludeArchive: excludeArchive,
+        excludeDone: excludeDone,
+        sortCriteria: sortCriteria,
+        sortDirection: sortDirection,
+        scanRootPath: scanRootPath,
+      } as SavedWorkspaceView;
+      updatedViews.push(newSavedView);
+      viewIdToSelect = newId; // Select the newly created view
+      new Notice(`View "${trimmedNewViewName}" saved.`);
+    }
 
     props.plugin.settings.savedWorkspaceViews = updatedViews;
-    props.plugin.settings.lastSelectedWorkspaceViewId = newSavedView.id;
+    if (viewIdToSelect) {
+      // Only update lastSelected if a view was actually saved/overwritten
+      props.plugin.settings.lastSelectedWorkspaceViewId = viewIdToSelect;
+    }
     await props.plugin.saveSettings();
 
-    setSavedViews(updatedViews);
-    setSelectedViewId(newSavedView.id);
-    // No need to set activeFilterTags/Members here, as useEffect on selectedViewId or handleScanDirectory will react
-    setNewViewName('');
+    setSavedViews(updatedViews); // Update local state for dropdown
+    if (viewIdToSelect) {
+      setSelectedViewId(viewIdToSelect); // Ensure the UI reflects the selected (new or overwritten) view
+    }
+    // setNewViewName(""); // Do not clear newViewName if overwriting, or if user might want to save again.
+    // Let the useEffect for selectedViewId handle newViewName update if a *different* view is selected.
   }, [
     newViewName,
+    selectedViewId, // ADDED: selectedViewId is crucial for overwrite logic
+    savedViews, // ADDED: savedViews is needed to find the selected view by name/id
     activeFilterTags,
     activeFilterMembers,
     props.plugin,
     setSavedViews,
     setSelectedViewId,
-    setNewViewName,
+    // setNewViewName, // No longer directly set here for new saves
     dueDateFilterValue,
     dueDateFilterUnit,
-    excludeArchive, // Add to dependencies
-    excludeDone, // Add to dependencies
-    sortCriteria, // Add to dependency array
-    sortDirection, // Add to dependency array
-    scanRootPath, // ADDED: Add scanRootPath as a dependency
-  ]); // Added activeFilterMembers and setters to deps
+    excludeArchive,
+    excludeDone,
+    sortCriteria,
+    sortDirection,
+    scanRootPath,
+  ]);
 
   const handleDeleteView = useCallback(async () => {
     if (!selectedViewId) {
