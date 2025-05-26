@@ -140,6 +140,10 @@ export interface KanbanSettings {
   enableDueDateEmailReminders?: boolean;
   dueDateReminderLastRun?: number;
   dueDateReminderTimeframeDays?: number;
+  enableAutomaticEmailSending?: boolean;
+  automaticEmailSenderAddress?: string;
+  automaticEmailAppPassword?: string;
+  automaticEmailSendingFrequencyDays?: number;
 }
 
 export interface KanbanViewSettings {
@@ -156,6 +160,10 @@ export interface KanbanViewSettings {
   enableDueDateEmailReminders: false;
   dueDateReminderLastRun: 0;
   dueDateReminderTimeframeDays: 1;
+  enableAutomaticEmailSending: false;
+  automaticEmailSenderAddress: '';
+  automaticEmailAppPassword: '';
+  automaticEmailSendingFrequencyDays: 1;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -210,6 +218,10 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'enableDueDateEmailReminders',
   'dueDateReminderLastRun',
   'dueDateReminderTimeframeDays',
+  'enableAutomaticEmailSending',
+  'automaticEmailSenderAddress',
+  'automaticEmailAppPassword',
+  'automaticEmailSendingFrequencyDays',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -1878,6 +1890,89 @@ export class KanbanSettingsTab extends PluginSettingTab {
         text.inputEl.type = 'number'; // Set input type to number for better UX
         text.inputEl.min = '0'; // Minimum value for the timeframe
       });
+
+    // --- New Settings for Automatic Email Sending ---
+    containerEl.createEl('h4', { text: t('Automatic Email Sending') });
+
+    new Setting(containerEl)
+      .setName(t('Enable Automatic Email Sending'))
+      .setDesc(
+        t(
+          "If enabled, the plugin will attempt to send due date reminders automatically using the configured Gmail account (App Password required). WARNING: This stores your email and App Password in Obsidian's settings."
+        )
+      )
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.enableAutomaticEmailSending || false)
+          .onChange(async (value) => {
+            this.plugin.settings.enableAutomaticEmailSending = value;
+            await this.plugin.saveSettings();
+            this.display(); // Re-render to show/hide dependent fields
+          });
+      });
+
+    if (this.plugin.settings.enableAutomaticEmailSending) {
+      new Setting(containerEl)
+        .setName(t('Sender Gmail Address'))
+        .setDesc(t('Your full Gmail address (e.g., user@gmail.com).'))
+        .addText((text) =>
+          text
+            .setPlaceholder('user@gmail.com')
+            .setValue(this.plugin.settings.automaticEmailSenderAddress || '')
+            .onChange(async (value) => {
+              this.plugin.settings.automaticEmailSenderAddress = value;
+              await this.plugin.saveSettings();
+            })
+        );
+
+      new Setting(containerEl)
+        .setName(t('Gmail App Password'))
+        .setDesc(
+          t(
+            'An App Password generated for Obsidian from your Google Account settings. This is NOT your regular Gmail password.'
+          )
+        )
+        .addText((text) => {
+          text.inputEl.type = 'password'; // Mask the input
+          text
+            .setPlaceholder('abcd efgh ijkl mnop')
+            .setValue(this.plugin.settings.automaticEmailAppPassword || '')
+            .onChange(async (value) => {
+              this.plugin.settings.automaticEmailAppPassword = value;
+              await this.plugin.saveSettings();
+            });
+        });
+
+      new Setting(containerEl)
+        .setName(t('Automatic Sending Frequency (Days)'))
+        .setDesc(
+          t(
+            'How often to automatically send reminder emails (e.g., 1 for daily, 7 for weekly). Minimum is 1 day.'
+          )
+        )
+        .addText((text) => {
+          text.inputEl.type = 'number';
+          text.inputEl.min = '1'; // Minimum 1 day
+          text
+            .setValue(this.plugin.settings.automaticEmailSendingFrequencyDays?.toString() || '1')
+            .setPlaceholder('1')
+            .onChange(async (value) => {
+              const numValue = parseInt(value);
+              if (!isNaN(numValue) && numValue >= 1) {
+                this.plugin.settings.automaticEmailSendingFrequencyDays = numValue;
+                text.inputEl.removeClass('error');
+              } else {
+                this.plugin.settings.automaticEmailSendingFrequencyDays =
+                  DEFAULT_SETTINGS.automaticEmailSendingFrequencyDays;
+                text.inputEl.addClass('error');
+              }
+              await this.plugin.saveSettings();
+            });
+        });
+    }
+    // --- End Automatic Email Sending Settings ---
+
+    this.renderHiddenSettings(containerEl);
   }
 
   renderTeamMembersSetting(containerEl: HTMLElement) {
@@ -2048,6 +2143,10 @@ export class KanbanSettingsTab extends PluginSettingTab {
   renderTagSortSettings(containerEl: HTMLElement) {
     // Implementation of renderTagSortSettings method
   }
+
+  renderHiddenSettings(containerEl: HTMLElement) {
+    // Implementation of renderHiddenSettings method
+  }
 }
 
 export const DEFAULT_SETTINGS: KanbanSettings = {
@@ -2114,6 +2213,10 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   enableDueDateEmailReminders: false,
   dueDateReminderLastRun: 0,
   dueDateReminderTimeframeDays: 1,
+  enableAutomaticEmailSending: false,
+  automaticEmailSenderAddress: '',
+  automaticEmailAppPassword: '',
+  automaticEmailSendingFrequencyDays: 1,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {
