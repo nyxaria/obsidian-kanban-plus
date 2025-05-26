@@ -103,10 +103,24 @@ export function constructMenuDatePickerOnChange({
   const dateTrigger = stateManager.getSetting('date-trigger');
   const timeTrigger = stateManager.getSetting('time-trigger');
 
-  const dateAndTimePattern =
-    `(${escapeRegExpStr(dateTrigger as string)}(?:{[^}]+}|\[\[[^\]]+\]\]))` +
-    `(\s*${escapeRegExpStr(timeTrigger as string)}{[^}]+})?`;
-  const dateAndTimeRegEx = new RegExp(`(^|\s)${dateAndTimePattern}`, 'gi');
+  // Revised regex for date and optional time, focusing on {date} and {time} syntax
+  const escapedDateTrigger = escapeRegExpStr(dateTrigger as string);
+  const escapedTimeTrigger = escapeRegExpStr(timeTrigger as string);
+
+  // --- DEBUG LOGS FOR TRIGGERS ---
+  console.log('[constructMenuDatePickerOnChange] Triggers:', {
+    dateTrigger,
+    escapedDateTrigger,
+    timeTrigger,
+    escapedTimeTrigger,
+  });
+  // --- END DEBUG LOGS FOR TRIGGERS ---
+
+  const datePartPattern = `(?:${escapedDateTrigger}{([^}]+?)})`; // Captures content of {date}
+  const timePartPattern = `(?:\s*${escapedTimeTrigger}{([^}]+?)})?`; // Optional, captures content of {time}
+
+  // Regex to find the whole date and optional time block. Group 1: BOL/space. Group 2: Date/Time block.
+  const dateAndTimeRegEx = new RegExp(`(^|\s)(${datePartPattern}${timePartPattern})`, 'gi');
 
   return (dates: Date[]) => {
     const date = dates[0];
@@ -117,23 +131,55 @@ export function constructMenuDatePickerOnChange({
 
     let titleRaw = item.data.titleRaw;
 
+    // Priority stripping logic (operates on titleRaw)
     const priorityRegexGlobal = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
-    const existingPriorityMatch = priorityRegexGlobal.exec(item.data.titleRaw);
+    const originalTitleForPriorityCheck = titleRaw; // Use a temp var to avoid confusion
+    const existingPriorityMatch = priorityRegexGlobal.exec(originalTitleForPriorityCheck);
     const existingPriorityTag = existingPriorityMatch ? existingPriorityMatch[1] : null;
 
     if (existingPriorityTag) {
-      titleRaw = titleRaw
+      titleRaw = titleRaw // titleRaw is initially item.data.titleRaw
         .replace(priorityRegexGlobal, ' ')
         .replace(/\s{2,}/g, ' ')
         .trim();
     }
+    // titleRaw is now potentially stripped of priority.
 
+    // --- DEBUG LOGS START --- -> Combined with new logic
     if (hasDate) {
-      titleRaw = titleRaw.replace(dateAndTimeRegEx, `$1${dateTrigger}${wrappedDate}`);
-    } else {
-      titleRaw = `${titleRaw} ${dateTrigger}${wrappedDate}`.trim();
-    }
+      console.log(
+        '[constructMenuDatePickerOnChange] Editing existing date (by remove & add logic):'
+      );
+      console.log('  Original titleRaw (after priority strip):', JSON.stringify(titleRaw));
 
+      // 1. Perform logic similar to "Remove Date"
+      // More robust regex to remove date and associated time if present
+      // This regex should match @{date}, @[[date]], 📅date and optional @{time} or @@{time} after them.
+      // We need to use the actual dateTrigger and timeTrigger here.
+      const removeDatePatternPart = `(?:${escapedDateTrigger}(?:{[^}]+}|[[^]]+]])|📅d{4}-d{2}-d{2})`;
+      const removeTimePatternPart = `(?:\s*(?:${escapedDateTrigger}|${escapedTimeTrigger}){[^}]+})?`;
+      const robustDateTimeRemoveRegex = new RegExp(
+        `\s*(?:${removeDatePatternPart}${removeTimePatternPart})`,
+        'gi'
+      );
+
+      titleRaw = titleRaw.replace(robustDateTimeRemoveRegex, '').trim();
+      console.log('  titleRaw after internal date removal:', JSON.stringify(titleRaw));
+
+      // 2. Now, proceed as if we are adding a new date to this cleaned titleRaw
+      titleRaw = `${titleRaw} ${dateTrigger}${wrappedDate}`.trim();
+      console.log('  titleRaw after re-adding new date:', JSON.stringify(titleRaw));
+    } else {
+      // This is the logic for ADDING a new date (hasDate is false initially)
+      titleRaw = `${titleRaw} ${dateTrigger}${wrappedDate}`.trim();
+      console.log(
+        '[constructMenuDatePickerOnChange] Adding new date (hasDate was false). titleRaw:',
+        JSON.stringify(titleRaw)
+      );
+    }
+    // --- DEBUG LOGS END ---
+
+    // Re-apply priority tag if it was stripped
     if (existingPriorityTag && !titleRaw.includes(existingPriorityTag)) {
       if (titleRaw.length > 0 && !titleRaw.endsWith(' ')) {
         titleRaw += ' ';
@@ -280,7 +326,8 @@ export function constructMenuTimePickerOnChange({
 }: ConstructMenuTimePickerOnChangeParams) {
   const timeFormat = stateManager.getSetting('time-format');
   const timeTrigger = stateManager.getSetting('time-trigger');
-  const timeRegEx = new RegExp(`(^|\s)${escapeRegExpStr(timeTrigger)}{[^}]+}`, 'gi');
+  // Corrected timeRegEx for linter
+  const timeRegEx = new RegExp(`(?:^|\s)${escapeRegExpStr(timeTrigger)}{([^}]+)}`, 'gi');
 
   return (selectedTime: string) => {
     const timeMoment = moment(selectedTime, timeFormat);
