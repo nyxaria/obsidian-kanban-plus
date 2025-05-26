@@ -144,6 +144,7 @@ export interface KanbanSettings {
   automaticEmailSenderAddress?: string;
   automaticEmailAppPassword?: string;
   automaticEmailSendingFrequencyDays?: number;
+  hideDoneLane?: boolean;
 }
 
 export interface KanbanViewSettings {
@@ -164,6 +165,7 @@ export interface KanbanViewSettings {
   automaticEmailSenderAddress: '';
   automaticEmailAppPassword: '';
   automaticEmailSendingFrequencyDays: 1;
+  hideDoneLane: false;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -222,6 +224,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'automaticEmailSenderAddress',
   'automaticEmailAppPassword',
   'automaticEmailSendingFrequencyDays',
+  'hideDoneLane',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -337,6 +340,28 @@ export class SettingsManager {
                 });
               });
           });
+      });
+
+    new Setting(contentEl)
+      .setName(t("Hide 'Done' lane"))
+      .setDesc(
+        t(
+          'If enabled, lanes with the exact title "Done" (case-insensitive) will be hidden from the board view.'
+        )
+      )
+      .addToggle((toggle) => {
+        const [value, globalValue] = this.getSetting('hideDoneLane', local);
+        let currentValue = value;
+        if (currentValue === undefined) {
+          currentValue = globalValue;
+        }
+        if (currentValue === undefined) {
+          currentValue = DEFAULT_SETTINGS.hideDoneLane;
+        }
+
+        toggle.setValue(!!currentValue).onChange((newValue) => {
+          this.applySettingsUpdate({ hideDoneLane: { $set: newValue } });
+        });
       });
 
     new Setting(contentEl)
@@ -1452,7 +1477,7 @@ export class SettingsManager {
               .setTooltip(t('Reset to default'))
               .onClick(() => {
                 const [, globalValue] = this.getSetting('move-task-metadata', local);
-                toggleComponent.setValue((globalValue as boolean) ?? true);
+                toggleComponent.setValue(!!globalValue);
 
                 this.applySettingsUpdate({
                   $unset: ['move-task-metadata'],
@@ -2217,6 +2242,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   automaticEmailSenderAddress: '',
   automaticEmailAppPassword: '',
   automaticEmailSendingFrequencyDays: 1,
+  hideDoneLane: false,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {
