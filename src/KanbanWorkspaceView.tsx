@@ -415,6 +415,19 @@ function KanbanWorkspaceViewComponent(props: {
       // setFilteredCards([]); // Keep existing cards while loading new ones, or clear if preferred
       const app = props.plugin.app;
 
+      // --- DEBUG LOG AT START OF SCAN ---
+      console.log('[WorkspaceView] handleScanDirectory: Received filter arguments:', {
+        tagsToFilterBy,
+        membersToFilterBy,
+        currentDueDateValue,
+        currentDueDateUnit,
+        currentExcludeArchive,
+        currentExcludeDone,
+        currentSortCriteria,
+        currentSortDirection,
+      });
+      // --- END DEBUG LOG ---
+
       // Due Date Filter Logic - START
       let maxDueDate: moment.Moment | null = null;
       if (typeof currentDueDateValue === 'number' && currentDueDateValue > 0) {
@@ -454,6 +467,16 @@ function KanbanWorkspaceViewComponent(props: {
           if (hasFrontmatterKey(mdFile)) {
             try {
               const fileContent = await props.plugin.app.vault.cachedRead(mdFile);
+
+              // <<< ADDED DEBUG LOGS for Overall.md >>>
+              if (mdFile.path === 'Monomotion Mechanics/Kanban/Overall.md') {
+                console.log(
+                  `[WorkspaceView] DEBUG SCAN: Content of ${mdFile.path} being processed in handleScanDirectory (first 500 chars):`,
+                  fileContent.substring(0, 500) + '...'
+                );
+              }
+              // <<< END ADDED DEBUG LOGS >>>
+
               const tempStateManager = new StateManager(
                 props.plugin.app,
                 { file: mdFile } as any,
@@ -465,6 +488,28 @@ function KanbanWorkspaceViewComponent(props: {
                 ast: MdastRoot;
                 settings: KanbanSettings;
               };
+
+              // <<< ADDED DEBUG LOGS for Overall.md AST >>>
+              if (mdFile.path === 'Monomotion Mechanics/Kanban/Overall.md') {
+                console.log(
+                  `[WorkspaceView] DEBUG SCAN: AST for ${mdFile.path} (first 1000 chars of stringified):`,
+                  JSON.stringify(ast, null, 2).substring(0, 1000) + '...'
+                );
+                console.log(
+                  `[WorkspaceView] DEBUG SCAN: AST for ${mdFile.path} has ${ast.children.length} top-level children.`
+                );
+                ast.children.forEach((child, index) => {
+                  console.log(
+                    `[WorkspaceView] DEBUG SCAN: AST Child ${index} for ${mdFile.path} - Type: ${child.type}`
+                  );
+                  if (child.type === 'list') {
+                    console.log(
+                      `[WorkspaceView] DEBUG SCAN: List Child ${index} for ${mdFile.path} has ${(child as MdastList).children.length} items.`
+                    );
+                  }
+                });
+              }
+              // <<< END ADDED DEBUG LOGS >>>
 
               let currentLaneTitle = 'Unknown Lane';
               for (const astNode of ast.children) {
@@ -850,6 +895,22 @@ function KanbanWorkspaceViewComponent(props: {
               new Notice(`Moved "${card.title}" to Done lane in ${targetFile.basename}.`);
             }
           }
+
+          // --- DEBUG LOG BEFORE REFRESH ---
+          console.log(
+            '[WorkspaceView] handleToggleCardDoneStatus: Calling handleScanDirectory with filters:',
+            {
+              activeFilterTags: [...activeFilterTags],
+              activeFilterMembers: [...activeFilterMembers],
+              dueDateFilterValue,
+              dueDateFilterUnit,
+              excludeArchive,
+              excludeDone,
+              sortCriteria,
+              sortDirection,
+            }
+          );
+          // --- END DEBUG LOG ---
 
           handleScanDirectory(
             [...activeFilterTags],
