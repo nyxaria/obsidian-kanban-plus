@@ -14,7 +14,6 @@ import {
   ItemView,
   Menu,
   MenuItem,
-  Modal,
   Notice,
   Setting,
   TFile,
@@ -32,6 +31,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { KanbanView, kanbanViewType } from './KanbanView';
 import { DEFAULT_SETTINGS, KanbanSettings, SavedWorkspaceView } from './Settings';
 import { StateManager } from './StateManager';
+import { getDefaultLocale } from './components/Editor/datePickerLocale';
+// CORRECTED: Import constructDatePicker and getDefaultLocale
+import { constructDatePicker } from './components/Item/helpers';
 import { generateInstanceId } from './components/helpers';
 import { getTagColorFn, getTagSymbolFn } from './components/helpers';
 import { Lane } from './components/types';
@@ -218,59 +220,7 @@ async function moveCardToDoneLaneInMarkdown(
 }
 
 // --- Simple Modal for Date Input ---
-class DateInputModal extends Modal {
-  currentDate: string; // YYYY-MM-DD format
-  onSubmit: (newDate: string | null) => void;
-
-  constructor(app: App, currentDate: string, onSubmit: (newDate: string | null) => void) {
-    super(app);
-    this.currentDate = currentDate;
-    this.onSubmit = onSubmit;
-  }
-
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.empty();
-    contentEl.createEl('h2', { text: 'Set/Change Due Date' });
-
-    let dateStrFromPicker: string = this.currentDate; // Store date from picker
-
-    new Setting(contentEl)
-      .setName('Due Date')
-      .setDesc('Select a date, or clear the input to remove the due date.')
-      .addMomentFormat((momentFormat) => {
-        // Configure the moment format component
-        momentFormat
-          .setPlaceholder('YYYY-MM-DD')
-          .setValue(this.currentDate) // Expects YYYY-MM-DD for initial value if set
-          .onChange((value: string) => {
-            dateStrFromPicker = value; // Update on change
-          });
-      });
-
-    new Setting(contentEl)
-      .addButton((btn) =>
-        btn
-          .setButtonText('Save')
-          .setCta()
-          .onClick(() => {
-            this.close();
-            this.onSubmit(dateStrFromPicker);
-          })
-      )
-      .addButton((btn) =>
-        btn.setButtonText('Cancel').onClick(() => {
-          this.close();
-          this.onSubmit(null); // Indicate cancellation
-        })
-      );
-  }
-
-  onClose() {
-    const { contentEl } = this;
-    contentEl.empty();
-  }
-}
+// REMOVED DateInputModal
 // --- End Date Input Modal ---
 
 // Basic React component for the workspace view
@@ -1023,35 +973,31 @@ function KanbanWorkspaceViewComponent(props: {
         item
           .setTitle('Set/Change Due Date')
           .setIcon('calendar-clock')
-          .onClick(() => {
-            // Note: Removed async here as modal handles async part
-            new DateInputModal(
+          .onClick(async () => {
+            // Keep async for file operations
+            // Create a temporary StateManager. This is a bit of a hack.
+            // Ideally, constructDatePicker or a similar utility would not need a full StateManager
+            // if only date format settings are relevant.
+            const tempStateManager = new StateManager(
               props.plugin.app,
-              card.date ? card.date.format('DD-MM-YYYY') : moment().format('DD-MM-YYYY'),
-              async (newDateStr) => {
-                if (newDateStr === null) return; // User cancelled modal
+              { file: null } as any, // No specific file context needed here, but StateManager expects it
+              () => {},
+              () => props.plugin.settings
+            );
 
-                // The dateStrFromPicker (newDateStr) from MomentFormatComponent might be in display format.
-                // We need to parse it back to YYYY-MM-DD for consistent internal handling and before re-saving.
-                // However, for this iteration, we'll assume the settings for date-format will correctly parse it if it's a valid date string.
-                // A more robust solution might involve knowing the display format used by MomentFormatComponent.
+            constructDatePicker(
+              event.view as Window, // Pass the window object
+              tempStateManager, // Pass the temporary state manager
+              { x: event.clientX, y: event.clientY }, // Pass mouse coordinates
+              async (dates: Date[]) => {
+                // onChange callback
+                if (!dates || dates.length === 0) return; // No date selected or picker dismissed
 
+                const selectedDate = dates[0];
                 let newMomentDate: moment.Moment | undefined = undefined;
-                if (newDateStr.trim() !== '') {
-                  // Try parsing with plugin's date-format first, then with YYYY-MM-DD as a fallback for direct input.
-                  const pluginDateFormat = props.plugin.settings['date-format'] || 'DD-MM-YYYY';
-                  let parsedDate = moment(newDateStr.trim(), pluginDateFormat, true); // Strict parsing
-                  if (!parsedDate.isValid()) {
-                    parsedDate = moment(newDateStr.trim(), 'DD-MM-YYYY', true); // Fallback for direct YYYY-MM-DD input
-                  }
 
-                  if (!parsedDate.isValid()) {
-                    new Notice(
-                      'Invalid date format. Please use a valid date recognized by your settings or DD-MM-YYYY.'
-                    );
-                    return;
-                  }
-                  newMomentDate = parsedDate;
+                if (selectedDate) {
+                  newMomentDate = moment(selectedDate); // flatpickr returns a Date object
                 }
 
                 // 1. Update local state for immediate feedback
@@ -1059,7 +1005,7 @@ function KanbanWorkspaceViewComponent(props: {
                   prevCards.map((c) => (c.id === card.id ? { ...c, date: newMomentDate } : c))
                 );
 
-                // 2. Propagate change to source file (logic remains the same)
+                // 2. Propagate change to source file
                 const targetFile = props.plugin.app.vault.getAbstractFileByPath(
                   card.sourceBoardPath
                 ) as TFile;
@@ -1079,10 +1025,15 @@ function KanbanWorkspaceViewComponent(props: {
                     ? `${dateTrigger}{${newMomentDate.format(dateFormat)}}`
                     : '';
 
+                  // Use the simplified regex from previous successful fix for date pattern
+                  // Ensure escapedDateTrigger is defined correctly
+                  const escapedDateTrigger = escapeRegExp(dateTrigger);
+                  // SIMPLIFIED: Revert to the version that worked, only supporting @{date}
                   const pluginDatePattern = new RegExp(
-                    `(?:^|\\s)ESCAPED_TRIGGER(?:{([^}]+?)}|\\[\\[([^\\]]+?)\\]\\])`,
+                    `(?:^|\\s)${escapedDateTrigger}\\{([^}]+?)\\}`,
                     'g'
                   );
+
                   const wikilinkDatePattern = /\s*\[\[\d{4}-\d{2}-\d{2}\]\]\s*/g;
                   const taskPluginDatePattern = /\s*📅\s*\d{4}-\d{2}-\d{2}\s*/g;
 
@@ -1094,6 +1045,7 @@ function KanbanWorkspaceViewComponent(props: {
                     for (let i = 0; i < lines.length; i++) {
                       if (lines[i].includes(blockIdSuffix)) {
                         let line = lines[i];
+                        // Remove existing date patterns
                         line = line
                           .replace(pluginDatePattern, ' ')
                           .replace(wikilinkDatePattern, ' ')
@@ -1121,40 +1073,34 @@ function KanbanWorkspaceViewComponent(props: {
                       handleScanDirectory(
                         [...activeFilterTags],
                         [...activeFilterMembers],
-                        dueDateFilterValue, // PASS STATE
-                        dueDateFilterUnit, // PASS STATE
-                        excludeArchive, // PASS STATE
-                        excludeDone, // PASS STATE
-                        sortCriteria, // PASS STATE
-                        sortDirection // PASS STATE
-                      ); // Refresh list
+                        dueDateFilterValue,
+                        dueDateFilterUnit,
+                        excludeArchive,
+                        excludeDone,
+                        sortCriteria,
+                        sortDirection
+                      );
                     } else {
                       new Notice(
                         `Could not find block ID ${card.blockId} to update date. Date updated in this view only.`
                       );
                     }
                   } else if (card.sourceStartLine !== undefined) {
-                    // Fallback to line number if blockId is not available
                     new Notice(
                       'Attempting to update by line number (no block ID). This is less reliable.'
                     );
                     const lines = fileContent.split('\n');
-                    const targetLineIndex = card.sourceStartLine - 1; // Adjust for 0-based array
+                    const targetLineIndex = card.sourceStartLine - 1;
 
                     if (targetLineIndex >= 0 && targetLineIndex < lines.length) {
                       let line = lines[targetLineIndex];
-
-                      // Basic verification: check if the line still roughly contains the card title.
-                      // This is a simple heuristic and might not be foolproof.
                       const titleSnippet =
                         card.title.length > 20 ? card.title.substring(0, 20) : card.title;
                       if (!line.toLowerCase().includes(titleSnippet.toLowerCase())) {
                         new Notice(
                           `Line content at ${card.sourceStartLine} seems to have changed. Date updated in this view only.`
                         );
-                        // Optionally, clear newMomentDate here if we decide not to update local state on verification failure
-                        // For now, local state is updated, but file isn't.
-                        return; // Abort file modification
+                        return;
                       }
 
                       line = line
@@ -1165,7 +1111,7 @@ function KanbanWorkspaceViewComponent(props: {
                       if (newDateStringForMd) {
                         lines[targetLineIndex] = `${line.trim()} ${newDateStringForMd}`.trim();
                       } else {
-                        lines[targetLineIndex] = line.trim(); // Just the cleaned line if date is cleared
+                        lines[targetLineIndex] = line.trim();
                       }
                       lines[targetLineIndex] = lines[targetLineIndex].replace(/\s+/g, ' ').trim();
 
@@ -1177,13 +1123,13 @@ function KanbanWorkspaceViewComponent(props: {
                       handleScanDirectory(
                         [...activeFilterTags],
                         [...activeFilterMembers],
-                        dueDateFilterValue, // PASS STATE
-                        dueDateFilterUnit, // PASS STATE
-                        excludeArchive, // PASS STATE
-                        excludeDone, // PASS STATE
-                        sortCriteria, // PASS STATE
-                        sortDirection // PASS STATE
-                      ); // Refresh list
+                        dueDateFilterValue,
+                        dueDateFilterUnit,
+                        excludeArchive,
+                        excludeDone,
+                        sortCriteria,
+                        sortDirection
+                      );
                     } else {
                       new Notice(
                         `Invalid source line number (${card.sourceStartLine}). Date updated in this view only.`
@@ -1197,9 +1143,15 @@ function KanbanWorkspaceViewComponent(props: {
                 } catch (e) {
                   console.error('Error updating card date in source file:', e);
                   new Notice('Error updating card date. See console.');
+                  // Revert optimistic UI update on error
+                  setFilteredCards(
+                    (prevCards) =>
+                      prevCards.map((c) => (c.id === card.id ? { ...c, date: card.date } : c)) // Revert to original card.date
+                  );
                 }
-              }
-            ).open();
+              },
+              card.date ? card.date.toDate() : new Date() // Pass current card date or today's date
+            );
           })
       );
 
@@ -1451,16 +1403,22 @@ function KanbanWorkspaceViewComponent(props: {
 
                   // Regex for plugin's date format @{date} or @[[date]]
                   const escapedDateTrigger = escapeRegExp(dateTrigger);
-                  const datePatternString = `(?:^|\\\\s)${escapedDateTrigger}(?:\\\\{([^}]+?)\\\\}|\\[\\[([^\\]]+?)\\]\\])`;
-                  const pluginDatePattern = new RegExp(datePatternString, 'g');
+                  // SIMPLIFIED: Revert to the version that worked, only supporting @{date}
+                  const pluginDatePattern = new RegExp(
+                    `(?:^|\\s)${escapedDateTrigger}\\{([^}]+?)\\}`,
+                    'g'
+                  );
 
                   // Regex for Tasks plugin style dates 📅 YYYY-MM-DD
                   const tasksPluginDatePattern = /\s*📅\s*\d{4}-\d{2}-\d{2}\s*/g;
 
                   // Regex for plugin's time format @{time}
                   const escapedTimeTrigger = escapeRegExp(timeTrigger);
-                  const timePatternString = `(?:^|\\\\s)${escapedTimeTrigger}\\\\{([^}]+?)\\}`;
-                  const pluginTimePattern = new RegExp(timePatternString, 'g');
+                  // CORRECTED: Template literal for time pattern
+                  const pluginTimePattern = new RegExp(
+                    `(?:^|\\s)${escapedTimeTrigger}\\{([^}]+?)\\}`,
+                    'g'
+                  );
 
                   const updateLineWithPriority = (line: string): string => {
                     let textContent = line;
