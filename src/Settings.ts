@@ -68,6 +68,7 @@ export interface SavedWorkspaceView {
   excludeDone?: boolean;
   sortCriteria?: 'default' | 'priority' | 'dueDate';
   sortDirection?: 'asc' | 'desc';
+  scanRootPath?: string;
 }
 
 export interface TeamMemberColorConfig {
