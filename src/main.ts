@@ -1162,6 +1162,7 @@ export default class KanbanPlugin extends Plugin {
         dueDate: string;
         tags?: string[];
         priority?: 'high' | 'medium' | 'low';
+        laneName: string;
       }>
     > = {};
 
@@ -1265,6 +1266,7 @@ export default class KanbanPlugin extends Plugin {
                             dueDate: dueDate.format('YYYY-MM-DD'),
                             tags: cardItemData.metadata?.tags || [],
                             priority: cardItemData.metadata?.priority,
+                            laneName: lane.data.title,
                           });
                         }
                       }
@@ -1309,7 +1311,8 @@ export default class KanbanPlugin extends Plugin {
               const daysUntilDue = dueDateMoment.diff(today, 'days');
               let dueInText = '';
               if (daysUntilDue < 0) {
-                dueInText = `overdue by ${Math.abs(daysUntilDue)} day(s)`;
+                const overdueDays = Math.abs(daysUntilDue);
+                dueInText = `overdue by ${overdueDays} day${overdueDays === 1 ? '' : 's'}`;
               } else if (daysUntilDue === 0) {
                 dueInText = 'today';
               } else if (daysUntilDue === 1) {
@@ -1331,7 +1334,7 @@ export default class KanbanPlugin extends Plugin {
               if (task.priority) {
                 priorityDisplay = `[${task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}] `;
               }
-              emailBody += `- ${cleanTitle} @ ${task.boardName} ${priorityDisplay}[${dueInText}]\n\n`;
+              emailBody += `- ${cleanTitle} @ ${task.boardName}:${task.laneName} ${priorityDisplay}[${dueInText}]\n\n`;
             });
             emailBody += 'Regards,\nYour Kanban Plugin';
 
