@@ -1331,7 +1331,7 @@ export default class KanbanPlugin extends Plugin {
               if (task.priority) {
                 priorityDisplay = `[${task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}] `;
               }
-              emailBody += `- ${cleanTitle} ${priorityDisplay}[${dueInText}]\n\n`;
+              emailBody += `- ${cleanTitle} @ ${task.boardName} ${priorityDisplay}[${dueInText}]\n\n`;
             });
             emailBody += 'Regards,\nYour Kanban Plugin';
 
