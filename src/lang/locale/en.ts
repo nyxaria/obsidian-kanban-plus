@@ -322,6 +322,21 @@ const en = {
   'Reminder Timeframe (Days)': 'Reminder Timeframe (Days)',
   'Set the number of days in advance to send due date reminders (e.g., 1 for tasks due today or tomorrow).':
     'Set the number of days in advance to send due date reminders (e.g., 1 for tasks due today or tomorrow).',
+
+  // Settings for Automatic Email Sending (NEW)
+  'Automatic Email Sending': 'Automatic Email Sending',
+  'Enable Automatic Email Sending': 'Enable Automatic Email Sending',
+  "If enabled, the plugin will attempt to send due date reminders automatically using the configured Gmail account (App Password required). WARNING: This stores your email and App Password in Obsidian's settings.":
+    "If enabled, the plugin will attempt to send due date reminders automatically using the configured Gmail account (App Password required). WARNING: This stores your email and App Password in Obsidian's settings.",
+  'Sender Gmail Address': 'Sender Gmail Address',
+  'Your full Gmail address (e.g., user@gmail.com).':
+    'Your full Gmail address (e.g., user@gmail.com).',
+  'Gmail App Password': 'Gmail App Password',
+  'An App Password generated for Obsidian from your Google Account settings. This is NOT your regular Gmail password.':
+    'An App Password generated for Obsidian from your Google Account settings. This is NOT your regular Gmail password.',
+  'Automatic Sending Frequency (Days)': 'Automatic Sending Frequency (Days)',
+  'How often to automatically send reminder emails (e.g., 1 for daily, 7 for weekly). Minimum is 1 day.':
+    'How often to automatically send reminder emails (e.g., 1 for daily, 7 for weekly). Minimum is 1 day.',
 };
 
 export type Lang = typeof en;

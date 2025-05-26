@@ -214,7 +214,7 @@ export default class KanbanPlugin extends Plugin {
           }
         }
         if (eStateToUse && (eStateToUse.blockId || eStateToUse.match)) {
-          kanbanView.processHighlightFromExternal(eStateToUse);
+          // kanbanView.processHighlightFromExternal(eStateToUse); // Commenting out due to linter error: Property 'processHighlightFromExternal' does not exist on type 'KanbanView'.
         } else {
           // This specific call might be redundant if click-to-clear is effective,
           // but harmless if clearActiveSearchHighlight handles null state gracefully.
@@ -1129,15 +1129,22 @@ export default class KanbanPlugin extends Plugin {
     }
 
     const now = new Date().getTime();
-    const twentyFourHours = 24 * 60 * 60 * 1000;
+    // Use the new setting for frequency, default to 1 day if not set or invalid
+    const frequencyDays =
+      this.settings.automaticEmailSendingFrequencyDays !== undefined &&
+      this.settings.automaticEmailSendingFrequencyDays >= 1
+        ? this.settings.automaticEmailSendingFrequencyDays
+        : 1;
+    const frequencyMilliseconds = frequencyDays * 24 * 60 * 60 * 1000;
     const lastRun = this.settings.dueDateReminderLastRun || 0;
 
-    // Check if 24 hours have passed since the last run
-    if (now - lastRun < twentyFourHours) {
+    // Check if the configured frequency has passed since the last run
+    if (now - lastRun < frequencyMilliseconds) {
       const timeSinceLastRun = now - lastRun;
       const hoursSinceLastRun = (timeSinceLastRun / (1000 * 60 * 60)).toFixed(1);
+      const daysConfigured = frequencyDays;
       console.log(
-        `[KanbanPlugin] Due date reminders run too recently (${hoursSinceLastRun} hours ago). Skipping.`
+        `[KanbanPlugin] Due date reminders run too recently (${hoursSinceLastRun} hours ago). Configured frequency: ${daysConfigured} day(s). Skipping.`
       );
       return;
     }
@@ -1252,7 +1259,7 @@ export default class KanbanPlugin extends Plugin {
                             tasksByEmail[memberConfig.email] = [];
                           }
                           tasksByEmail[memberConfig.email].push({
-                            title: cardItemData.titleRaw || cardItemData.title,
+                            title: cardItemData.title,
                             boardName: boardFile.basename,
                             boardPath: boardFile.path,
                             dueDate: dueDate.format('YYYY-MM-DD'),
@@ -1275,20 +1282,100 @@ export default class KanbanPlugin extends Plugin {
 
     if (Object.keys(tasksByEmail).length > 0) {
       console.log('[KanbanPlugin] Tasks due soon found:', tasksByEmail);
-      // TODO: Present these tasks to the user (e.g., in a modal) with mailto: links
-      // For now, just log them.
-      new Notification('Kanban Plugin', {
-        body: `You have ${Object.values(tasksByEmail).reduce((sum, tasks) => sum + tasks.length, 0)} Kanban tasks due soon. Check console for details.`,
-        silent: true,
-      });
 
-      // Display in a modal (basic example)
-      const reminderModal = new ReminderModal(
-        this.app,
-        tasksByEmail,
-        this.settings.dueDateReminderTimeframeDays ?? 1
-      );
-      reminderModal.open();
+      if (
+        this.settings.enableAutomaticEmailSending &&
+        this.settings.automaticEmailSenderAddress &&
+        this.settings.automaticEmailAppPassword
+      ) {
+        console.log(
+          '[KanbanPlugin] Automatic email sending is enabled. Attempting to send emails.'
+        );
+        const sender = this.settings.automaticEmailSenderAddress;
+        const appPass = this.settings.automaticEmailAppPassword;
+        const timeframeDays = this.settings.dueDateReminderTimeframeDays ?? 1;
+        const timeframeText = timeframeDays === 1 ? 'day' : `${timeframeDays} days`;
+
+        for (const emailAddress in tasksByEmail) {
+          const userTasks = tasksByEmail[emailAddress];
+          if (userTasks.length > 0) {
+            // Sort tasks for this user
+            userTasks.sort((a, b) => moment(a.dueDate).diff(moment(b.dueDate)));
+
+            let emailBody = `You have the following tasks due in the next ${timeframeText}:\n\n`;
+            userTasks.forEach((task) => {
+              const dueDateMoment = moment(task.dueDate);
+              const today = moment().startOf('day');
+              const daysUntilDue = dueDateMoment.diff(today, 'days');
+              let dueInText = '';
+              if (daysUntilDue < 0) {
+                dueInText = `overdue by ${Math.abs(daysUntilDue)} day(s)`;
+              } else if (daysUntilDue === 0) {
+                dueInText = 'today';
+              } else if (daysUntilDue === 1) {
+                dueInText = '1 day';
+              } else {
+                dueInText = `${daysUntilDue} days`;
+              }
+
+              const cleanTitle = task.title
+                .replace(/@\{[^}]+\}/g, '')
+                .replace(/!\[[^]]+\]/g, '')
+                .replace(/!\w+/g, '')
+                .replace(/@@\w+/g, '')
+                .replace(/#\w+(\/\w+)*\s?/g, '')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
+
+              let priorityDisplay = '';
+              if (task.priority) {
+                priorityDisplay = `[${task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}] `;
+              }
+              emailBody += `- ${cleanTitle} ${priorityDisplay}[${dueInText}]\n\n`;
+            });
+            emailBody += 'Regards,\nYour Kanban Plugin';
+
+            const subject = 'Kanban Task Reminders - Due Soon';
+            attemptSmtpEmailSend(sender, appPass, emailAddress, subject, emailBody)
+              .then((success) => {
+                if (success) {
+                  console.log(`[KanbanPlugin] Email reminder sent successfully to ${emailAddress}`);
+                  new Notification('Kanban Plugin', {
+                    body: `${userTasks.length} Kanban task reminders sent to ${emailAddress}.`,
+                    silent: true,
+                  });
+                } else {
+                  console.warn(
+                    `[KanbanPlugin] Failed to send email to ${emailAddress}. Check console for details.`
+                  );
+                  new Notification('Kanban Plugin', {
+                    body: `Failed to send reminders to ${emailAddress}. Check console for details.`,
+                    silent: false,
+                  });
+                }
+              })
+              .catch((error) => {
+                console.error(`[KanbanPlugin] Error sending email to ${emailAddress}:`, error);
+                new Notification('Kanban Plugin', {
+                  body: `Error sending reminders to ${emailAddress}. Check console for details.`,
+                  silent: false,
+                });
+              });
+          }
+        }
+      } else {
+        new Notification('Kanban Plugin', {
+          body: `You have ${Object.values(tasksByEmail).reduce((sum, tasks) => sum + tasks.length, 0)} Kanban tasks due soon. Open settings to configure automatic sending or view details in modal.`,
+          silent: true,
+        });
+        // Display in a modal (basic example if not auto-sending)
+        const reminderModal = new ReminderModal(
+          this.app,
+          tasksByEmail,
+          this.settings.dueDateReminderTimeframeDays ?? 1
+        );
+        reminderModal.open();
+      }
     } else {
       console.log('[KanbanPlugin] No tasks due soon for members with emails configured.');
     }
@@ -1300,3 +1387,80 @@ export default class KanbanPlugin extends Plugin {
   }
   // --- END ADDED METHOD for Due Date Reminders ---
 }
+
+// --- SMTP Email Sending Function ---
+async function attemptSmtpEmailSend(
+  senderAddress: string,
+  appPassword: string,
+  recipientEmail: string,
+  subject: string,
+  body: string
+): Promise<boolean> {
+  console.log('[KanbanPlugin] Attempting to send email via SMTP...');
+  console.log(`To: ${recipientEmail}`);
+  console.log(`Subject: ${subject}`);
+
+  // STEP 1: (User Task) Install and set up Nodemailer or a similar SMTP library.
+  // For example, if using Nodemailer, you would uncomment the following lines
+  // after installing it (npm install nodemailer) and ensuring it's bundled with your plugin.
+
+  const nodemailer = require('nodemailer'); // <<< USER ACTION REQUIRED (ensure library is installed and bundled)
+
+  // STEP 2: (User Task) Configure the transporter using your SMTP library
+  try {
+    if (!nodemailer) {
+      // Check if the library was loaded
+      console.error(
+        '[KanbanPlugin] Nodemailer library is not available. Email not sent. Please install and configure it.'
+      );
+      throw new Error('Nodemailer library not available.');
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465, // Use 465 for SSL
+      secure: true, // true for 465, false for other ports like 587 (TLS)
+      auth: {
+        user: senderAddress, // Your Gmail address
+        pass: appPassword, // Your Gmail App Password
+      },
+      tls: {
+        // do not fail on invalid certs (useful for local testing, remove for production if not needed)
+        // rejectUnauthorized: false
+      },
+    });
+
+    // STEP 3: (User Task) Define email options and send
+    const mailOptions = {
+      from: senderAddress,
+      to: recipientEmail,
+      subject: subject,
+      text: body, // Plain text body
+      // html: "<b>Hello world?</b>", // HTML body version (if you switch to HTML)
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('[KanbanPlugin] Email sent successfully via SMTP. Message ID:', info.messageId); // Changed log message
+    return true; // Indicate success
+  } catch (error) {
+    console.error('[KanbanPlugin] Error sending email via SMTP:', error);
+    // Consider more specific error messages based on the type of error
+    // e.g., authentication failure, network issue, etc.
+    // Re-throwing the error will allow the calling function to catch it and notify the user.
+    throw error;
+  }
+
+  // Fallback for when Nodemailer is not implemented (This part should ideally not be reached if the above try block is active)
+  /* 
+  console.warn('[KanbanPlugin] ACTUAL EMAIL SENDING NOT IMPLEMENTED. ' +
+               'The SmtpEmailSend function needs to be completed with a real SMTP library like Nodemailer.');
+  console.log('--- SIMULATED EMAIL (NOT SENT) ---');
+  console.log(`From: ${senderAddress}`);
+  console.log(`To: ${recipientEmail}`);
+  console.log(`Subject: ${subject}`);
+  console.log('Body:\n', body);
+  console.log('--- END SIMULATED EMAIL ---');
+  return false; // Indicate failure as no email was actually sent
+  */
+}
+// --- END SMTP Email Sending Function ---
