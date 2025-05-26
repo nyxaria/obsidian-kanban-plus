@@ -16,6 +16,7 @@ import {
   MenuItem,
   Notice,
   Setting,
+  TAbstractFile,
   TFile,
   TFolder,
   ViewStateResult, // Added import
@@ -2993,6 +2994,56 @@ export class KanbanWorkspaceView extends ItemView {
     this.boundHandleActiveLeafChange = this.handleActiveLeafChange.bind(this);
   }
 
+  // ADDED: Method to handle file/folder renames
+  async handleRename(file: TAbstractFile, oldPath: string) {
+    console.log(`[KanbanWorkspaceView] handleRename: File '${oldPath}' renamed to '${file.path}'`);
+    let settingsChanged = false;
+    let currentLeafViewAffected = false;
+
+    const currentSettings = this.plugin.settings;
+    const savedViews = currentSettings.savedWorkspaceViews || [];
+
+    const updatedSavedViews = savedViews.map((view) => {
+      if (view.scanRootPath === oldPath) {
+        console.log(
+          `[KanbanWorkspaceView] handleRename: Updating scanRootPath in saved view '${view.name}' from '${oldPath}' to '${file.path}'`
+        );
+        settingsChanged = true;
+        if (this.currentLeafSavedViewId === view.id) {
+          currentLeafViewAffected = true;
+          console.log(
+            `[KanbanWorkspaceView] handleRename: scanRootPath for current leaf's view ('${view.name}') updated.`
+          );
+        }
+        return { ...view, scanRootPath: file.path };
+      }
+      return view;
+    });
+
+    if (settingsChanged) {
+      this.plugin.settings.savedWorkspaceViews = updatedSavedViews;
+      await this.plugin.saveSettings();
+      // The component's useEffect watching plugin.settings.savedWorkspaceViews will now trigger,
+      // potentially updating its internal scanRootPath state if the selectedViewId was affected.
+    }
+
+    // Always trigger a data refresh.
+    // If a saved view's scanRootPath was updated, the component's useEffect for settings changes
+    // should have updated its internal scanRootPath state before this scan runs.
+    // If a file *within* a scan path was renamed, this refresh will pick up that change.
+    console.log(
+      "[KanbanWorkspaceView] handleRename: Triggering 'refresh-data' to re-scan with potentially updated configurations."
+    );
+    this.viewEvents.trigger('refresh-data');
+
+    if (currentLeafViewAffected) {
+      // If the view loaded in *this* leaf had its scanRootPath changed,
+      // refresh the header as well. The getDisplayText doesn't directly use scanRootPath,
+      // but it's good practice if the underlying config of the displayed view changes.
+      this.refreshHeader();
+    }
+  }
+
   // Updated method to set both name and ID for the current leaf
   public setViewConfigurationForLeaf(name: string | null, id: string | null) {
     this.activeSavedViewNameForDisplay = name;
@@ -3170,6 +3221,9 @@ export class KanbanWorkspaceView extends ItemView {
 
   async onload() {
     super.onload();
+    // ADDED: Register rename event listener
+    this.registerEvent(this.app.vault.on('rename', this.handleRename.bind(this)));
+
     this.renderReactComponent(); // Initial render call
     this.app.workspace.on('active-leaf-change', this.boundHandleActiveLeafChange);
 

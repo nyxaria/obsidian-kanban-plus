@@ -5,6 +5,7 @@ import {
   HoverPopover,
   Menu,
   Platform,
+  TAbstractFile,
   TFile,
   TextFileView,
   ViewStateResult,
@@ -245,6 +246,20 @@ export class KanbanView extends TextFileView implements HoverParent {
       '[KanbanView] onload: Entered. targetHighlightLocation will be set by setState if eState is provided directly.'
     );
 
+    this.registerEvent(
+      this.app.vault.on('rename', (file, oldPath) => {
+        // Check if this specific view instance is still valid and its file matches the oldPath
+        // This check helps prevent errors if the view is already closed or no longer relevant
+        if (this.file && this.file.path === oldPath) {
+          this.handleRename(file, oldPath);
+        } else if (this.file && this.file.path === file.path && this.file.path !== oldPath) {
+          // This handles the case where this.file might have already been updated to the new path
+          // by the time the event fires, but we still need to process it based on oldPath.
+          this.handleRename(file, oldPath);
+        }
+      })
+    );
+
     // Check for pending highlight state stored on the leaf by the monkeypatch
     const pendingHighlightState = (this.leaf as any)._kanbanPendingHighlightState;
     if (pendingHighlightState) {
@@ -304,9 +319,30 @@ export class KanbanView extends TextFileView implements HoverParent {
     this.actionButtons = {};
   }
 
-  handleRename(newPath: string, oldPath: string) {
-    if (this.file.path === newPath) {
-      this.plugin.handleViewFileRename(this, oldPath);
+  async handleRename(file: TAbstractFile, oldPath: string) {
+    // Ensure this.file exists and file is a TFile
+    if (this.file && file instanceof TFile) {
+      // Check if the currently open file in this view is the one that was renamed.
+      // this.file should ideally be the new file object by the time this is called.
+      if (this.file.path === file.path && this.file.path !== oldPath) {
+        console.log(
+          `[KanbanView] handleRename: View for ${file.path} (formerly ${oldPath}) detected rename.`
+        );
+        // It's important that handleViewFileRename can correctly update based on oldPath
+        // and the view instance (this), which now holds the new file.
+        this.plugin.handleViewFileRename(this, oldPath);
+      } else if (this.file.path === oldPath && file.path !== oldPath) {
+        // This is a fallback if this.file somehow hasn't updated yet.
+        // This view instance is still associated with the oldPath.
+        console.log(
+          `[KanbanView] handleRename: View for ${oldPath} (now ${file.path}) detected rename. Instance file path matches oldPath.`
+        );
+        // We still pass 'this' (which refers to the view of oldPath) and oldPath.
+        // handleViewFileRename needs to manage the transition.
+        this.plugin.handleViewFileRename(this, oldPath);
+        // It's possible Obsidian's TextFileView superclass might update `this.file` to `file` AFTER this handler,
+        // or `this.plugin.handleViewFileRename` should handle updating `this.file` if necessary.
+      }
     }
   }
 
