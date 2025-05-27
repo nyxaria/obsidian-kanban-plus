@@ -45,6 +45,113 @@ import { ListFormat } from './parsers/List';
 import { listItemToItemData } from './parsers/formats/list';
 import { parseMarkdown } from './parsers/parseMarkdown';
 
+// NEW COMPONENT for basic external link rendering
+// RENAMED and ENHANCED to InteractiveMarkdownCell
+function InteractiveMarkdownCell(props: {
+  markdownText: string;
+  app: App; // ADDED: For internal link handling
+  sourcePath: string; // ADDED: For resolving internal links
+}) {
+  const { markdownText, app, sourcePath } = props;
+  const contentRef = useRef<HTMLSpanElement>(null);
+
+  // Regex for external links: [text](url)
+  const externalLinkRegex = /\B\[([^\][]*)\]\((https?:\/\/[^)]+)\)/g;
+  // Regex for internal links: [[file]] or [[file|alias]]
+  const internalLinkRegex = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+
+  // Combined regex to find either type of link
+  const combinedRegex = new RegExp(`${externalLinkRegex.source}|${internalLinkRegex.source}`, 'g');
+
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = combinedRegex.exec(markdownText)) !== null) {
+    // Text before the link
+    if (match.index > lastIndex) {
+      parts.push(markdownText.substring(lastIndex, match.index));
+    }
+
+    const externalText = match[1];
+    const externalUrl = match[2];
+    const internalFile = match[3];
+    const internalAlias = match[4];
+
+    if (externalUrl) {
+      // External link
+      parts.push(
+        createElement(
+          'a',
+          {
+            href: externalUrl,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            class: 'external-link',
+          },
+          externalText || externalUrl
+        )
+      );
+    } else if (internalFile) {
+      // Internal link
+      const displayText = internalAlias || internalFile;
+      const linkText = internalFile + (internalAlias ? `|${internalAlias}` : ''); // Original [[content]]
+      parts.push(
+        createElement(
+          'a',
+          {
+            href: '#', // Placeholder, click is handled
+            class: 'internal-link',
+            'data-link-text': linkText, // Store original link for Obsidian to handle
+          },
+          displayText
+        )
+      );
+    }
+    lastIndex = combinedRegex.lastIndex;
+  }
+
+  // Text after the last link
+  if (lastIndex < markdownText.length) {
+    parts.push(markdownText.substring(lastIndex));
+  }
+
+  // Click handler for internal links
+  useEffect(() => {
+    const currentContentRef = contentRef.current;
+    if (!currentContentRef) return;
+
+    const handleClick = (event: MouseEvent) => {
+      let target = event.target as HTMLElement | null;
+      // Traverse up to find the link if the click was on a child element
+      for (let i = 0; i < 3 && target && target !== currentContentRef; i++) {
+        if (target.tagName === 'A' && target.classList.contains('internal-link')) {
+          event.preventDefault();
+          event.stopPropagation();
+          const link = target.getAttribute('data-link-text');
+          if (link) {
+            app.workspace.openLinkText(
+              link,
+              sourcePath,
+              event.ctrlKey || event.metaKey || event.button === 1 // Open in new tab/split on Ctrl/Cmd click or middle mouse click
+            );
+          }
+          return;
+        }
+        target = target.parentElement;
+      }
+    };
+
+    currentContentRef.addEventListener('click', handleClick);
+    return () => {
+      currentContentRef.removeEventListener('click', handleClick);
+    };
+  }, [app, sourcePath]); // Dependencies for the click handler
+
+  // Render the parts into a span
+  return createElement('span', { ref: contentRef }, ...parts);
+}
+
 // New interface for the cards displayed in the workspace view
 interface WorkspaceCard {
   id: string;
@@ -1028,7 +1135,24 @@ function KanbanWorkspaceViewComponent(props: {
   );
 
   const handleRowClick = useCallback(
-    async (card: WorkspaceCard) => {
+    async (card: WorkspaceCard, event?: MouseEvent) => {
+      // Check if the click originated from an <a> tag
+      if (event) {
+        let targetElement = event.target as HTMLElement;
+        // Traverse up to 3 levels to check for an ancestor <a> tag.
+        // This handles cases where the click might be on an element inside the <a> tag.
+        for (let i = 0; i < 3 && targetElement && targetElement !== event.currentTarget; i++) {
+          if (targetElement.tagName === 'A') {
+            // If it's an external link, Obsidian's default handling (target=_blank) should take over.
+            // If we wanted special handling for internal links later, we'd differentiate here.
+            // For now, any <a> click stops row navigation.
+            return;
+          }
+          if (!targetElement.parentElement) break;
+          targetElement = targetElement.parentElement;
+        }
+      }
+
       const { app } = props.plugin;
 
       const navigationState = {
@@ -2782,7 +2906,7 @@ function KanbanWorkspaceViewComponent(props: {
                 return (
                   <tr
                     key={card.id}
-                    onClick={() => handleRowClick(card)}
+                    onClick={(event) => handleRowClick(card, event)} // MODIFIED: pass event
                     onContextMenu={(e) => handleRowContextMenu(e, card)}
                     style={{ cursor: 'pointer' }}
                     onMouseEnter={(e) =>
@@ -2820,7 +2944,11 @@ function KanbanWorkspaceViewComponent(props: {
                         paddingLeft: '8px',
                       }}
                     >
-                      {card.title}
+                      <InteractiveMarkdownCell
+                        markdownText={card.title}
+                        app={props.plugin.app}
+                        sourcePath={card.sourceBoardPath}
+                      />
                     </td>
                     {/* Category Cell */}
                     <td
