@@ -2918,7 +2918,8 @@ function KanbanWorkspaceViewComponent(props: {
                     <td
                       style={{
                         border: '1px solid var(--background-modifier-border)',
-                        padding: '4px',
+                        padding: '4px 0px 0px 5px',
+                        margin: '0px 0px 0px 0px',
                         textAlign: 'center',
                       }}
                       onClick={(e) => e.stopPropagation()} // Stop propagation here
@@ -2954,7 +2955,7 @@ function KanbanWorkspaceViewComponent(props: {
                     <td
                       style={{
                         border: '1px solid var(--background-modifier-border)',
-                        padding: '4px',
+                        padding: '0px 12px 0px 12px',
                         textAlign: 'center',
                       }}
                     >
@@ -2964,7 +2965,7 @@ function KanbanWorkspaceViewComponent(props: {
                     <td
                       style={{
                         border: '1px solid var(--background-modifier-border)',
-                        padding: '4px',
+                        padding: '0px 12px 0px 12px',
                         textAlign: 'center',
                       }}
                     >
@@ -2973,7 +2974,7 @@ function KanbanWorkspaceViewComponent(props: {
                     <td
                       style={{
                         border: '1px solid var(--background-modifier-border)',
-                        padding: '4px',
+                        padding: '0px 12px 0px 12px',
                         textAlign: 'center',
                         ...priorityStyle,
                       }}
@@ -2986,6 +2987,7 @@ function KanbanWorkspaceViewComponent(props: {
                         border: '1px solid var(--background-modifier-border)',
                         padding: '4px',
                         textAlign: 'center', // Keep textAlign for the cell itself if content might not fill
+                        minWidth: '120px', // ADDED: Minimum width for the members column
                       }}
                     >
                       <div
@@ -3094,6 +3096,7 @@ function KanbanWorkspaceViewComponent(props: {
                         border: '1px solid var(--background-modifier-border)',
                         padding: '4px',
                         textAlign: 'center',
+                        width: '70px', // ADDED: Set a fixed width to make the column narrower
                       }}
                     >
                       {dueDateDisplay}
