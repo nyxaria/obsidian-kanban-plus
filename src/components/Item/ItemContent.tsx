@@ -51,6 +51,16 @@ import {
   constructTimePicker,
 } from './helpers';
 
+// Helper function to get initials from a name string
+function getInitials(name: string): string {
+  if (!name || typeof name !== 'string') return '';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length > 0 && parts[0].length > 0) {
+    return parts[0].charAt(0).toUpperCase();
+  }
+  return '';
+}
+
 export function useDatePickers(item: Item, explicitPath?: Path) {
   const { stateManager, boardModifiers } = useContext(KanbanContext);
   const path = explicitPath || useNestedEntityPath();
@@ -251,13 +261,14 @@ export function AssignedMembers({
     <div
       className={c('item-assigned-members')}
       style={{
-        marginTop: '4px',
+        marginTop: '0px',
         display: 'flex',
         justifyContent: 'flex-end',
         flexWrap: 'wrap',
         gap: '0px',
         paddingRight: '0px',
         marginRight: '0px',
+        // marginLeft: '4px',
         ...style,
       }}
     >
@@ -267,6 +278,7 @@ export function AssignedMembers({
         const textColor =
           memberConfig?.text ||
           (memberConfig?.background ? 'var(--text-on-accent)' : 'var(--text-normal)');
+        const initials = getInitials(member);
 
         const handleMemberClick = (e: MouseEvent) => {
           e.preventDefault();
@@ -284,28 +296,29 @@ export function AssignedMembers({
         };
 
         return (
-          <span
-            onClick={handleMemberClick}
+          <div
             key={i}
-            className={`${c('item-assigned-member')} ${
-              searchQuery && member.toLocaleLowerCase().contains(searchQuery)
-                ? 'is-search-match'
-                : ''
-            }`}
+            className={c('item-assigned-member-initials')}
+            onClick={handleMemberClick}
+            title={member}
             style={{
-              cursor: 'pointer',
-              backgroundColor: backgroundColor,
+              backgroundColor,
               color: textColor,
-              padding: '1px 5px',
-              marginLeft: '0.2em',
-              borderRadius: '3px',
-              fontSize: '0.9em',
-              display: 'inline-flex',
+              borderRadius: '50%',
+              width: '18px',
+              height: '18px',
+              display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
+              marginLeft: '4px',
+              fontSize: '12px',
+              // fontWeight: 'bold',
+              cursor: 'pointer',
+              userSelect: 'none',
             }}
           >
-            {member}
-          </span>
+            {initials}
+          </div>
         );
       })}
     </div>
