@@ -1,0 +1,760 @@
+// May need to move/share this
+// import { MdastHeading, MdastList, MdastListItem, MdastRoot } from 'mdast'; // Removed due to import errors
+import moment from 'moment';
+import { App, TFile, TFolder } from 'obsidian';
+import { Fragment, createElement } from 'preact';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { KanbanView } from 'src/KanbanView';
+// Assuming this is the correct type for props.view
+import { DEFAULT_SETTINGS } from 'src/Settings';
+import { updateCardDatesInMarkdown } from 'src/markdownUpdater';
+
+import { getHeadingText } from '../../KanbanWorkspaceView';
+import { InteractiveMarkdownCell } from '../../KanbanWorkspaceView';
+import { StateManager } from '../../StateManager';
+import { hasFrontmatterKey } from '../../helpers';
+import KanbanPlugin from '../../main';
+// Assuming this path and file are correct
+import { listItemToItemData } from '../../parsers/formats/list';
+// Assuming ItemMetadata will have startDate
+import { parseMarkdown } from '../../parsers/parseMarkdown';
+import { TimelineCardData as ImportedTimelineCardData, ItemData, ItemMetadata } from '../types';
+
+// Renamed imported TimelineCardData
+
+// Local TimelineCardData definition
+export interface TimelineCardData {
+  id: string;
+  title: string;
+  titleRaw: string;
+  sourceBoardName: string;
+  sourceBoardPath: string;
+  blockId?: string;
+  startDate?: moment.Moment;
+  dueDate?: moment.Moment;
+  checked?: boolean;
+}
+
+interface TimelineViewComponentProps {
+  plugin: KanbanPlugin;
+  app: App; // Added app
+  view: KanbanView; // Added view (adjust type if KanbanView is not correct for TimelineView context)
+  // Add other props like viewEvents, refreshViewHeader, view instance if needed
+}
+
+// const DAY_WIDTH_PX = 50; // Width of one day column - REMOVED
+const CARD_HEIGHT_PX = 40;
+const ROW_GAP_PX = 5;
+const TIMELINE_HEADER_HEIGHT_PX = 50; // Increased for better date display
+
+// Helper function to escape string for regex
+function escapeRegExp(string: string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
+}
+
+export function TimelineViewComponent(props: TimelineViewComponentProps) {
+  const [cards, setCards] = useState<TimelineCardData[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isMounted = useRef(true);
+
+  // Access DAY_WIDTH_PX from settings
+  const DAY_WIDTH_PX =
+    props.plugin.settings.timelineDayWidth || DEFAULT_SETTINGS.timelineDayWidth || 50;
+
+  const [timelineStartDate, setTimelineStartDate] = useState<moment.Moment | null>(null);
+  const [timelineEndDate, setTimelineEndDate] = useState<moment.Moment | null>(null);
+  const timelineGridRef = useRef<HTMLDivElement>(null); // Ref for the timeline grid
+
+  // Moved scanCards definition before useEffect hooks that use it
+  const scanCards = useCallback(async () => {
+    console.log('[TimelineView] Starting scanCards...');
+    if (!isMounted.current) return;
+    setIsLoading(true);
+    setError(null);
+
+    // Defensive check for props.view and props.app (props.view.file is not relevant for a global timeline)
+    if (!props.view || !props.app) {
+      // Removed props.view.file check
+      console.warn(
+        '[TimelineView] View or App not available in scanCards. props.view:',
+        props.view,
+        'props.app:',
+        props.app
+      );
+      setCards([]);
+      setIsLoading(false);
+      setError('Timeline data cannot be loaded: view or app context is missing.');
+      return;
+    }
+    // Removed the check for props.app.vault.getAbstractFileByPath(props.view.file.path)
+    // as props.view.file is not used and not relevant for a global timeline.
+
+    const app = props.plugin.app; // or directly props.app, ensure consistency
+    const allFetchedCards: TimelineCardData[] = [];
+    let minDate: moment.Moment | null = null;
+    let maxDate: moment.Moment | null = null;
+
+    try {
+      const targetFolder = app.vault.getRoot();
+      const allMdFiles = await recursivelyGetAllMdFilesInFolder(targetFolder);
+      console.log(`[TimelineView] Found ${allMdFiles.length} MD files to scan.`);
+
+      for (const mdFile of allMdFiles) {
+        if (hasFrontmatterKey(mdFile)) {
+          try {
+            const fileContent = await props.plugin.app.vault.cachedRead(mdFile);
+            const tempStateManager = new StateManager(
+              props.plugin.app,
+              { file: mdFile } as any,
+              () => {},
+              () => props.plugin.settings
+            );
+            const { ast } = parseMarkdown(tempStateManager, fileContent) as {
+              ast: any;
+              settings: any;
+            };
+            for (const astNode of ast.children) {
+              if (astNode.type === 'list') {
+                for (const listItemNode of (astNode as any).children) {
+                  if (listItemNode.type === 'listItem') {
+                    const itemData: ItemData = listItemToItemData(
+                      tempStateManager,
+                      fileContent,
+                      listItemNode as any
+                    );
+                    if (itemData.checked) {
+                      continue;
+                    }
+                    let cardStartDate: moment.Moment | null = null;
+                    let cardDueDate: moment.Moment | null = null;
+                    const globalDateFormat = tempStateManager.getSetting('date-format');
+                    const startDateUserFormat =
+                      (props.plugin.settings as any)['start-date-format'] || globalDateFormat;
+                    const startDateTriggerSetting =
+                      (props.plugin.settings as any)['start-date-trigger'] || '@start{';
+                    const startDatePrefix = startDateTriggerSetting.substring(
+                      0,
+                      startDateTriggerSetting.indexOf('{') > -1
+                        ? startDateTriggerSetting.indexOf('{')
+                        : startDateTriggerSetting.length
+                    );
+                    const metadata = itemData.metadata;
+                    if (metadata?.startDateStr) {
+                      const d = moment(metadata.startDateStr, startDateUserFormat);
+                      if (d.isValid()) cardStartDate = d;
+                    }
+                    if (
+                      !cardStartDate &&
+                      moment.isMoment(metadata?.startDate) &&
+                      metadata.startDate.isValid()
+                    ) {
+                      cardStartDate = metadata.startDate.clone();
+                    }
+                    if (metadata?.dateStr) {
+                      const d = moment(metadata.dateStr, globalDateFormat);
+                      if (d.isValid()) cardDueDate = d;
+                    }
+                    if (
+                      !cardDueDate &&
+                      moment.isMoment(metadata?.date) &&
+                      metadata.date.isValid()
+                    ) {
+                      if (!itemData.titleRaw.includes(startDatePrefix)) {
+                        cardDueDate = metadata.date.clone();
+                      }
+                    }
+                    if (itemData.titleRaw.includes(startDatePrefix)) {
+                      let potentialStartDateFromHeuristic: moment.Moment | null = null;
+                      let potentialDueDateFromHeuristic: moment.Moment | null = null;
+                      if (moment.isMoment(metadata?.date) && metadata.date.isValid()) {
+                        potentialStartDateFromHeuristic = metadata.date.clone();
+                      }
+                      if (metadata?.dateStr) {
+                        const d = moment(metadata.dateStr, globalDateFormat);
+                        if (d.isValid()) {
+                          potentialDueDateFromHeuristic = d;
+                        }
+                      }
+                      const regexString = escapeRegExp(startDatePrefix) + '\\{' + '([^}]+)' + '\\}';
+                      const correctStartDateRegexPattern = new RegExp(regexString);
+                      const titleMatch = itemData.titleRaw.match(correctStartDateRegexPattern);
+                      if (titleMatch && titleMatch[1]) {
+                        const originalStartDateString = titleMatch[1];
+                        const reparsedStartDateFromTitle = moment(
+                          originalStartDateString,
+                          startDateUserFormat
+                        );
+                        if (reparsedStartDateFromTitle.isValid()) {
+                          if (
+                            potentialStartDateFromHeuristic &&
+                            potentialStartDateFromHeuristic.date() !==
+                              reparsedStartDateFromTitle.date()
+                          ) {
+                            potentialStartDateFromHeuristic = reparsedStartDateFromTitle;
+                          } else if (!potentialStartDateFromHeuristic) {
+                            potentialStartDateFromHeuristic = reparsedStartDateFromTitle;
+                          }
+                        }
+                      }
+                      if (potentialStartDateFromHeuristic) {
+                        if (!cardStartDate) {
+                          cardStartDate = potentialStartDateFromHeuristic;
+                          if (potentialDueDateFromHeuristic && !cardDueDate) {
+                            cardDueDate = potentialDueDateFromHeuristic;
+                          }
+                        } else {
+                          if (potentialDueDateFromHeuristic && !cardDueDate) {
+                            cardDueDate = potentialDueDateFromHeuristic;
+                          }
+                        }
+                      }
+                    }
+                    if (!cardDueDate || !cardDueDate.isValid()) {
+                      cardDueDate = moment().startOf('day');
+                    }
+                    if (!cardStartDate || !cardStartDate.isValid()) {
+                      cardStartDate = cardDueDate.clone().startOf('day');
+                    } else {
+                      if (cardStartDate.isAfter(cardDueDate)) {
+                        cardStartDate = cardDueDate.clone().startOf('day');
+                      }
+                    }
+                    if (
+                      cardDueDate &&
+                      cardStartDate &&
+                      cardStartDate.isValid() &&
+                      cardDueDate.isValid()
+                    ) {
+                      allFetchedCards.push({
+                        id:
+                          itemData.blockId ||
+                          `${mdFile.path}-${itemData.titleRaw.slice(0, 10)}-${Math.random()}`,
+                        title: itemData.title,
+                        titleRaw: itemData.titleRaw,
+                        sourceBoardName: mdFile.basename,
+                        sourceBoardPath: mdFile.path,
+                        blockId: itemData.blockId,
+                        startDate: cardStartDate.clone().startOf('day'),
+                        dueDate: cardDueDate.clone().endOf('day'),
+                        checked: itemData.checked,
+                      });
+                      if (!minDate || cardStartDate.isBefore(minDate)) {
+                        minDate = cardStartDate.clone().startOf('day');
+                      }
+                      if (!maxDate || cardDueDate.isAfter(maxDate)) {
+                        maxDate = cardDueDate.clone().endOf('day');
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } catch (parseError) {
+            console.error(`[TimelineView] Error processing board ${mdFile.path}:`, parseError);
+          }
+        }
+      }
+      if (isMounted.current) {
+        allFetchedCards.sort((a, b) => {
+          if (a.startDate && b.startDate) {
+            return a.startDate.diff(b.startDate);
+          }
+          return 0;
+        });
+        setCards(allFetchedCards);
+        if (allFetchedCards.length > 0 && minDate && maxDate) {
+          setTimelineStartDate(minDate.clone().subtract(3, 'days'));
+          setTimelineEndDate(maxDate.clone().add(3, 'days'));
+        } else {
+          setTimelineStartDate(moment().startOf('week'));
+          setTimelineEndDate(moment().endOf('week'));
+        }
+      }
+    } catch (e) {
+      console.error('[TimelineView] Error scanning directory:', e);
+      if (isMounted.current) setError(`Error scanning directory: ${(e as Error).message}`);
+    }
+    if (isMounted.current) setIsLoading(false);
+    console.log('[TimelineView] Finished scanCards.');
+  }, [props.plugin, props.app, props.view]); // Added props.app and props.view to dependencies
+
+  // Corrected useEffect for initial scanCards call
+  useEffect(() => {
+    // Check if view and app are available before calling scanCards
+    if (props.view && props.app) {
+      scanCards();
+    } else {
+      console.warn('[TimelineView] Initial scanCards call skipped: view or app not yet available.');
+      // Optionally set an error or loading state here if preferred
+      setError('Timeline view not fully initialized. Cannot load card data yet.');
+      setIsLoading(false);
+    }
+  }, [scanCards, props.view, props.app]); // Depend on scanCards, and also props.view/props.app to retry if they become available
+
+  useEffect(() => {
+    // Effect for setting up and tearing down the wheel event listener
+    const handleWheelZoom = async (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        // metaKey for macOS
+        e.preventDefault();
+
+        let currentDayWidth =
+          props.plugin.settings.timelineDayWidth || DEFAULT_SETTINGS.timelineDayWidth || 50;
+        const zoomSensitivity = 5; // Adjust for faster/slower zoom
+
+        if (e.deltaY < 0) {
+          // Zooming in (scrolling up or pinching out)
+          currentDayWidth += zoomSensitivity;
+        } else {
+          // Zooming out (scrolling down or pinching in)
+          currentDayWidth -= zoomSensitivity;
+        }
+
+        const minDayWidth = 10;
+        const maxDayWidth = 300;
+        currentDayWidth = Math.max(minDayWidth, Math.min(maxDayWidth, currentDayWidth));
+
+        if (props.plugin.settings.timelineDayWidth !== currentDayWidth) {
+          props.plugin.settings.timelineDayWidth = currentDayWidth;
+          await props.plugin.saveSettings();
+          // The component will re-render because props.plugin.settings.timelineDayWidth changes,
+          // which will update the DAY_WIDTH_PX constant at the top of the component.
+        }
+      }
+    };
+
+    const gridEl = timelineGridRef.current;
+    if (gridEl) {
+      gridEl.addEventListener('wheel', handleWheelZoom, { passive: false });
+    }
+
+    return () => {
+      if (gridEl) {
+        gridEl.removeEventListener('wheel', handleWheelZoom);
+      }
+    };
+  }, [props.plugin, timelineGridRef]); // Rerun if plugin instance or grid ref changes
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    console.log(
+      '[TimelineView] Timeline range updated: StartDate:',
+      timelineStartDate?.format('YYYY-MM-DD'),
+      'EndDate:',
+      timelineEndDate?.format('YYYY-MM-DD')
+    );
+  }, [timelineStartDate, timelineEndDate]);
+
+  // Drag and Drop Handlers
+  const draggedItemData = useRef<{
+    cardId: string;
+    originalStartDate?: moment.Moment;
+    originalDueDate?: moment.Moment;
+    isResizingLeft?: boolean;
+    isResizingRight?: boolean;
+  } | null>(null);
+
+  const handleDragStart = (
+    e: DragEvent,
+    cardId: string,
+    isResizingLeft: boolean,
+    isResizingRight: boolean
+  ) => {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.setData('text/plain', cardId);
+    e.dataTransfer.effectAllowed = 'move';
+    const card = cards.find((c) => c.id === cardId);
+    if (card) {
+      draggedItemData.current = {
+        cardId,
+        originalStartDate: card.startDate?.clone(),
+        originalDueDate: card.dueDate?.clone(),
+        isResizingLeft,
+        isResizingRight,
+      };
+    }
+    // console.log('[TimelineView] handleDragStart:', cardId, 'isResizingLeft:', isResizingLeft, 'isResizingRight:', isResizingRight, 'originalStart:', card?.startDate?.format('YYYY-MM-DD'), 'originalDue:', card?.dueDate?.format('YYYY-MM-DD'));
+  };
+
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'move';
+    }
+  };
+
+  const handleDragEnd = () => {
+    // console.log('[TimelineView] handleDragEnd, clearing draggedItemData');
+    draggedItemData.current = null;
+  };
+
+  const handleDrop = async (e: DragEvent) => {
+    e.preventDefault();
+    if (
+      !timelineStartDate ||
+      !timelineGridRef.current ||
+      !e.dataTransfer ||
+      !draggedItemData.current
+    )
+      return;
+
+    const { cardId, originalStartDate, originalDueDate, isResizingLeft, isResizingRight } =
+      draggedItemData.current;
+    const draggedCard = cards.find((c) => c.id === cardId);
+
+    if (!draggedCard) {
+      console.error('[TimelineView] Dragged card not found in state after drop.');
+      draggedItemData.current = null; // Clear dragged item data
+      return;
+    }
+
+    // Ensure original dates from draggedItemData are used if available, otherwise from card state (though they should match)
+    const currentCardStartDate = originalStartDate || draggedCard.startDate;
+    const currentCardDueDate = originalDueDate || draggedCard.dueDate;
+
+    if (!currentCardStartDate || !currentCardDueDate) {
+      console.error('[TimelineView] Dragged card is missing start or due date for drop handling.');
+      draggedItemData.current = null; // Clear dragged item data
+      return;
+    }
+
+    const timelineRect = timelineGridRef.current.getBoundingClientRect();
+    const dropX = e.clientX - timelineRect.left;
+    const dayIndexDroppedOn = Math.max(0, Math.floor(dropX / DAY_WIDTH_PX)); // Ensure non-negative index
+
+    let newStartDate: moment.Moment;
+    let newDueDate: moment.Moment;
+
+    if (isResizingLeft) {
+      // console.log('[TimelineView] Drop detected for RESIZING LEFT');
+      newStartDate = timelineStartDate.clone().add(dayIndexDroppedOn, 'days').startOf('day');
+      newDueDate = currentCardDueDate.clone(); // Due date does not change when resizing left
+
+      // Ensure new start date is before the new due date
+      if (newStartDate.isSameOrAfter(newDueDate)) {
+        newStartDate = newDueDate.clone().subtract(1, 'day').startOf('day');
+        // Additional check if newStartDate is still problematic (e.g., if due date was very early)
+        if (newStartDate.isSameOrAfter(newDueDate)) {
+          console.warn(
+            '[TimelineView] Resize Left: Corrected start date is still problematic relative to due date. Due date might be too early or card duration too short.'
+          );
+          // Fallback: maintain original due date and set start date one day before, if possible
+          // Or, revert to original dates if correction is impossible
+          newStartDate = currentCardDueDate.clone().subtract(1, 'days').startOf('day');
+          if (newStartDate.isSameOrAfter(currentCardDueDate)) {
+            // If due date is today, start is yesterday.
+            // If this still fails, it implies an issue with original due date or a 0-day duration attempt.
+            // For now, this will proceed, but might need more robust handling.
+            console.error(
+              '[TimelineView] Resize Left: Cannot ensure start is before due after corrections.'
+            );
+          }
+        }
+      }
+      // console.log(`[TimelineView] Resizing Left: Card '${draggedCard.title}' New Start: ${newStartDate.format('YYYY-MM-DD')}, Due (unchanged): ${newDueDate.format('YYYY-MM-DD')}`);
+    } else if (isResizingRight) {
+      // console.log('[TimelineView] Drop detected for RESIZING RIGHT');
+      newStartDate = currentCardStartDate.clone(); // Start date does not change
+      newDueDate = timelineStartDate.clone().add(dayIndexDroppedOn, 'days').endOf('day');
+
+      // Ensure new due date is after the new start date
+      if (newDueDate.isSameOrBefore(newStartDate)) {
+        newDueDate = newStartDate.clone().add(1, 'day').endOf('day');
+        // Additional check if newDueDate is still problematic
+        if (newDueDate.isSameOrBefore(newStartDate)) {
+          console.warn(
+            '[TimelineView] Resize Right: Corrected due date is still problematic relative to start date. Start date might be too late or card duration too short.'
+          );
+          newDueDate = currentCardStartDate.clone().add(1, 'days').endOf('day');
+          if (newDueDate.isSameOrBefore(currentCardStartDate)) {
+            console.error(
+              '[TimelineView] Resize Right: Cannot ensure due is after start after corrections.'
+            );
+          }
+        }
+      }
+      // console.log(`[TimelineView] Resizing Right: Card '${draggedCard.title}' New Due: ${newDueDate.format('YYYY-MM-DD')}, Start (unchanged): ${newStartDate.format('YYYY-MM-DD')}`);
+    } else {
+      // Moving the whole card
+      // console.log('[TimelineView] Drop detected for MOVING card');
+      newStartDate = timelineStartDate.clone().add(dayIndexDroppedOn, 'days').startOf('day');
+      const durationDays = currentCardDueDate.diff(currentCardStartDate, 'days');
+      newDueDate = newStartDate.clone().add(Math.max(0, durationDays), 'days').endOf('day'); // Ensure duration is not negative
+      // console.log(`[TimelineView] Moving Card: '${draggedCard.title}' New Start: ${newStartDate.format('YYYY-MM-DD')}, New Due: ${newDueDate.format('YYYY-MM-DD')}`);
+    }
+
+    // console.log(`[TimelineView] Card '${draggedCard.title}' (ID: ${draggedCard.id}) dropped. isResizingLeft: ${isResizingLeft}, isResizingRight: ${isResizingRight}. New Start: ${newStartDate.format(props.plugin.settings['date-format'])}, New Due: ${newDueDate.format(props.plugin.settings['date-format'])}`);
+
+    try {
+      await updateCardDatesInMarkdown(
+        props.plugin.app,
+        draggedCard.sourceBoardPath,
+        draggedCard, // Pass the whole card data for now
+        newStartDate,
+        newDueDate,
+        props.plugin.settings
+      );
+      console.log(
+        `[TimelineView] Successfully updated dates in Markdown for card: ${draggedCard.title}`
+      );
+      // OPTIMISTIC UI UPDATE: Update the card in the local state
+      setCards((prevCards) =>
+        prevCards.map((c) =>
+          c.id === draggedCard.id
+            ? {
+                ...c,
+                startDate: newStartDate.clone(), // Ensure we use the calculated newStartDate
+                dueDate: newDueDate.clone(), // Ensure we use the calculated newDueDate
+              }
+            : c
+        )
+      );
+      // Optionally, re-scan or refresh data if needed, though optimistic update might be enough
+      // scanCards();
+    } catch (error) {
+      console.error(
+        `[TimelineView] Error updating dates in Markdown for card: ${draggedCard.title}`,
+        error
+      );
+      // TODO: Revert optimistic UI update or notify user
+      // For now, we'll log and the UI will be out of sync with the file
+      setError(`Failed to save changes for ${draggedCard.title}. Please check console.`);
+      // Potentially revert the change in local state
+      // scanCards(); // Re-scan to get actual state from files
+    }
+    draggedItemData.current = null; // Clear dragged item data regardless of success/failure of Markdown update
+  };
+  // END Drag and Drop Handlers
+
+  const renderDateHeaders = () => {
+    if (!timelineStartDate || !timelineEndDate) return null;
+
+    const headers = [];
+    let currentDate = timelineStartDate.clone();
+    while (currentDate.isSameOrBefore(timelineEndDate, 'day')) {
+      headers.push(
+        <div
+          key={currentDate.format('YYYY-MM-DD')}
+          style={{
+            minWidth: `${DAY_WIDTH_PX}px`,
+            textAlign: 'center',
+            borderRight: '1px solid var(--background-modifier-border)',
+            padding: '5px 0',
+            fontSize: '0.8em',
+            boxSizing: 'border-box',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <div style={{ fontSize: '0.9em', fontWeight: '500' }}>{currentDate.format('MMM')}</div>
+          <div style={{ fontSize: '1.1em', fontWeight: 'bold' }}>{currentDate.format('D')}</div>
+          <div style={{ fontSize: '0.75em' }}>{currentDate.format('ddd')}</div>
+        </div>
+      );
+      currentDate.add(1, 'day');
+    }
+    return (
+      <div
+        style={{
+          display: 'flex',
+          position: 'sticky',
+          top: 0,
+          background: 'var(--background-secondary)',
+          zIndex: 10,
+          height: `${TIMELINE_HEADER_HEIGHT_PX}px`,
+          borderBottom: '1px solid var(--background-modifier-border)',
+        }}
+      >
+        {headers}
+      </div>
+    );
+  };
+
+  const renderTimelineCards = () => {
+    if (!timelineStartDate || !timelineEndDate || cards.length === 0) {
+      // console.log('[TimelineView] renderTimelineCards: No cards or timeline range to render.');
+      return null;
+    }
+    // console.log('[TimelineView] renderTimelineCards: Rendering cards. Count:', cards.length);
+
+    return cards.map((card, index) => {
+      if (!card.startDate || !card.dueDate) {
+        // console.log(`[TimelineView] Card ${card.id} skipped (missing start/due date in render):`, card);
+        return null;
+      }
+
+      const cardStartDate = moment(card.startDate).startOf('day');
+      const cardDueDate = moment(card.dueDate).endOf('day');
+
+      // console.log(`[TimelineView] Rendering card ${card.id}: ${card.title}, Start: ${cardStartDate.format('YYYY-MM-DD')}, Due: ${cardDueDate.format('YYYY-MM-DD')}`);
+
+      if (cardDueDate.isBefore(timelineStartDate) || cardStartDate.isAfter(timelineEndDate)) {
+        // console.log(`[TimelineView] Card ${card.id} is outside current timeline range. Start: ${timelineStartDate.format('YYYY-MM-DD')}, End: ${timelineEndDate.format('YYYY-MM-DD')}`);
+        return null;
+      }
+
+      let startOffsetDays = cardStartDate.diff(timelineStartDate, 'days');
+      let durationDays = cardDueDate.diff(cardStartDate, 'days') + 1;
+
+      if (cardStartDate.isBefore(timelineStartDate)) {
+        durationDays = cardDueDate.diff(timelineStartDate, 'days') + 1;
+        startOffsetDays = 0;
+      }
+      if (cardDueDate.isAfter(timelineEndDate)) {
+        durationDays =
+          timelineEndDate.diff(
+            cardStartDate.isBefore(timelineStartDate) ? timelineStartDate : cardStartDate,
+            'days'
+          ) + 1;
+      }
+      if (durationDays <= 0) durationDays = 1;
+
+      const left = startOffsetDays * DAY_WIDTH_PX;
+      const width = durationDays * DAY_WIDTH_PX - 2;
+      const top = TIMELINE_HEADER_HEIGHT_PX + index * (CARD_HEIGHT_PX + ROW_GAP_PX) + ROW_GAP_PX;
+
+      //   console.log(`[TimelineView] Card ${card.id} position: left=${left}, top=${top}, width=${width}, durationDays=${durationDays}, startOffsetDays=${startOffsetDays}`);
+
+      return (
+        <div
+          key={card.id}
+          draggable={true}
+          onDragStart={(e) => handleDragStart(e, card.id, false, false)}
+          onDragEnd={handleDragEnd}
+          className="timeline-card"
+          style={{
+            position: 'absolute',
+            left: `${left}px`,
+            top: `${top}px`,
+            width: `${width}px`,
+            height: `${CARD_HEIGHT_PX}px`,
+            backgroundColor: card.blockId ? '#e0e0e0' : '#f0f0f0',
+            border: '1px solid #ccc',
+            padding: '5px',
+            boxSizing: 'border-box',
+            cursor: 'grab',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            textOverflow: 'ellipsis',
+          }}
+          title={`${card.titleRaw}\nSource: ${card.sourceBoardName}\nStart: ${cardStartDate.format(props.plugin.settings['date-format'])}\nDue: ${cardDueDate.format(props.plugin.settings['date-format'])}`}
+        >
+          {/* Left Resize Handle */}
+          <div
+            draggable={true}
+            onDragStart={(e) => {
+              e.stopPropagation();
+              handleDragStart(e, card.id, true, false);
+            }}
+            style={{
+              position: 'absolute',
+              left: '0px',
+              top: '0px',
+              width: '8px',
+              height: '100%',
+              cursor: 'ew-resize',
+            }}
+            title="Resize start date"
+          ></div>
+          {/* Card Title - adjust left padding to not overlap with handle */}
+          <div
+            style={{
+              marginLeft: '5px',
+              marginRight: '8px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {card.title}
+          </div>
+          {/* Right Resize Handle */}
+          <div
+            draggable={true}
+            onDragStart={(e) => {
+              e.stopPropagation();
+              handleDragStart(e, card.id, false, true);
+            }}
+            style={{
+              position: 'absolute',
+              right: '0px',
+              top: '0px',
+              width: '8px',
+              height: '100%',
+              cursor: 'ew-resize',
+            }}
+            title="Resize due date"
+          ></div>
+        </div>
+      );
+    });
+  };
+
+  const totalTimelineWidth =
+    timelineStartDate && timelineEndDate
+      ? (timelineEndDate.diff(timelineStartDate, 'days') + 1) * DAY_WIDTH_PX
+      : 0;
+  const totalTimelineHeight =
+    TIMELINE_HEADER_HEIGHT_PX + cards.length * (CARD_HEIGHT_PX + ROW_GAP_PX) + ROW_GAP_PX;
+
+  return (
+    <div style={{ padding: '10px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <h2 style={{ flexShrink: 0 }}>Timeline View</h2>
+      {isLoading && (
+        <p style={{ flexShrink: 0 }}>
+          <i>Loading cards...</i>
+        </p>
+      )}
+      {error && <p style={{ color: 'red', flexShrink: 0 }}>Error: {error}</p>}
+      {!isLoading && !error && cards.length === 0 && (
+        <p style={{ flexShrink: 0 }}>
+          <i>No cards to display on the timeline.</i>
+        </p>
+      )}
+      {!isLoading && !error && timelineStartDate && timelineEndDate && (
+        // console.log('[TimelineView] Rendering main timeline grid. Width:', totalTimelineWidth, 'Height:', totalTimelineHeight),
+        <div
+          style={{
+            flexGrow: 1,
+            overflow: 'auto',
+            border: '1px solid var(--background-modifier-border)',
+          }}
+        >
+          <div
+            ref={timelineGridRef}
+            style={{
+              width: `${totalTimelineWidth}px`,
+              minHeight: `${totalTimelineHeight}px`,
+              position: 'relative',
+            }}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          >
+            {renderDateHeaders()}
+            {renderTimelineCards()}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Placeholder for recursivelyGetAllMdFilesInFolder if not moved to a shared location
+async function recursivelyGetAllMdFilesInFolder(folder: TFolder): Promise<TFile[]> {
+  const mdFiles: TFile[] = [];
+  for (const child of folder.children) {
+    if (child instanceof TFile && child.extension === 'md') {
+      mdFiles.push(child);
+    } else if (child instanceof TFolder) {
+      mdFiles.push(...(await recursivelyGetAllMdFilesInFolder(child)));
+    }
+  }
+  return mdFiles;
+}

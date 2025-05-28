@@ -47,7 +47,7 @@ import { parseMarkdown } from './parsers/parseMarkdown';
 
 // NEW COMPONENT for basic external link rendering
 // RENAMED and ENHANCED to InteractiveMarkdownCell
-function InteractiveMarkdownCell(props: {
+export function InteractiveMarkdownCell(props: {
   markdownText: string;
   app: App; // ADDED: For internal link handling
   sourcePath: string; // ADDED: For resolving internal links
@@ -194,7 +194,7 @@ async function recursivelyGetAllMdFilesInFolder(folder: TFolder): Promise<TFile[
 }
 
 // Helper to get text content from a heading node
-function getHeadingText(node: MdastHeading): string {
+export function getHeadingText(node: MdastHeading): string {
   return node.children.map((child) => ('value' in child ? child.value : '')).join('');
 }
 

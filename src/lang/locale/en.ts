@@ -98,6 +98,11 @@ const en = {
   "When toggled, cards will display the distance between today and the card's date. eg. 'In 3 days', 'A month ago'. Relative dates will not be shown for dates from the Tasks and Dataview plugins.":
     "When toggled, cards will display the distance between today and the card's date. eg. 'In 3 days', 'A month ago'. Relative dates will not be shown for dates from the Tasks and Dataview plugins.",
 
+  // Timeline View Settings
+  'Timeline Day Width': 'Timeline Day Width',
+  'The width of each day column in the timeline view, in pixels.':
+    'The width of each day column in the timeline view, in pixels.',
+
   'Move dates to card footer': 'Move dates to card footer',
   "When toggled, dates will be displayed in the card's footer instead of the card's body.":
     "When toggled, dates will be displayed in the card's footer instead of the card's body.",

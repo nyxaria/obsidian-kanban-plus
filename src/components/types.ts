@@ -93,6 +93,8 @@ export interface ItemMetadata {
   fileMetadata?: FileMetadata;
   fileMetadataOrder?: string[];
   inlineMetadata?: InlineField[];
+  startDate?: moment.Moment;
+  startDateStr?: string;
 }
 
 export interface ItemData {
@@ -265,4 +267,12 @@ export interface SavedWorkspaceView {
   tags: string[];
   members?: string[];
   dueDateFilter?: DueDateFilterConfig;
+}
+
+export interface TimelineCardData {
+  id: string;
+  title: string;
+  titleRaw?: string;
+  sourceBoardName: string;
+  sourceBoardPath: string;
 }

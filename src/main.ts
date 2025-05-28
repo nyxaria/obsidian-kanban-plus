@@ -28,6 +28,7 @@ import {
   SettingsManagerConfig,
 } from './Settings';
 import { StateManager } from './StateManager';
+import { TIMELINE_ICON, TIMELINE_VIEW_TYPE, TimelineView } from './TimelineView';
 import { DateSuggest, TimeSuggest } from './components/Editor/suggest';
 import { ReminderModal } from './components/ReminderModal';
 import { Item, ItemData } from './components/types';
@@ -172,6 +173,7 @@ export default class KanbanPlugin extends Plugin {
 
     this.registerView(kanbanViewType, (leaf) => new KanbanView(leaf, this));
     this.registerView(KANBAN_WORKSPACE_VIEW_TYPE, (leaf) => new KanbanWorkspaceView(leaf, this));
+    this.registerView(TIMELINE_VIEW_TYPE, (leaf) => new TimelineView(leaf, this));
     this.registerMonkeyPatches();
     this.registerCommands();
     this.registerEvents();
@@ -241,6 +243,13 @@ export default class KanbanPlugin extends Plugin {
     this.addRibbonIcon(KANBAN_WORKSPACE_ICON, 'Open Kanban Workspace View', () => {
       this.app.workspace.getLeaf(true).setViewState({
         type: KANBAN_WORKSPACE_VIEW_TYPE,
+        active: true,
+      });
+    });
+
+    this.addRibbonIcon(TIMELINE_ICON, 'Open Timeline View', () => {
+      this.app.workspace.getLeaf(true).setViewState({
+        type: TIMELINE_VIEW_TYPE,
         active: true,
       });
     });
@@ -905,10 +914,21 @@ export default class KanbanPlugin extends Plugin {
 
     this.addCommand({
       id: 'open-kanban-workspace-view',
-      name: 'Kanban Workspace: Open tag filter view',
+      name: 'Open workspace view',
       callback: () => {
         this.app.workspace.getLeaf(true).setViewState({
           type: KANBAN_WORKSPACE_VIEW_TYPE,
+          active: true,
+        });
+      },
+    });
+
+    this.addCommand({
+      id: 'open-timeline-view',
+      name: 'Open timeline view',
+      callback: () => {
+        this.app.workspace.getLeaf(true).setViewState({
+          type: TIMELINE_VIEW_TYPE,
           active: true,
         });
       },
