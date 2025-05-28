@@ -53,6 +53,8 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
   const moveTags = stateManager.getSetting('move-tags');
   const moveDates = stateManager.getSetting('move-dates');
   const dateFormat = stateManager.getSetting('date-format');
+  const dateTrigger = stateManager.getSetting('date-trigger') || '@'; // Default to '@' if not set
+  const startDateTrigger = dateTrigger + 'start'; // e.g., "@start"
 
   const startNode = item.children.first();
   const endNode = item.children.last();
@@ -100,6 +102,8 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     metadata: {
       dateStr: undefined,
       date: undefined,
+      startDateStr: undefined, // Initialize startDateStr
+      startDate: undefined, // Initialize startDate
       time: undefined,
       timeStr: undefined,
       tags: [],
@@ -183,13 +187,54 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     }
 
     if (genericNode.type === 'date' || genericNode.type === 'dateLink') {
-      itemData.metadata.dateStr = (genericNode as DateNode).date;
+      const dateNode = genericNode as DateNode;
+      const currentDateStr = dateNode.date;
+      // const nodeText = toString(dateNode).trim(); // Old way
 
-      if (moveDates) {
-        title = markRangeForDeletion(title, {
-          start: node.position.start.offset - itemBoundary.start,
-          end: node.position.end.offset - itemBoundary.start,
-        });
+      // Get the original text slice using node's position
+      // Ensure node.position, node.position.start, and node.position.end exist and have offset
+      let originalTextSlice = '';
+      if (
+        node.position &&
+        node.position.start &&
+        node.position.end &&
+        typeof node.position.start.offset === 'number' &&
+        typeof node.position.end.offset === 'number'
+      ) {
+        originalTextSlice = md
+          .substring(node.position.start.offset, node.position.end.offset)
+          .trim();
+      } else {
+        // Fallback or error logging if position is not available as expected
+        // This case should ideally not happen if AST is well-formed
+        console.warn(
+          '[listItemToItemData] Date node found without complete position information:',
+          node
+        );
+        // Attempt to use toString as a less reliable fallback, though we know it doesn't have the trigger
+        originalTextSlice = toString(dateNode).trim();
+      }
+
+      if (originalTextSlice.startsWith(startDateTrigger + '{')) {
+        if (!itemData.metadata.startDateStr) {
+          itemData.metadata.startDateStr = currentDateStr;
+          if (moveDates) {
+            title = markRangeForDeletion(title, {
+              start: node.position.start.offset - itemBoundary.start,
+              end: node.position.end.offset - itemBoundary.start,
+            });
+          }
+        }
+      } else if (originalTextSlice.startsWith(dateTrigger + '{')) {
+        if (!itemData.metadata.dateStr) {
+          itemData.metadata.dateStr = currentDateStr;
+          if (moveDates) {
+            title = markRangeForDeletion(title, {
+              start: node.position.start.offset - itemBoundary.start,
+              end: node.position.end.offset - itemBoundary.start,
+            });
+          }
+        }
       }
       return true;
     }
@@ -216,9 +261,16 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
         const potentialDate = moment(linkContent.trim(), dateFormat, true);
 
         if (potentialDate.isValid()) {
-          if (!itemData.metadata.dateStr) {
+          // Heuristic: if a date is already parsed from a @{date} tag, a wikilink date is likely a start date
+          // or an alternative due date. This needs refinement based on desired behavior.
+          // For now, if itemData.metadata.dateStr is set, assume this wikilink is a startDate if startDateStr isn't.
+          // If dateStr isn't set, assume this is the primary (due) date.
+          if (itemData.metadata.dateStr && !itemData.metadata.startDateStr) {
+            itemData.metadata.startDateStr = potentialDate.format(dateFormat);
+          } else if (!itemData.metadata.dateStr) {
             itemData.metadata.dateStr = potentialDate.format(dateFormat);
           }
+          // If both are set, the wikilink date is currently ignored. Could be logged.
 
           if (moveDates) {
             title = markRangeForDeletion(title, {
@@ -248,6 +300,28 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     if (genericNode.type === 'embedLink') {
       itemData.metadata.fileAccessor = (genericNode as FileNode).fileAccessor;
       return true;
+    }
+
+    // Add member assignment parsing
+    if (genericNode.type === 'text' && genericNode.value) {
+      const memberAssignmentPrefix = stateManager.getSetting('memberAssignmentPrefix') || '@@';
+      const escapedPrefix = memberAssignmentPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const memberRegex = new RegExp(`(?:^|\\s)(${escapedPrefix}[^\\s]+)`, 'g');
+      let memberMatch;
+      let tempTextContent = genericNode.value as string;
+      let lastIndex = 0;
+
+      while ((memberMatch = memberRegex.exec(tempTextContent)) !== null) {
+        const fullMemberTag = memberMatch[0]; // e.g., " @@user1" or "@@user1"
+        const memberName = memberMatch[1].substring(memberAssignmentPrefix.length); // "user1"
+        if (memberName && !itemData.assignedMembers.includes(memberName)) {
+          itemData.assignedMembers.push(memberName);
+        }
+        // Mark for deletion from title (relative to the current text node's content)
+        // This needs careful handling of offsets if we want to modify the global 'title' string here.
+        // For now, we are just extracting. The removal from title happens later or not at all for members.
+        lastIndex = memberRegex.lastIndex;
+      }
     }
   });
 
@@ -337,6 +411,10 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
 
   itemData.metadata.tags?.sort(defaultSort);
 
+  console.log(
+    `[listItemToItemData] Returning metadata:`,
+    JSON.parse(JSON.stringify(itemData.metadata))
+  );
   return itemData;
 }
 

@@ -146,6 +146,7 @@ export interface KanbanSettings {
   automaticEmailAppPassword?: string;
   automaticEmailSendingFrequencyDays?: number;
   hideDoneLane?: boolean;
+  timelineDayWidth?: number;
 }
 
 export interface KanbanViewSettings {
@@ -167,6 +168,7 @@ export interface KanbanViewSettings {
   automaticEmailAppPassword: '';
   automaticEmailSendingFrequencyDays: 1;
   hideDoneLane: false;
+  'timeline-day-width': 50;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -226,6 +228,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'automaticEmailAppPassword',
   'automaticEmailSendingFrequencyDays',
   'hideDoneLane',
+  'timeline-day-width',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -451,7 +454,7 @@ export class SettingsManager {
       });
 
     new Setting(contentEl)
-      .setName(t('List width'))
+      .setName(t('Lane Width'))
       .setDesc(t('Enter a number to set the list width in pixels.'))
       .addText((text) => {
         const [value, globalValue] = this.getSetting('lane-width', local);
@@ -481,6 +484,37 @@ export class SettingsManager {
             $unset: ['lane-width'],
           });
         });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Timeline Day Width'))
+      .setDesc(t('The width of each day column in the timeline view, in pixels.'))
+      .addText((text) => {
+        const [value, globalValue] = this.getSetting('timelineDayWidth', local);
+        const placeholderValue = globalValue !== undefined ? globalValue : DEFAULT_SETTINGS.timelineDayWidth;
+
+        text.inputEl.setAttr('type', 'number');
+        text.setPlaceholder(placeholderValue?.toString() || '50')
+          .setValue(value?.toString() || '') // Show current local value or empty if none
+          .onChange(async (val) => {
+            if (val && numberRegEx.test(val) && parseInt(val) > 0) {
+              text.inputEl.removeClass('error');
+              this.applySettingsUpdate({
+                timelineDayWidth: {
+                  $set: parseInt(val),
+                },
+              });
+            } else if (!val) { // If input is cleared, reset to default
+              text.inputEl.removeClass('error');
+               this.applySettingsUpdate({
+                $unset: ['timelineDayWidth'], // This will make it use global or DEFAULT_SETTINGS value
+              });
+            } else { // Invalid input (not a positive number)
+              text.inputEl.addClass('error');
+              // Do not save invalid input, keep current setting or let it be default
+            }
+            // No need for explicit saveSettings() here as applySettingsUpdate handles it with debounce
+          });
       });
 
     new Setting(contentEl).setName(t('Expand lists to full width in list view')).then((setting) => {
@@ -2244,6 +2278,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   automaticEmailAppPassword: '',
   automaticEmailSendingFrequencyDays: 1,
   hideDoneLane: false,
+  timelineDayWidth: 50,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {
