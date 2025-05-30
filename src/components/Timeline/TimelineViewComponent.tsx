@@ -373,8 +373,8 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
         });
         setCards(allFetchedCards);
         if (allFetchedCards.length > 0 && minDate && maxDate) {
-          setTimelineStartDate(minDate.clone().subtract(3, 'days'));
-          setTimelineEndDate(maxDate.clone().add(3, 'days'));
+          setTimelineStartDate(minDate.clone().subtract(1, 'days'));
+          setTimelineEndDate(maxDate.clone().add(1, 'days'));
         } else {
           setTimelineStartDate(moment().startOf('week'));
           setTimelineEndDate(moment().endOf('week'));
@@ -878,7 +878,11 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
               whiteSpace: 'normal',
             }}
           >
-            {card.title}
+            <InteractiveMarkdownCell
+              markdownText={card.title}
+              app={props.app}
+              sourcePath={card.sourceBoardPath}
+            />
           </div>
           {/* Right Resize Handle */}
           <div
