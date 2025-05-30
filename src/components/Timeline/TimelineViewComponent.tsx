@@ -1,10 +1,10 @@
 // May need to move/share this
 // import { MdastHeading, MdastList, MdastListItem, MdastRoot } from 'mdast'; // Removed due to import errors
 import moment from 'moment';
-import { App, TFile, TFolder } from 'obsidian';
+import { App, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
 import { Fragment, createElement } from 'preact';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { KanbanView } from 'src/KanbanView';
+import { KanbanView, kanbanViewType } from 'src/KanbanView';
 // Assuming this is the correct type for props.view
 import { DEFAULT_SETTINGS } from 'src/Settings';
 import { updateCardDatesInMarkdown } from 'src/markdownUpdater';
@@ -33,6 +33,8 @@ export interface TimelineCardData {
   startDate?: moment.Moment;
   dueDate?: moment.Moment;
   checked?: boolean;
+  laneColor?: string;
+  sourceLaneTitle?: string;
 }
 
 interface TimelineViewComponentProps {
@@ -43,7 +45,6 @@ interface TimelineViewComponentProps {
 }
 
 // const DAY_WIDTH_PX = 50; // Width of one day column - REMOVED
-const CARD_HEIGHT_PX = 40;
 const ROW_GAP_PX = 5;
 const TIMELINE_HEADER_HEIGHT_PX = 50; // Increased for better date display
 
@@ -61,6 +62,9 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
   // Access DAY_WIDTH_PX from settings
   const DAY_WIDTH_PX =
     props.plugin.settings.timelineDayWidth || DEFAULT_SETTINGS.timelineDayWidth || 50;
+  // Access CARD_HEIGHT_PX from settings
+  const CARD_HEIGHT_PX =
+    props.plugin.settings.timelineCardHeight || DEFAULT_SETTINGS.timelineCardHeight || 40;
 
   const [timelineStartDate, setTimelineStartDate] = useState<moment.Moment | null>(null);
   const [timelineEndDate, setTimelineEndDate] = useState<moment.Moment | null>(null);
@@ -101,21 +105,87 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
       console.log(`[TimelineView] Found ${allMdFiles.length} MD files to scan.`);
 
       for (const mdFile of allMdFiles) {
-        if (hasFrontmatterKey(mdFile)) {
-          try {
-            const fileContent = await props.plugin.app.vault.cachedRead(mdFile);
-            const tempStateManager = new StateManager(
-              props.plugin.app,
-              { file: mdFile } as any,
-              () => {},
-              () => props.plugin.settings
+        try {
+          const fileContent = await props.plugin.app.vault.cachedRead(mdFile);
+          const tempStateManager = new StateManager(
+            props.plugin.app,
+            { file: mdFile } as any,
+            () => {},
+            () => props.plugin.settings
+          );
+          // Capture the full result from parseMarkdown
+          const parsedResult = parseMarkdown(tempStateManager, fileContent) as {
+            ast: any; // Adjust 'any' to a more specific mdast type if available/known
+            settings: any; // Adjust 'any' to KanbanSettings if appropriate
+          };
+          console.log(
+            `[TimelineView] DEBUG: After parseMarkdown for ${mdFile.path}. parsedResult exists: ${!!parsedResult}, settings exists: ${!!parsedResult?.settings}`
+          );
+
+          // Log the value being checked for board identification
+          const kanbanPluginSetting = parsedResult?.settings?.['kanban-plugin'];
+          console.log(
+            `[TimelineView] File: ${mdFile.path}, kanban-plugin setting: "${kanbanPluginSetting}" (Type: ${typeof kanbanPluginSetting})`
+          );
+
+          // Check if the parsed file is a Kanban board based on its settings
+          if (parsedResult && parsedResult.settings && kanbanPluginSetting === 'board') {
+            console.log(
+              `[TimelineView] File ${mdFile.path} identified as a Kanban board. Processing for timeline cards.`
             );
-            const { ast } = parseMarkdown(tempStateManager, fileContent) as {
-              ast: any;
-              settings: any;
-            };
+            const ast = parsedResult.ast; // Use the AST from the parsed result
+
+            // Existing logic for processing ast.children (headings, colors, lists) starts here
+            console.log(
+              `[TimelineView] Processing AST for ${mdFile.path}. Number of root children: ${ast.children.length}`
+            );
+            let currentLaneColor: string | undefined = undefined;
+            let currentLaneTitle: string | undefined = undefined;
+
             for (const astNode of ast.children) {
+              console.log(`[TimelineView] AST Node: type=${astNode.type}`);
+              if (astNode.type === 'heading') {
+                currentLaneColor = undefined;
+                currentLaneTitle = getHeadingText(astNode as any);
+                console.log(
+                  `[TimelineView] Encountered heading: "${currentLaneTitle}". Reset color. Searching for color comment...`
+                );
+                const headingIndex = ast.children.indexOf(astNode);
+                for (let i = headingIndex + 1; i < ast.children.length; i++) {
+                  const nextNode = ast.children[i];
+                  console.log(
+                    `[TimelineView]  Sub-check for color: nextNode type=${nextNode.type}, index=${i}`
+                  );
+                  if (nextNode.type === 'html') {
+                    const htmlContent = nextNode.value as string;
+                    console.log(`[TimelineView]    HTML node content: "${htmlContent}"`);
+                    const colorCommentRegex =
+                      /<!--\s*kanban-lane-background-color:\s*(#[0-9a-fA-F]{6}|[a-zA-Z]+)\s*-->/i;
+                    const colorMatch = colorCommentRegex.exec(htmlContent);
+                    if (colorMatch && colorMatch[1]) {
+                      currentLaneColor = colorMatch[1].trim();
+                      console.log(
+                        `[TimelineView]    Found and set lane color: ${currentLaneColor}`
+                      );
+                      break;
+                    } else {
+                      console.log(`[TimelineView]    HTML node did not match color regex.`);
+                    }
+                  } else if (nextNode.type === 'list' || nextNode.type === 'heading') {
+                    console.log(
+                      `[TimelineView]  Stopping color search for current heading; encountered ${nextNode.type}.`
+                    );
+                    break;
+                  }
+                }
+                if (!currentLaneColor) {
+                  console.log(`[TimelineView] No color comment found for the preceding heading.`);
+                }
+              }
               if (astNode.type === 'list') {
+                console.log(
+                  `[TimelineView] Processing list. Active lane color for this list: ${currentLaneColor}`
+                );
                 for (const listItemNode of (astNode as any).children) {
                   if (listItemNode.type === 'listItem') {
                     const itemData: ItemData = listItemToItemData(
@@ -204,6 +274,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                             cardDueDate = potentialDueDateFromHeuristic;
                           }
                         } else {
+                          // cardStartDate already exists, so we only potentially set cardDueDate
                           if (potentialDueDateFromHeuristic && !cardDueDate) {
                             cardDueDate = potentialDueDateFromHeuristic;
                           }
@@ -220,13 +291,14 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                         cardStartDate = cardDueDate.clone().startOf('day');
                       }
                     }
+
                     if (
                       cardDueDate &&
                       cardStartDate &&
                       cardStartDate.isValid() &&
                       cardDueDate.isValid()
                     ) {
-                      allFetchedCards.push({
+                      const cardToPush: TimelineCardData = {
                         id:
                           itemData.blockId ||
                           `${mdFile.path}-${itemData.titleRaw.slice(0, 10)}-${Math.random()}`,
@@ -238,20 +310,53 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                         startDate: cardStartDate.clone().startOf('day'),
                         dueDate: cardDueDate.clone().endOf('day'),
                         checked: itemData.checked,
-                      });
+                        laneColor: currentLaneColor,
+                        sourceLaneTitle: currentLaneTitle,
+                      };
+                      console.log(
+                        `[TimelineView] Adding card: "${cardToPush.titleRaw.substring(0, 30)}...", assigned laneColor: ${cardToPush.laneColor}, File: ${mdFile.path}`
+                      );
+                      allFetchedCards.push(cardToPush);
+
                       if (!minDate || cardStartDate.isBefore(minDate)) {
                         minDate = cardStartDate.clone().startOf('day');
                       }
                       if (!maxDate || cardDueDate.isAfter(maxDate)) {
                         maxDate = cardDueDate.clone().endOf('day');
                       }
+                    } else {
+                      console.log(
+                        `[TimelineView] Card SKIPPED due to invalid/missing dates: "${itemData.titleRaw.substring(0, 30)}...", File: ${mdFile.path}`
+                      );
                     }
                   }
                 }
               }
             }
-          } catch (parseError) {
-            console.error(`[TimelineView] Error processing board ${mdFile.path}:`, parseError);
+            // End of existing logic for processing ast.children
+          } else {
+            // Optional: Log if a file was parsed but not identified as a Kanban board.
+            // This might be noisy if there are many non-Kanban files.
+            // console.log(`[TimelineView] File ${mdFile.path} is not a Kanban board or has no 'kanban-plugin: board' setting. Skipping for timeline.`);
+          }
+        } catch (parseError: any) {
+          const errorMessage = parseError && parseError.message ? String(parseError.message) : '';
+          if (
+            parseError instanceof TypeError &&
+            errorMessage.includes('Cannot convert undefined or null to object')
+          ) {
+            console.debug(
+              `[TimelineView] Skipping file ${mdFile.path} due to TypeError during parsing (likely not a Kanban board or has minimal/no frontmatter).`
+            );
+          } else if (errorMessage.includes('Error parsing frontmatter')) {
+            console.debug(
+              `[TimelineView] Skipping file ${mdFile.path} due to frontmatter parsing issue (likely not a Kanban board).`
+            );
+          } else {
+            console.error(
+              `[TimelineView] Error processing file ${mdFile.path} (unexpected structure or issue):`,
+              parseError
+            );
           }
         }
       }
@@ -531,13 +636,62 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
     }
     draggedItemData.current = null; // Clear dragged item data regardless of success/failure of Markdown update
   };
-  // END Drag and Drop Handlers
+
+  const handleTimelineCardClick = useCallback(
+    async (cardData: TimelineCardData) => {
+      const app = props.app;
+
+      const navigationState = {
+        file: cardData.sourceBoardPath,
+        eState: {
+          filePath: cardData.sourceBoardPath,
+          blockId: cardData.blockId,
+          cardTitle: !cardData.blockId ? cardData.title : undefined,
+          listName: !cardData.blockId ? cardData.sourceLaneTitle : undefined,
+        },
+      };
+
+      let linkPath = cardData.sourceBoardPath;
+      if (cardData.blockId) {
+        linkPath = `${cardData.sourceBoardPath}#^${cardData.blockId}`;
+      }
+
+      let existingLeaf: WorkspaceLeaf | null = null;
+      app.workspace.getLeavesOfType(kanbanViewType).forEach((leaf) => {
+        if (leaf.view instanceof KanbanView && leaf.view.file?.path === cardData.sourceBoardPath) {
+          existingLeaf = leaf;
+        }
+      });
+
+      if (existingLeaf) {
+        app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+        const kanbanView = existingLeaf.view as KanbanView;
+        kanbanView.setState({ eState: navigationState.eState }, { history: true });
+        // Add a slight delay to ensure setState has processed and the view is ready
+        setTimeout(() => {
+          if (kanbanView && kanbanView.applyHighlight) {
+            console.log(
+              '[TimelineView] Directly calling applyHighlight on KanbanView instance for:',
+              cardData.sourceBoardPath
+            );
+            kanbanView.applyHighlight();
+          }
+        }, 150); // Increased delay slightly to see if it helps
+      } else {
+        // Fallback to opening a new tab if no existing view is found or suitable
+        await app.workspace.openLinkText(linkPath, cardData.sourceBoardPath, 'tab', {
+          state: navigationState,
+        });
+      }
+    },
+    [props.app]
+  );
 
   const renderDateHeaders = () => {
     if (!timelineStartDate || !timelineEndDate) return null;
 
     const headers = [];
-    let currentDate = timelineStartDate.clone();
+    const currentDate = timelineStartDate.clone();
     while (currentDate.isSameOrBefore(timelineEndDate, 'day')) {
       headers.push(
         <div
@@ -629,6 +783,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
           draggable={true}
           onDragStart={(e) => handleDragStart(e, card.id, false, false)}
           onDragEnd={handleDragEnd}
+          onClick={() => handleTimelineCardClick(card)}
           className="timeline-card"
           style={{
             position: 'absolute',
@@ -636,14 +791,16 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             top: `${top}px`,
             width: `${width}px`,
             height: `${CARD_HEIGHT_PX}px`,
-            backgroundColor: card.blockId ? '#e0e0e0' : '#f0f0f0',
-            border: '1px solid #ccc',
+            backgroundColor: card.laneColor || (card.blockId ? '#e0e0e0' : '#f0f0f0'),
+            // border: '1px solid #ccc',
+            borderRadius: '8px',
             padding: '5px',
             boxSizing: 'border-box',
             cursor: 'grab',
             overflow: 'hidden',
-            whiteSpace: 'nowrap',
-            textOverflow: 'ellipsis',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
           title={`${card.titleRaw}\nSource: ${card.sourceBoardName}\nStart: ${cardStartDate.format(props.plugin.settings['date-format'])}\nDue: ${cardDueDate.format(props.plugin.settings['date-format'])}`}
         >
@@ -669,8 +826,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             style={{
               marginLeft: '5px',
               marginRight: '8px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
+              whiteSpace: 'normal',
             }}
           >
             {card.title}

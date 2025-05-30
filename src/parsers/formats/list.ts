@@ -159,6 +159,54 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     );
   }
 
+  // Regex for @start{date}
+  // Escape the dateTrigger for use in regex
+  const escapedDateTrigger = dateTrigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const startDateRawRegex = new RegExp(`(?:^|\\s)(${escapedDateTrigger}start\\{[^}]+\\})`, 'g');
+  let startDateMatch;
+  let tempTitleForStartDateExtraction = title; // Use a temporary copy for regex exec
+
+  console.log(`[listItemToItemData] Searching for start dates with regex: ${startDateRawRegex}`);
+
+  while ((startDateMatch = startDateRawRegex.exec(tempTitleForStartDateExtraction)) !== null) {
+    const fullMatchedStartDateTag = startDateMatch[0]; // e.g., " @start{date}" or "@start{date}"
+    const actualStartDateTag = startDateMatch[1]; // e.g., "@start{date}"
+    console.log(
+      `[listItemToItemData] Found potential start date tag: ${actualStartDateTag} (full match: ${fullMatchedStartDateTag})`
+    );
+
+    // Extract the date part from actualStartDateTag: @start{DATE_HERE}
+    const dateContentMatch = actualStartDateTag.match(/\{([^}]+)\}$/);
+    if (dateContentMatch && dateContentMatch[1]) {
+      const extractedDateStr = dateContentMatch[1];
+      if (!itemData.metadata.startDateStr) {
+        itemData.metadata.startDateStr = extractedDateStr;
+        console.log(`[listItemToItemData] Extracted startDateStr: ${extractedDateStr}`);
+
+        if (moveDates) {
+          // Mark the actual matched tag (e.g., "@start{date}") for deletion
+          // We need its index within the *original* title string that's being modified.
+          // startDateMatch.index is the index of fullMatchedStartDateTag (" @start{date}")
+          // We need to find the index of actualStartDateTag within fullMatchedStartDateTag
+          const relativeStartIndex = fullMatchedStartDateTag.indexOf(actualStartDateTag);
+          const absoluteStartIndex = startDateMatch.index + relativeStartIndex;
+
+          title = markRangeForDeletion(title, {
+            start: absoluteStartIndex,
+            end: absoluteStartIndex + actualStartDateTag.length,
+          });
+          console.log(
+            `[listItemToItemData] Marked start date string "${actualStartDateTag}" for deletion from title.`
+          );
+        }
+      }
+    } else {
+      console.warn(
+        `[listItemToItemData] Could not extract date content from supposed start date tag: ${actualStartDateTag}`
+      );
+    }
+  }
+
   visit(item, (node, i, parent) => {
     const genericNode = node as ValueNode;
 
@@ -189,10 +237,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     if (genericNode.type === 'date' || genericNode.type === 'dateLink') {
       const dateNode = genericNode as DateNode;
       const currentDateStr = dateNode.date;
-      // const nodeText = toString(dateNode).trim(); // Old way
 
-      // Get the original text slice using node's position
-      // Ensure node.position, node.position.start, and node.position.end exist and have offset
       let originalTextSlice = '';
       if (
         node.position &&
@@ -205,15 +250,17 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
           .substring(node.position.start.offset, node.position.end.offset)
           .trim();
       } else {
-        // Fallback or error logging if position is not available as expected
-        // This case should ideally not happen if AST is well-formed
         console.warn(
           '[listItemToItemData] Date node found without complete position information:',
           node
         );
-        // Attempt to use toString as a less reliable fallback, though we know it doesn't have the trigger
         originalTextSlice = toString(dateNode).trim();
       }
+
+      // DEBUG LOGGING
+      console.log(
+        `[listItemToItemData] Date Node Processing: originalTextSlice="${originalTextSlice}", startDateTrigger="${startDateTrigger}", isStartDateMatch=${originalTextSlice.startsWith(startDateTrigger + '{')}, dateTrigger="${dateTrigger}", isDueDateMatch=${originalTextSlice.startsWith(dateTrigger + '{')}`
+      );
 
       if (originalTextSlice.startsWith(startDateTrigger + '{')) {
         if (!itemData.metadata.startDateStr) {

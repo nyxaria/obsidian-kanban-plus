@@ -44,9 +44,9 @@ export class StateManager {
     this.getGlobalSettings = getGlobalSettings;
     this.parser = new ListFormat(this);
 
-    console.log(
-      `[StateManager] Constructor completed for ${this.file?.path}. Initial parsing deferred to plugin.addView.`
-    );
+    // console.log(
+    //   `[StateManager] Constructor completed for ${this.file?.path}. Initial parsing deferred to plugin.addView.`
+    // );
   }
 
   getAView(): KanbanView | undefined {
