@@ -6,7 +6,7 @@ import { Fragment, createElement } from 'preact';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { KanbanView, kanbanViewType } from 'src/KanbanView';
 // Assuming this is the correct type for props.view
-import { DEFAULT_SETTINGS } from 'src/Settings';
+import { DEFAULT_SETTINGS, KanbanSettings } from 'src/Settings';
 import { updateCardDatesInMarkdown } from 'src/markdownUpdater';
 
 import { getHeadingText } from '../../KanbanWorkspaceView';
@@ -18,6 +18,8 @@ import KanbanPlugin from '../../main';
 import { listItemToItemData } from '../../parsers/formats/list';
 // Assuming ItemMetadata will have startDate
 import { parseMarkdown } from '../../parsers/parseMarkdown';
+// Import helper functions for tags and members - CORRECTED PATH
+import { getTagColorFn, getTagSymbolFn } from '../helpers';
 import { TimelineCardData as ImportedTimelineCardData, ItemData, ItemMetadata } from '../types';
 
 // Renamed imported TimelineCardData
@@ -35,6 +37,8 @@ export interface TimelineCardData {
   checked?: boolean;
   laneColor?: string;
   sourceLaneTitle?: string;
+  tags?: string[];
+  assignedMembers?: string[];
 }
 
 interface TimelineViewComponentProps {
@@ -73,6 +77,23 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
   const [actualTotalTimelineHeight, setActualTotalTimelineHeight] = useState(
     TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX * 2
   );
+
+  // Get tag and member display settings
+  const getTagColor = useMemo(
+    () => getTagColorFn(props.plugin.settings['tag-colors'] || []),
+    [props.plugin.settings]
+  );
+  const getTagSymbol = useMemo(
+    () => getTagSymbolFn(props.plugin.settings['tag-symbols'] || []),
+    [props.plugin.settings]
+  );
+  const teamMemberColors = useMemo(
+    () => props.plugin.settings.teamMemberColors || {},
+    [props.plugin.settings]
+  );
+  const hideHashForTagsWithoutSymbols =
+    props.plugin.settings.hideHashForTagsWithoutSymbols ??
+    DEFAULT_SETTINGS.hideHashForTagsWithoutSymbols;
 
   // Moved scanCards definition before useEffect hooks that use it
   const scanCards = useCallback(async () => {
@@ -316,6 +337,8 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                         checked: itemData.checked,
                         laneColor: currentLaneColor,
                         sourceLaneTitle: currentLaneTitle,
+                        tags: itemData.metadata?.tags,
+                        assignedMembers: itemData.assignedMembers,
                       };
                       console.log(
                         `[TimelineView] Adding card: "${cardToPush.titleRaw.substring(0, 30)}...", assigned laneColor: ${cardToPush.laneColor}, File: ${mdFile.path}`
@@ -753,6 +776,10 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'flex-end',
+            // ADDED: Highlight for current day
+            backgroundColor: currentDate.isSame(moment(), 'day')
+              ? 'var(--text-highlight-bg)'
+              : undefined,
           }}
         >
           <div style={{ fontSize: '0.9em', fontWeight: '500' }}>{currentDate.format('MMM')}</div>
@@ -850,6 +877,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'center',
+            zIndex: 2,
           }}
           title={`${card.titleRaw}\nSource: ${card.sourceBoardName}\nStart: ${cardStartDate.format(props.plugin.settings['date-format'])}\nDue: ${cardDueDate.format(props.plugin.settings['date-format'])}`}
         >
@@ -870,19 +898,120 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             }}
             title="Resize start date"
           ></div>
-          {/* Card Title - adjust left padding to not overlap with handle */}
+          {/* Card Content: Title, Tags, Members */}
           <div
             style={{
-              marginLeft: '5px',
-              marginRight: '8px',
-              whiteSpace: 'normal',
+              flexGrow: 1, // Allow this container to take available space
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center', // Center content vertically if space allows
+              marginLeft: '3px', // Space from left resize handle
+              marginRight: '3px', // Space for right resize handle
+              overflow: 'hidden', // Prevent content from spilling out
             }}
           >
-            <InteractiveMarkdownCell
-              markdownText={card.title}
-              app={props.app}
-              sourcePath={card.sourceBoardPath}
-            />
+            {/* Title */}
+            <div
+              style={{
+                marginBottom:
+                  (card.tags?.length || 0) > 0 || (card.assignedMembers?.length || 0) > 0
+                    ? '4px'
+                    : '0px',
+              }}
+            >
+              <InteractiveMarkdownCell
+                markdownText={card.title}
+                app={props.app}
+                sourcePath={card.sourceBoardPath}
+              />
+            </div>
+
+            {/* Tags and Members Container */}
+            {((card.tags && card.tags.length > 0) ||
+              (card.assignedMembers && card.assignedMembers.length > 0)) && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '4px',
+                  alignItems: 'center',
+                  // justifyContent: 'flex-end',
+                  // marginTop: 'auto', // Push to bottom if there's extra space in the card
+                }}
+              >
+                {/* Render Tags */}
+                {card.tags?.map((tagWithHash) => {
+                  const colorSetting = getTagColor(tagWithHash);
+                  const symbolInfo = getTagSymbol(tagWithHash);
+                  const colorValue = colorSetting?.color;
+                  const bgColor = colorSetting?.backgroundColor;
+                  const tagNameForDisplay = tagWithHash.substring(1);
+
+                  let displayContent = null;
+                  if (symbolInfo) {
+                    displayContent = (
+                      <Fragment>
+                        {symbolInfo.symbol}
+                        {!symbolInfo.hideTag && (
+                          <span style={{ marginLeft: '0.2em' }}>{tagNameForDisplay}</span>
+                        )}
+                      </Fragment>
+                    );
+                  } else {
+                    displayContent = hideHashForTagsWithoutSymbols
+                      ? tagNameForDisplay
+                      : tagWithHash;
+                  }
+
+                  return (
+                    <span
+                      key={`tag-${tagWithHash}`}
+                      style={{
+                        backgroundColor: bgColor || 'var(--background-modifier-hover)',
+                        color: colorValue || 'var(--text-normal)',
+                        padding: '1px 6px',
+                        borderRadius: '5px', // Lozenge shape
+                        fontSize: '0.75em',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {displayContent}
+                    </span>
+                  );
+                })}
+
+                {/* Render Members */}
+                {card.assignedMembers?.map((member) => {
+                  const memberConfig = teamMemberColors[member];
+                  const memberBgColor =
+                    memberConfig?.background || 'var(--background-modifier-accent)';
+                  const memberTextColor = memberConfig?.text || 'var(--text-on-accent)';
+                  const initial = member.charAt(0).toUpperCase();
+
+                  return (
+                    <div
+                      key={`member-${member}`}
+                      style={{
+                        backgroundColor: memberBgColor,
+                        color: memberTextColor,
+                        borderRadius: '50%',
+                        width: '18px',
+                        height: '18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.7em',
+                        fontWeight: 'bold',
+                        // marginLeft: '4px', // Spacing between members or tags
+                      }}
+                      title={member}
+                    >
+                      {initial}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
           {/* Right Resize Handle */}
           <div
@@ -904,6 +1033,33 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
         </div>
       );
     });
+  };
+
+  // NEW function to render vertical day divider lines
+  const renderDayBackgroundLines = () => {
+    if (!timelineStartDate || !timelineEndDate || !timelineGridRef.current) return null;
+
+    const lines = [];
+    const numDays = timelineEndDate.diff(timelineStartDate, 'days') + 1;
+
+    for (let i = 0; i < numDays - 1; i++) {
+      // numDays - 1 because we don't need a line after the last day
+      lines.push(
+        <div
+          key={`day-line-${i}`}
+          style={{
+            position: 'absolute',
+            left: `${(i + 1) * DAY_WIDTH_PX - 1}px`, // Align with header borderRight
+            top: `${TIMELINE_HEADER_HEIGHT_PX}px`, // Start below header
+            width: '1px',
+            height: `${actualTotalTimelineHeight - TIMELINE_HEADER_HEIGHT_PX}px`,
+            backgroundColor: 'var(--background-modifier-border)',
+            zIndex: 1, // Behind cards
+          }}
+        />
+      );
+    }
+    return <Fragment>{lines}</Fragment>; // Use Fragment to return multiple elements
   };
 
   const totalTimelineWidth =
@@ -945,6 +1101,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             onDrop={handleDrop}
           >
             {renderDateHeaders()}
+            {renderDayBackgroundLines()}
             {renderTimelineCards()}
           </div>
         </div>
