@@ -69,6 +69,10 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
   const [timelineStartDate, setTimelineStartDate] = useState<moment.Moment | null>(null);
   const [timelineEndDate, setTimelineEndDate] = useState<moment.Moment | null>(null);
   const timelineGridRef = useRef<HTMLDivElement>(null); // Ref for the timeline grid
+  const cardElementRefs = useRef<(HTMLDivElement | null)[]>([]); // Refs for individual card elements
+  const [actualTotalTimelineHeight, setActualTotalTimelineHeight] = useState(
+    TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX * 2
+  );
 
   // Moved scanCards definition before useEffect hooks that use it
   const scanCards = useCallback(async () => {
@@ -448,6 +452,49 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
     };
   }, []);
 
+  // useEffect to adjust card positions and total height dynamically
+  useEffect(() => {
+    if (
+      isLoading ||
+      !timelineGridRef.current ||
+      cards.length === 0 ||
+      !timelineStartDate ||
+      !timelineEndDate
+    ) {
+      // If still loading, or no cards/grid, or timeline range not set, do nothing or reset height
+      if (!isLoading && cards.length === 0) {
+        setActualTotalTimelineHeight(TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX * 2); // Minimal height
+      }
+      return;
+    }
+
+    let currentCumulativeTop = TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX;
+    let maxRowBottom = currentCumulativeTop;
+
+    for (let i = 0; i < cards.length; i++) {
+      const cardElement = cardElementRefs.current[i];
+      if (cardElement) {
+        // Ensure cardElement's display is not none, and it's part of the layout
+        // This is important as offsetHeight would be 0 for hidden elements.
+        // The cards are absolutely positioned, so this check is mainly about visibility.
+        if (cardElement.style.display !== 'none') {
+          cardElement.style.top = `${currentCumulativeTop}px`;
+          currentCumulativeTop += cardElement.offsetHeight + ROW_GAP_PX;
+          maxRowBottom = Math.max(maxRowBottom, currentCumulativeTop);
+        }
+      } else {
+        // Fallback if ref is not yet available, use min height (CARD_HEIGHT_PX)
+        // This scenario should be less common if refs are populated correctly during render.
+        currentCumulativeTop += CARD_HEIGHT_PX + ROW_GAP_PX;
+        maxRowBottom = Math.max(maxRowBottom, currentCumulativeTop);
+      }
+    }
+    // Ensure the total height is at least the header height plus some padding
+    setActualTotalTimelineHeight(
+      Math.max(maxRowBottom, TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX * 2)
+    );
+  }, [cards, isLoading, timelineStartDate, timelineEndDate, CARD_HEIGHT_PX, ROW_GAP_PX]); // Rerun if cards, loading state, or layout params change
+
   useEffect(() => {
     console.log(
       '[TimelineView] Timeline range updated: StartDate:',
@@ -780,6 +827,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
       return (
         <div
           key={card.id}
+          ref={(el) => (cardElementRefs.current[index] = el)}
           draggable={true}
           onDragStart={(e) => handleDragStart(e, card.id, false, false)}
           onDragEnd={handleDragEnd}
@@ -790,7 +838,8 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             left: `${left}px`,
             top: `${top}px`,
             width: `${width}px`,
-            height: `${CARD_HEIGHT_PX}px`,
+            minHeight: `${CARD_HEIGHT_PX}px`,
+            height: 'auto',
             backgroundColor: card.laneColor || (card.blockId ? '#e0e0e0' : '#f0f0f0'),
             // border: '1px solid #ccc',
             borderRadius: '8px',
@@ -799,7 +848,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             cursor: 'grab',
             overflow: 'hidden',
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             justifyContent: 'center',
           }}
           title={`${card.titleRaw}\nSource: ${card.sourceBoardName}\nStart: ${cardStartDate.format(props.plugin.settings['date-format'])}\nDue: ${cardDueDate.format(props.plugin.settings['date-format'])}`}
@@ -857,8 +906,6 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
     timelineStartDate && timelineEndDate
       ? (timelineEndDate.diff(timelineStartDate, 'days') + 1) * DAY_WIDTH_PX
       : 0;
-  const totalTimelineHeight =
-    TIMELINE_HEADER_HEIGHT_PX + cards.length * (CARD_HEIGHT_PX + ROW_GAP_PX) + ROW_GAP_PX;
 
   return (
     <div style={{ padding: '10px', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -887,7 +934,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             ref={timelineGridRef}
             style={{
               width: `${totalTimelineWidth}px`,
-              minHeight: `${totalTimelineHeight}px`,
+              minHeight: `${actualTotalTimelineHeight}px`,
               position: 'relative',
             }}
             onDragOver={handleDragOver}
