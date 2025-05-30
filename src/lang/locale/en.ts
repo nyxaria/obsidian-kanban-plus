@@ -102,6 +102,9 @@ const en = {
   'Timeline Day Width': 'Timeline Day Width',
   'The width of each day column in the timeline view, in pixels.':
     'The width of each day column in the timeline view, in pixels.',
+  'Timeline Card Height': 'Timeline Card Height',
+  'The height of each card in the timeline view, in pixels.':
+    'The height of each card in the timeline view, in pixels.',
 
   'Move dates to card footer': 'Move dates to card footer',
   "When toggled, dates will be displayed in the card's footer instead of the card's body.":
