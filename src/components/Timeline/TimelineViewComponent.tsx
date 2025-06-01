@@ -306,15 +306,19 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                         }
                       }
                     }
-                    if (!cardDueDate || !cardDueDate.isValid()) {
-                      cardDueDate = moment().startOf('day');
-                    }
-                    if (!cardStartDate || !cardStartDate.isValid()) {
-                      cardStartDate = cardDueDate.clone().startOf('day');
-                    } else {
-                      if (cardStartDate.isAfter(cardDueDate)) {
+                    if (cardDueDate && cardDueDate.isValid()) {
+                      if (!cardStartDate || !cardStartDate.isValid()) {
                         cardStartDate = cardDueDate.clone().startOf('day');
+                      } else {
+                        // Ensure startDate is not after dueDate if both are valid
+                        if (cardStartDate.isAfter(cardDueDate)) {
+                          cardStartDate = cardDueDate.clone().startOf('day');
+                        }
                       }
+                    } else {
+                      // If cardDueDate is not valid, this card will be skipped anyway.
+                      // cardStartDate will be whatever it was parsed as (or null).
+                      // No further defaulting of cardStartDate is needed here for skipping purposes.
                     }
 
                     if (
