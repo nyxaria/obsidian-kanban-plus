@@ -39,6 +39,7 @@ export interface TimelineCardData {
   sourceLaneTitle?: string;
   tags?: string[];
   assignedMembers?: string[];
+  line?: number;
 }
 
 interface TimelineViewComponentProps {
@@ -131,6 +132,9 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
 
       for (const mdFile of allMdFiles) {
         try {
+          if (!hasFrontmatterKey(mdFile)) {
+            continue;
+          }
           const fileContent = await props.plugin.app.vault.cachedRead(mdFile);
           const tempStateManager = new StateManager(
             props.plugin.app,
@@ -327,27 +331,26 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                       cardStartDate.isValid() &&
                       cardDueDate.isValid()
                     ) {
-                      const cardToPush: TimelineCardData = {
-                        id:
-                          itemData.blockId ||
-                          `${mdFile.path}-${itemData.titleRaw.slice(0, 10)}-${Math.random()}`,
+                      const card: TimelineCardData = {
+                        id: `${mdFile.path}-${itemData.title.slice(0, 10).replace(/\s/g, '_')}-${Math.random()}`,
                         title: itemData.title,
                         titleRaw: itemData.titleRaw,
-                        sourceBoardName: mdFile.basename,
+                        sourceBoardName: mdFile.basename.replace('.md', ''),
                         sourceBoardPath: mdFile.path,
                         blockId: itemData.blockId,
-                        startDate: cardStartDate.clone().startOf('day'),
-                        dueDate: cardDueDate.clone().endOf('day'),
+                        startDate: cardStartDate ?? undefined,
+                        dueDate: cardDueDate ?? undefined,
                         checked: itemData.checked,
                         laneColor: currentLaneColor,
                         sourceLaneTitle: currentLaneTitle,
-                        tags: itemData.metadata?.tags,
+                        tags: itemData.metadata.tags,
                         assignedMembers: itemData.assignedMembers,
+                        line: itemData.line,
                       };
                       console.log(
-                        `[TimelineView] Adding card: "${cardToPush.titleRaw.substring(0, 30)}...", assigned laneColor: ${cardToPush.laneColor}, File: ${mdFile.path}`
+                        `[TimelineView] Adding card: "${card.titleRaw.substring(0, 30)}...", assigned laneColor: ${card.laneColor}, File: ${mdFile.path}`
                       );
-                      allFetchedCards.push(cardToPush);
+                      allFetchedCards.push(card);
 
                       if (!minDate || cardStartDate.isBefore(minDate)) {
                         minDate = cardStartDate.clone().startOf('day');
@@ -370,25 +373,11 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             // This might be noisy if there are many non-Kanban files.
             // console.log(`[TimelineView] File ${mdFile.path} is not a Kanban board or has no 'kanban-plugin: board' setting. Skipping for timeline.`);
           }
-        } catch (parseError: any) {
-          const errorMessage = parseError && parseError.message ? String(parseError.message) : '';
-          if (
-            parseError instanceof TypeError &&
-            errorMessage.includes('Cannot convert undefined or null to object')
-          ) {
-            console.debug(
-              `[TimelineView] Skipping file ${mdFile.path} due to TypeError during parsing (likely not a Kanban board or has minimal/no frontmatter).`
-            );
-          } else if (errorMessage.includes('Error parsing frontmatter')) {
-            console.debug(
-              `[TimelineView] Skipping file ${mdFile.path} due to frontmatter parsing issue (likely not a Kanban board).`
-            );
-          } else {
-            console.error(
-              `[TimelineView] Error processing file ${mdFile.path} (unexpected structure or issue):`,
-              parseError
-            );
-          }
+        } catch (e) {
+          console.error(
+            `[TimelineView] Error processing file ${mdFile.path} (unexpected structure or issue):`,
+            e
+          );
         }
       }
       if (isMounted.current) {
@@ -408,7 +397,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
         }
       }
     } catch (e) {
-      console.error('[TimelineView] Error scanning directory:', e);
+      console.error('[TimelineView] Error during scanCards:', e);
       if (isMounted.current) setError(`Error scanning directory: ${(e as Error).message}`);
     }
     if (isMounted.current) setIsLoading(false);

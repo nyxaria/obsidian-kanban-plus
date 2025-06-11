@@ -28,8 +28,6 @@ export async function updateCardDatesInMarkdown(
   const dateTrigger = settings.dateTrigger || '@';
   const startDateTrigger = dateTrigger + 'start'; // e.g., "@start"
 
-  console.log(`[markdownUpdater] Using dateFormat: '${dateFormat}' from settings.`);
-
   // Formatted new dates
   const newDueDateStr = newDueDate.format(dateFormat);
   const newStartDateStr = newStartDate.format(dateFormat);
@@ -50,8 +48,24 @@ export async function updateCardDatesInMarkdown(
     let itemLineText = '';
 
     // 1. Find the line
-    //    Priority: Block ID, then smart title match
-    if (cardData.blockId) {
+    //    Priority: Line number, then Block ID, then smart title match
+
+    if (typeof cardData.line === 'number' && cardData.line < lines.length) {
+      // Best case: We have the exact line number.
+      // We should still do a basic check to ensure it looks like the right line.
+      const line = lines[cardData.line];
+      if (line.trim().startsWith('- [')) {
+        itemLineIndex = cardData.line;
+        itemLineText = line;
+      } else {
+        console.warn(
+          `[markdownUpdater] Line number ${cardData.line} for card "${cardData.title}" did not seem to be a task item. Falling back to other methods.`
+        );
+      }
+    }
+
+    // Fallback to Block ID if line number search fails
+    if (itemLineIndex === -1 && cardData.blockId) {
       const blockIdSuffix = ` ^${cardData.blockId}`;
       itemLineIndex = lines.findIndex((line) => line.trim().endsWith(blockIdSuffix));
       if (itemLineIndex !== -1) {
@@ -77,7 +91,7 @@ export async function updateCardDatesInMarkdown(
       const baseTitleToSearch = rawTitleToSearch
         .replace(anyDateTriggerPattern, '')
         .replace(anyStartDateTriggerPattern, '')
-        .replace(/\s{2,}/g, ' ') // Normalize spaces
+        .replace(/\s+/g, ' ') // Normalize spaces
         .trim();
 
       itemLineIndex = lines.findIndex((line) => {
@@ -88,7 +102,7 @@ export async function updateCardDatesInMarkdown(
         const baseLine = line
           .replace(anyDateTriggerPattern, '')
           .replace(anyStartDateTriggerPattern, '')
-          .replace(/\s{2,}/g, ' ') // Normalize spaces
+          .replace(/\s+/g, ' ') // Normalize spaces
           .trim();
         // We are looking for the task content part.
         // A simple `includes` might be too broad if baseTitleToSearch is very short or common.
