@@ -112,6 +112,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
       fileMetadata: undefined,
       fileMetadataOrder: undefined,
     },
+    line: item.position.start.line - 1,
     assignedMembers: [],
     checked: item.checked,
     checkChar: item.checked ? item.checkChar || ' ' : ' ',
