@@ -308,6 +308,7 @@ export class KanbanView extends TextFileView implements HoverParent {
 
   onunload(): void {
     super.onunload();
+    unmountComponentAtNode(this.contentEl);
 
     this.previewQueue.clear();
     this.previewCache.clear();
@@ -886,6 +887,9 @@ export class KanbanView extends TextFileView implements HoverParent {
         }
 
         if (currentBoardState) {
+          this.pendingHighlightScroll = null; // Clear pending scroll state
+          this.currentSearchMatch = null;
+
           render(
             createElement(
               DndContext,
@@ -913,7 +917,6 @@ export class KanbanView extends TextFileView implements HoverParent {
             '[KanbanView] setReactState (renderBoardCallback): React component rendered/updated.'
           );
           this._isPendingInitialRender = false;
-          this.pendingHighlightScroll = null; // Clear pending scroll state
 
           if (this.targetHighlightLocation) {
             console.log(
