@@ -1,0 +1,1 @@
+osascript -e 'quit app "Obsidian"' && npm run build && mv main.js '/Users/georgehartt/Home/Projects/kb/.obsidian/plugins/obsidian-kanban' && mv styles.css '/Users/georgehartt/Home/Projects/kb/.obsidian/plugins/obsidian-kanban' && open -a "Obsidian"

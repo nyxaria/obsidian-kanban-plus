@@ -126,7 +126,9 @@ export class KanbanView extends TextFileView implements HoverParent {
         if (this.previewCache.has(item.id)) return;
 
         this.previewQueue.add(async () => {
-          const preview = this.addChild(new BasicMarkdownRenderer(this, item.data.title));
+          // Clean the titleRaw for display (remove metadata but keep task lists)
+          const cleanTitle = this.getCleanTitleForDisplay(item.data.titleRaw);
+          const preview = this.addChild(new BasicMarkdownRenderer(this, cleanTitle));
           this.previewCache.set(item.id, preview);
           await preview.renderCapability.promise;
         });
@@ -169,6 +171,75 @@ export class KanbanView extends TextFileView implements HoverParent {
   setBoard(board: Board, shouldSave: boolean = true) {
     const stateManager = this.plugin.stateManagers.get(this.file);
     stateManager.setState(board, shouldSave);
+  }
+
+  getCleanTitleForDisplay(titleRaw: string): string {
+    if (!titleRaw) return '';
+
+    let cleanTitle = titleRaw;
+
+    // Remove priority tags
+    const priorityRegex = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+    cleanTitle = cleanTitle.replace(priorityRegex, ' ');
+
+    // Remove member assignments
+    const memberRegex = /(?:^|\s)(@@\w+)(?=\s|$)/gi;
+    cleanTitle = cleanTitle.replace(memberRegex, ' ');
+
+    // Remove tags
+    const tagRegex = /(?:^|\s)(#\w+(?:\/\w+)*)(?=\s|$)/gi;
+    cleanTitle = cleanTitle.replace(tagRegex, ' ');
+
+    // Get settings from state manager if available
+    const stateManager = this.plugin.getStateManager(this.file);
+    if (stateManager) {
+      // Remove date triggers
+      const dateTrigger = stateManager.getSetting('date-trigger');
+      if (dateTrigger) {
+        const escapeRegExpStr = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        // Handle basic date trigger format: @{date}
+        const dateBraceRegex = new RegExp(
+          `(?:^|\\s)${escapeRegExpStr(dateTrigger)}{([^}]+)}`,
+          'gi'
+        );
+        cleanTitle = cleanTitle.replace(dateBraceRegex, ' ');
+
+        // Handle date trigger with wikilinks: @[[date]]
+        const dateBracketRegex = new RegExp(
+          `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\[\\[([^]]+)\\]\\]`,
+          'gi'
+        );
+        cleanTitle = cleanTitle.replace(dateBracketRegex, ' ');
+
+        // Handle date trigger with prefixes like @start{date}, @end{date}, etc.
+        const dateWithPrefixBraceRegex = new RegExp(
+          `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\w*{([^}]+)}`,
+          'gi'
+        );
+        cleanTitle = cleanTitle.replace(dateWithPrefixBraceRegex, ' ');
+
+        // Handle date trigger with prefixes and wikilinks like @start[[date]], @end[[date]], etc.
+        const dateWithPrefixBracketRegex = new RegExp(
+          `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\w*\\[\\[([^]]+)\\]\\]`,
+          'gi'
+        );
+        cleanTitle = cleanTitle.replace(dateWithPrefixBracketRegex, ' ');
+      }
+
+      // Remove time triggers
+      const timeTrigger = stateManager.getSetting('time-trigger');
+      if (timeTrigger) {
+        const escapeRegExpStr = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const timeRegex = new RegExp(`(?:^|\\s)${escapeRegExpStr(timeTrigger)}{([^}]+)}`, 'gi');
+        cleanTitle = cleanTitle.replace(timeRegex, ' ');
+      }
+    }
+
+    // Clean up multiple spaces but preserve newlines
+    cleanTitle = cleanTitle.replace(/[ \t]{2,}/g, ' ').trim();
+
+    return cleanTitle;
   }
 
   getBoard(): Board | null {
