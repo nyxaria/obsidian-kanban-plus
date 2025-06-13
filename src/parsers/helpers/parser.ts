@@ -1,5 +1,9 @@
-import { Stat } from 'obsidian';
+import { App, Stat } from 'obsidian';
 import { Item } from 'src/components/types';
+
+declare global {
+  const app: App;
+}
 
 export interface FileAccessor {
   isEmbed: boolean;
@@ -33,7 +37,7 @@ export function replaceBrs(str: string) {
 
 export function indentNewLines(str: string) {
   const useTab = (app.vault as any).getConfig('useTab');
-  return str.trim().replace(/(?:\r\n|\n)/g, useTab ? '\n\t' : '\n    ');
+  return str.replace(/(?:\r\n|\n)/g, useTab ? '\n\t' : '\n    ');
 }
 
 export function addBlockId(str: string, item: Item) {
@@ -54,7 +58,7 @@ export function removeBlockId(str: string) {
 }
 
 export function dedentNewLines(str: string) {
-  return str.trim().replace(/(?:\r\n|\n)(?: {4}|\t)/g, '\n');
+  return str.replace(/(?:\r\n|\n)(?: {4}|\t)/g, '\n');
 }
 
 export function parseLaneTitle(str: string) {

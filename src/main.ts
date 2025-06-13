@@ -1153,6 +1153,257 @@ export default class KanbanPlugin extends Plugin {
     );
   }
 
+  // --- BEGIN HELPER METHOD for Converting Wikilinks to Obsidian URLs ---
+  convertWikilinksToObsidianUrls(text: string): string {
+    if (!text) return text;
+
+    // Get the vault name for the obsidian:// URL
+    const vaultName = this.app.vault.getName();
+
+    let result = text;
+
+    // Replace external markdown links [text](url) first
+    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
+      return `${linkText} (${url})`;
+    });
+
+    // Replace wikilinks with Obsidian URLs
+    // Pattern matches: [[filename]] or [[path/filename]] or [[filename|display text]]
+    result = result.replace(
+      /\[\[([^\]|]+)(\|([^\]]+))?\]\]/g,
+      (match, filePath, pipe, displayText) => {
+        // Use display text if provided, otherwise use the filename
+        const linkText = displayText || filePath.split('/').pop() || filePath;
+
+        // Encode the file path for URL
+        const encodedPath = encodeURIComponent(filePath);
+
+        // Create the obsidian:// URL
+        const obsidianUrl = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodedPath}`;
+
+        // Return as a clickable link (for plain text emails, this will show as a URL)
+        return `${linkText} (${obsidianUrl})`;
+      }
+    );
+
+    // Convert markdown lists to plain text format
+    result = this.convertMarkdownListsToText(result);
+
+    return result;
+  }
+
+  convertMarkdownListsToText(text: string): string {
+    if (!text) return text;
+
+    // Split by lines to process each line
+    const lines = text.split('\n');
+    const processedLines: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmedLine = line.trim();
+
+      // Check for task list items (- [ ], - [x])
+      const taskMatch = trimmedLine.match(/^-\s+\[([ x])\]\s+(.*)$/);
+      // Check for unordered list items (-, *, +)
+      const unorderedMatch = trimmedLine.match(/^[-*+]\s+(.*)$/);
+      // Check for ordered list items (1., 2., etc.)
+      const orderedMatch = trimmedLine.match(/^\d+\.\s+(.*)$/);
+
+      if (taskMatch) {
+        // Task list item - preserve the checkbox format
+        const isChecked = taskMatch[1] === 'x';
+        const content = taskMatch[2];
+        const checkbox = isChecked ? '[x]' : '[ ]';
+        processedLines.push(`  • ${checkbox} ${content}`);
+      } else if (unorderedMatch) {
+        // Regular unordered list item
+        processedLines.push(`  • ${unorderedMatch[1]}`);
+      } else if (orderedMatch) {
+        // Ordered list item
+        processedLines.push(`  ${trimmedLine}`);
+      } else {
+        // Not a list item - preserve as is
+        processedLines.push(line);
+      }
+    }
+
+    return processedLines.join('\n');
+  }
+
+  convertWikilinksToHtmlLinks(text: string): string {
+    if (!text) return text;
+
+    // Get the vault name for the obsidian:// URL
+    const vaultName = this.app.vault.getName();
+
+    let result = text;
+
+    // Replace external markdown links [text](url) with HTML anchor tags first
+    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
+      // Escape HTML characters in link text
+      const escapedLinkText = linkText
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return `<a href="${url}" target="_blank">${escapedLinkText}</a>`;
+    });
+
+    // Replace wikilinks with HTML anchor tags
+    // Pattern matches: [[filename]] or [[path/filename]] or [[filename|display text]]
+    result = result.replace(
+      /\[\[([^\]|]+)(\|([^\]]+))?\]\]/g,
+      (match, filePath, pipe, displayText) => {
+        // Use display text if provided, otherwise use the filename
+        const linkText = displayText || filePath.split('/').pop() || filePath;
+
+        // Escape HTML characters in link text
+        const escapedLinkText = linkText
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+
+        // Encode the file path for URL
+        const encodedPath = encodeURIComponent(filePath);
+
+        // Create the obsidian:// URL
+        const obsidianUrl = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodedPath}`;
+
+        // Return as an HTML anchor tag
+        return `<a href="${obsidianUrl}">${escapedLinkText}</a>`;
+      }
+    );
+
+    // Convert markdown lists to HTML
+    result = this.convertMarkdownListsToHtml(result);
+
+    return result;
+  }
+
+  convertMarkdownListsToHtml(text: string): string {
+    if (!text) return text;
+
+    // Split by lines to process each line
+    const lines = text.split('\n');
+    const processedLines: string[] = [];
+    let inList = false;
+    let listType: 'ul' | 'ol' | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmedLine = line.trim();
+
+      // Check for unordered list items (-, *, +)
+      const unorderedMatch = trimmedLine.match(/^[-*+]\s+(.*)$/);
+      // Check for task list items (- [ ], - [x])
+      const taskMatch = trimmedLine.match(/^-\s+\[([ x])\]\s+(.*)$/);
+      // Check for ordered list items (1., 2., etc.)
+      const orderedMatch = trimmedLine.match(/^\d+\.\s+(.*)$/);
+
+      if (taskMatch) {
+        // Task list item
+        if (!inList || listType !== 'ul') {
+          if (inList) processedLines.push('</ul>');
+          processedLines.push('<ul>');
+          inList = true;
+          listType = 'ul';
+        }
+        const isChecked = taskMatch[1] === 'x';
+        const content = taskMatch[2];
+        const checkbox = isChecked
+          ? '<input type="checkbox" checked disabled style="margin-right: 8px;">'
+          : '<input type="checkbox" disabled style="margin-right: 8px;">';
+        processedLines.push(`<li>${checkbox}${content}</li>`);
+      } else if (unorderedMatch) {
+        // Regular unordered list item
+        if (!inList || listType !== 'ul') {
+          if (inList) processedLines.push(listType === 'ul' ? '</ul>' : '</ol>');
+          processedLines.push('<ul>');
+          inList = true;
+          listType = 'ul';
+        }
+        processedLines.push(`<li>${unorderedMatch[1]}</li>`);
+      } else if (orderedMatch) {
+        // Ordered list item
+        if (!inList || listType !== 'ol') {
+          if (inList) processedLines.push(listType === 'ul' ? '</ul>' : '</ol>');
+          processedLines.push('<ol>');
+          inList = true;
+          listType = 'ol';
+        }
+        processedLines.push(`<li>${orderedMatch[1]}</li>`);
+      } else {
+        // Not a list item
+        if (inList) {
+          processedLines.push(listType === 'ul' ? '</ul>' : '</ol>');
+          inList = false;
+          listType = null;
+        }
+        // Convert newlines to <br> for non-list content, but only if the line isn't empty
+        if (trimmedLine === '') {
+          processedLines.push('<br>');
+        } else {
+          processedLines.push(line);
+        }
+      }
+    }
+
+    // Close any open list
+    if (inList) {
+      processedLines.push(listType === 'ul' ? '</ul>' : '</ol>');
+    }
+
+    return processedLines.join('');
+  }
+
+  createBoardLink(boardName: string, boardPath: string, isHtml: boolean): string {
+    // Get the vault name for the obsidian:// URL
+    const vaultName = this.app.vault.getName();
+
+    // Encode the file path for URL
+    const encodedPath = encodeURIComponent(boardPath);
+
+    // Create the obsidian:// URL
+    const obsidianUrl = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodedPath}`;
+
+    if (isHtml) {
+      // Escape HTML characters in board name
+      const escapedBoardName = boardName
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return `<a href="${obsidianUrl}">${escapedBoardName}</a>`;
+    } else {
+      // Text version
+      return `${boardName} (${obsidianUrl})`;
+    }
+  }
+
+  cleanTitleForEmail(titleRaw: string): string {
+    if (!titleRaw) return '';
+
+    let cleanTitle = titleRaw;
+
+    // Remove date triggers (like @{date}, @start{date}, etc.)
+    cleanTitle = cleanTitle.replace(/@\w*\{[^}]+\}/g, '');
+    cleanTitle = cleanTitle.replace(/@\w*\[\[[^\]]+\]\]/g, '');
+
+    // Remove priority tags
+    cleanTitle = cleanTitle.replace(/!\w+/g, '');
+
+    // Remove member assignments
+    cleanTitle = cleanTitle.replace(/@@\w+/g, '');
+
+    // Remove tags
+    cleanTitle = cleanTitle.replace(/#\w+(\/\w+)*\s?/g, '');
+
+    // Clean up multiple spaces but preserve newlines (only collapse spaces/tabs)
+    cleanTitle = cleanTitle.replace(/[ \t]{2,}/g, ' ').trim();
+
+    return cleanTitle;
+  }
+  // --- END HELPER METHOD for Converting Wikilinks to Obsidian URLs ---
+
   // --- BEGIN ADDED METHOD for Due Date Reminders ---
   async processDueDateReminders() {
     console.log('[KanbanPlugin] processDueDateReminders called');
@@ -1293,7 +1544,7 @@ export default class KanbanPlugin extends Plugin {
                             tasksByEmail[memberConfig.email] = [];
                           }
                           tasksByEmail[memberConfig.email].push({
-                            title: cardItemData.title,
+                            title: cardItemData.titleRaw || cardItemData.title,
                             boardName: boardFile.basename,
                             boardPath: boardFile.path,
                             dueDate: dueDate.format('YYYY-MM-DD'),
@@ -1343,7 +1594,9 @@ export default class KanbanPlugin extends Plugin {
             // Sort tasks for this user
             userTasks.sort((a, b) => moment(a.dueDate).diff(moment(b.dueDate)));
 
-            let emailBody = `You have the following tasks due in the next ${timeframeText}:\n\n`;
+            let emailBodyText = `You have the following tasks due in the next ${timeframeText}:\n\n`;
+            let emailBodyHtml = `<p>You have the following tasks due in the next ${timeframeText}:</p><ul>`;
+
             userTasks.forEach((task) => {
               const dueDateMoment = moment(task.dueDate);
               const today = moment().startOf('day');
@@ -1360,25 +1613,44 @@ export default class KanbanPlugin extends Plugin {
                 dueInText = `${daysUntilDue} days`;
               }
 
-              const cleanTitle = task.title
-                .replace(/@\{[^}]+\}/g, '')
-                .replace(/!\[[^]]+\]/g, '')
-                .replace(/!\w+/g, '')
-                .replace(/@@\w+/g, '')
-                .replace(/#\w+(\/\w+)*\s?/g, '')
-                .replace(/\s{2,}/g, ' ')
-                .trim();
+              // Clean the title while preserving newlines and list structure
+              const cleanTitle = this.cleanTitleForEmail(task.title);
+
+              // Convert wikilinks to clickable Obsidian URLs for text version
+              const titleWithObsidianLinksText = this.convertWikilinksToObsidianUrls(cleanTitle);
+
+              // Convert wikilinks to HTML links for HTML version
+              const titleWithObsidianLinksHtml = this.convertWikilinksToHtmlLinks(cleanTitle);
+
+              // Create board links
+              const boardLinkText = this.createBoardLink(task.boardName, task.boardPath, false);
+              const boardLinkHtml = this.createBoardLink(task.boardName, task.boardPath, true);
 
               let priorityDisplay = '';
               if (task.priority) {
                 priorityDisplay = `[${task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}] `;
               }
-              emailBody += `- ${cleanTitle} @ ${task.boardName}:${task.laneName} ${priorityDisplay}[${dueInText}]\n\n`;
+
+              // Text version
+              
+              emailBodyText += `- ${titleWithObsidianLinksText} @ ${boardLinkText}:${task.laneName} ${priorityDisplay}[${dueInText}]\n\n`;
+
+              // HTML version
+              emailBodyHtml += `<li>${titleWithObsidianLinksHtml} @ <strong>${boardLinkHtml}:${task.laneName}</strong> ${priorityDisplay}<em>[${dueInText}]</em></li>`;
             });
-            emailBody += 'Regards,\nYour Kanban Plugin';
+
+            emailBodyText += 'Regards,\nYour Kanban Plugin';
+            emailBodyHtml += '</ul><p>Regards,<br>Your Kanban Plugin</p>';
 
             const subject = 'Kanban Task Reminders - Due Soon';
-            attemptSmtpEmailSend(sender, appPass, emailAddress, subject, emailBody)
+            attemptSmtpEmailSend(
+              sender,
+              appPass,
+              emailAddress,
+              subject,
+              emailBodyText,
+              emailBodyHtml
+            )
               .then((success) => {
                 if (success) {
                   console.log(`[KanbanPlugin] Email reminder sent successfully to ${emailAddress}`);
@@ -1436,7 +1708,8 @@ async function attemptSmtpEmailSend(
   appPassword: string,
   recipientEmail: string,
   subject: string,
-  body: string
+  textBody: string,
+  htmlBody?: string
 ): Promise<boolean> {
   console.log('[KanbanPlugin] Attempting to send email via SMTP...');
   console.log(`To: ${recipientEmail}`);
@@ -1473,13 +1746,17 @@ async function attemptSmtpEmailSend(
     });
 
     // STEP 3: (User Task) Define email options and send
-    const mailOptions = {
+    const mailOptions: any = {
       from: senderAddress,
       to: recipientEmail,
       subject: subject,
-      text: body, // Plain text body
-      // html: "<b>Hello world?</b>", // HTML body version (if you switch to HTML)
+      text: textBody, // Plain text body
     };
+
+    // Add HTML body if provided
+    if (htmlBody) {
+      mailOptions.html = htmlBody;
+    }
 
     const info = await transporter.sendMail(mailOptions);
     console.log('[KanbanPlugin] Email sent successfully via SMTP. Message ID:', info.messageId); // Changed log message
@@ -1500,7 +1777,8 @@ async function attemptSmtpEmailSend(
   console.log(`From: ${senderAddress}`);
   console.log(`To: ${recipientEmail}`);
   console.log(`Subject: ${subject}`);
-  console.log('Body:\n', body);
+  console.log('Text Body:\n', textBody);
+  if (htmlBody) console.log('HTML Body:\n', htmlBody);
   console.log('--- END SIMULATED EMAIL ---');
   return false; // Indicate failure as no email was actually sent
   */

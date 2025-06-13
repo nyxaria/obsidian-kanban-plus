@@ -325,6 +325,65 @@ export function AssignedMembers({
   );
 }
 
+function getCleanTitleForDisplay(titleRaw: string, stateManager: StateManager): string {
+  if (!titleRaw) return '';
+
+  let cleanTitle = titleRaw;
+
+  // Remove priority tags
+  const priorityRegex = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+  cleanTitle = cleanTitle.replace(priorityRegex, ' ');
+
+  // Remove member assignments
+  const memberRegex = /(?:^|\s)(@@\w+)(?=\s|$)/gi;
+  cleanTitle = cleanTitle.replace(memberRegex, ' ');
+
+  // Remove tags
+  const tagRegex = /(?:^|\s)(#\w+(?:\/\w+)*)(?=\s|$)/gi;
+  cleanTitle = cleanTitle.replace(tagRegex, ' ');
+
+  // Remove date triggers
+  const dateTrigger = stateManager.getSetting('date-trigger');
+  if (dateTrigger) {
+    // Handle basic date trigger format: @{date}
+    const dateBraceRegex = new RegExp(`(?:^|\\s)${escapeRegExpStr(dateTrigger)}{([^}]+)}`, 'gi');
+    cleanTitle = cleanTitle.replace(dateBraceRegex, ' ');
+
+    // Handle date trigger with wikilinks: @[[date]]
+    const dateBracketRegex = new RegExp(
+      `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\[\\[([^]]+)\\]\\]`,
+      'gi'
+    );
+    cleanTitle = cleanTitle.replace(dateBracketRegex, ' ');
+
+    // Handle date trigger with prefixes like @start{date}, @end{date}, etc.
+    const dateWithPrefixBraceRegex = new RegExp(
+      `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\w*{([^}]+)}`,
+      'gi'
+    );
+    cleanTitle = cleanTitle.replace(dateWithPrefixBraceRegex, ' ');
+
+    // Handle date trigger with prefixes and wikilinks like @start[[date]], @end[[date]], etc.
+    const dateWithPrefixBracketRegex = new RegExp(
+      `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\w*\\[\\[([^]]+)\\]\\]`,
+      'gi'
+    );
+    cleanTitle = cleanTitle.replace(dateWithPrefixBracketRegex, ' ');
+  }
+
+  // Remove time triggers
+  const timeTrigger = stateManager.getSetting('time-trigger');
+  if (timeTrigger) {
+    const timeRegex = new RegExp(`(?:^|\\s)${escapeRegExpStr(timeTrigger)}{([^}]+)}`, 'gi');
+    cleanTitle = cleanTitle.replace(timeRegex, ' ');
+  }
+
+  // Clean up multiple spaces but preserve newlines
+  cleanTitle = cleanTitle.replace(/[ \t]{2,}/g, ' ').trim();
+
+  return cleanTitle;
+}
+
 const ItemContentComponent = function ItemContent({
   item,
   editState,
@@ -390,6 +449,7 @@ const ItemContentComponent = function ItemContent({
     members: string[];
     dateStr?: string;
     timeStr?: string;
+    startDateStr?: string;
     priorityTag?: string | null;
   } | null>(null);
 
@@ -419,6 +479,7 @@ const ItemContentComponent = function ItemContent({
       const originalMembersFromMetadata = item.data.assignedMembers || [];
       const originalDateStr = item.data.metadata?.dateStr;
       const originalTimeStr = item.data.metadata?.timeStr;
+      const originalStartDateStr = item.data.metadata?.startDateStr;
 
       // Capture and store priority tag
       const priorityRegexGlobal = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
@@ -430,6 +491,7 @@ const ItemContentComponent = function ItemContent({
         members: [...originalMembersFromMetadata],
         dateStr: originalDateStr,
         timeStr: originalTimeStr,
+        startDateStr: originalStartDateStr,
         priorityTag: capturedPriorityTag,
       };
 
@@ -459,17 +521,33 @@ const ItemContentComponent = function ItemContent({
       const dateFormat = stateManager.getSetting('date-format');
 
       if (dateTrigger) {
+        // Handle basic date trigger format: @{date}
         const dateBraceRegex = new RegExp(
           `(?:^|\\s)${escapeRegExpStr(dateTrigger)}{([^}]+)}`,
           'gi'
         );
         cleanTitle = cleanTitle.replace(dateBraceRegex, ' ');
 
+        // Handle date trigger with wikilinks: @[[date]]
         const dateBracketRegex = new RegExp(
           `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\[\\[([^]]+)\\]\\]`,
           'gi'
         );
         cleanTitle = cleanTitle.replace(dateBracketRegex, ' ');
+
+        // Handle date trigger with prefixes like @start{date}, @end{date}, etc.
+        const dateWithPrefixBraceRegex = new RegExp(
+          `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\w*{([^}]+)}`,
+          'gi'
+        );
+        cleanTitle = cleanTitle.replace(dateWithPrefixBraceRegex, ' ');
+
+        // Handle date trigger with prefixes and wikilinks like @start[[date]], @end[[date]], etc.
+        const dateWithPrefixBracketRegex = new RegExp(
+          `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\w*\\[\\[([^]]+)\\]\\]`,
+          'gi'
+        );
+        cleanTitle = cleanTitle.replace(dateWithPrefixBracketRegex, ' ');
       }
 
       const wikilinkDateRegex = /\[\[([^\]]+)\]\]/g;
@@ -533,6 +611,7 @@ const ItemContentComponent = function ItemContent({
         const originalMembersFromMetadata = item.data.assignedMembers || [];
         const originalDateStr = item.data.metadata?.dateStr;
         const originalTimeStr = item.data.metadata?.timeStr;
+        const originalStartDateStr = item.data.metadata?.startDateStr;
         // capturedPriorityTagFromRef is already defined above
 
         console.log(
@@ -542,6 +621,7 @@ const ItemContentComponent = function ItemContent({
             members: originalMembersFromMetadata,
             dateStr: originalDateStr,
             timeStr: originalTimeStr,
+            startDateStr: originalStartDateStr,
             priorityTag: capturedPriorityTagFromRef,
           })
         );
@@ -552,32 +632,41 @@ const ItemContentComponent = function ItemContent({
 
         let addedSomething = false;
 
+        // Helper function to add metadata while preserving newlines
+        const addMetadata = (metadataString: string) => {
+          if (finalTitle.length > 0) {
+            // Check if the title ends with a newline or whitespace
+            if (!/[\s\n]$/.test(finalTitle)) {
+              finalTitle += ' ';
+            }
+          }
+          finalTitle += metadataString;
+          addedSomething = true;
+        };
+
+        // Add start date first if it exists
+        if (originalStartDateStr) {
+          console.log('[ItemContent] Reconstructing: Adding start date', originalStartDateStr);
+          const startDatePart = shouldLinkDateToDailyNote
+            ? `[[${originalStartDateStr}]]`
+            : `{${originalStartDateStr}}`;
+          addMetadata(`${dateTrigger}start${startDatePart}`);
+        }
+
         if (originalDateStr) {
           console.log('[ItemContent] Reconstructing: Adding date', originalDateStr);
           const datePart = shouldLinkDateToDailyNote
             ? `[[${originalDateStr}]]`
             : `{${originalDateStr}}`;
-          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
-            finalTitle += ' ';
-          else if (addedSomething) finalTitle += ' ';
-          finalTitle += `${dateTrigger}${datePart}`;
-          addedSomething = true;
+          addMetadata(`${dateTrigger}${datePart}`);
         }
 
         if (originalTimeStr && originalDateStr) {
           console.log('[ItemContent] Reconstructing: Adding time (with date)', originalTimeStr);
-          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
-            finalTitle += ' ';
-          else if (addedSomething) finalTitle += ' ';
-          finalTitle += `${timeTrigger}{${originalTimeStr}}`;
-          addedSomething = true;
+          addMetadata(`${timeTrigger}{${originalTimeStr}}`);
         } else if (originalTimeStr && !originalDateStr) {
           console.log('[ItemContent] Reconstructing: Adding time (standalone)', originalTimeStr);
-          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
-            finalTitle += ' ';
-          else if (addedSomething) finalTitle += ' ';
-          finalTitle += `${timeTrigger}{${originalTimeStr}}`;
-          addedSomething = true;
+          addMetadata(`${timeTrigger}{${originalTimeStr}}`);
         }
 
         if (originalMembersFromMetadata && originalMembersFromMetadata.length > 0) {
@@ -585,21 +674,13 @@ const ItemContentComponent = function ItemContent({
           const membersString = originalMembersFromMetadata
             .map((m) => `@@${m.replace(/^@@/, '')}`)
             .join(' ');
-          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
-            finalTitle += ' ';
-          else if (addedSomething) finalTitle += ' ';
-          finalTitle += membersString;
-          addedSomething = true;
+          addMetadata(membersString);
         }
 
         if (originalTagsFromMetadata && originalTagsFromMetadata.length > 0) {
           console.log('[ItemContent] Reconstructing: Adding tags', originalTagsFromMetadata);
           const tagsString = originalTagsFromMetadata.join(' ');
-          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
-            finalTitle += ' ';
-          else if (addedSomething) finalTitle += ' ';
-          finalTitle += tagsString;
-          addedSomething = true;
+          addMetadata(tagsString);
         }
 
         // Re-append priority tag if it was captured
@@ -608,14 +689,11 @@ const ItemContentComponent = function ItemContent({
             '[ItemContent] Reconstructing: Adding priority tag',
             capturedPriorityTagFromRef
           );
-          if (finalTitle.length > 0 && !/\s$/.test(finalTitle) && !addedSomething)
-            finalTitle += ' ';
-          else if (addedSomething) finalTitle += ' ';
-          finalTitle += capturedPriorityTagFromRef;
-          addedSomething = true;
+          addMetadata(capturedPriorityTagFromRef);
         }
 
-        finalTitle = finalTitle.replace(/\s{2,}/g, ' ').trim();
+        // Clean up multiple spaces but preserve newlines
+        finalTitle = finalTitle.replace(/[ \t]{2,}/g, ' ').trim();
 
         console.log(
           `[ItemContent ${item.id}] SaveEffect: About to call updateItem. Current item.data.titleRaw (safe): "${safeTitleRaw}", New finalTitle: "${finalTitle}"`
@@ -738,7 +816,7 @@ const ItemContentComponent = function ItemContent({
         <MarkdownRenderer
           entityId={item.id}
           className={c('item-markdown')}
-          markdownString={safeTitle}
+          markdownString={getCleanTitleForDisplay(safeTitleRaw, stateManager)}
           searchQuery={searchQuery}
         />
       </div>

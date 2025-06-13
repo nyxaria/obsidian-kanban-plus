@@ -1,7 +1,14 @@
 // May need to move/share this
 // import { MdastHeading, MdastList, MdastListItem, MdastRoot } from 'mdast'; // Removed due to import errors
 import moment from 'moment';
-import { App, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
+import {
+  App,
+  Component,
+  MarkdownRenderer as ObsidianMarkdownRenderer,
+  TFile,
+  TFolder,
+  WorkspaceLeaf,
+} from 'obsidian';
 import { Fragment, createElement } from 'preact';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { KanbanView, kanbanViewType } from 'src/KanbanView';
@@ -10,7 +17,6 @@ import { DEFAULT_SETTINGS, KanbanSettings } from 'src/Settings';
 import { updateCardDatesInMarkdown } from 'src/markdownUpdater';
 
 import { getHeadingText } from '../../KanbanWorkspaceView';
-import { InteractiveMarkdownCell } from '../../KanbanWorkspaceView';
 import { StateManager } from '../../StateManager';
 import { hasFrontmatterKey } from '../../helpers';
 import KanbanPlugin from '../../main';
@@ -18,9 +24,76 @@ import KanbanPlugin from '../../main';
 import { listItemToItemData } from '../../parsers/formats/list';
 // Assuming ItemMetadata will have startDate
 import { parseMarkdown } from '../../parsers/parseMarkdown';
+import { MarkdownRenderer } from '../MarkdownRenderer/MarkdownRenderer';
 // Import helper functions for tags and members - CORRECTED PATH
 import { getTagColorFn, getTagSymbolFn } from '../helpers';
 import { TimelineCardData as ImportedTimelineCardData, ItemData, ItemMetadata } from '../types';
+
+// Simple markdown renderer for Timeline view that doesn't require KanbanContext
+function TimelineMarkdownRenderer(props: { markdownString: string; app: App; sourcePath: string }) {
+  const { markdownString, app, sourcePath } = props;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const componentRef = useRef<Component | null>(null);
+
+  useEffect(() => {
+    if (!contentRef.current || !markdownString) return;
+
+    const container = contentRef.current;
+    container.innerHTML = '';
+
+    // Create a Component for proper memory management
+    if (!componentRef.current) {
+      componentRef.current = new Component();
+    }
+
+    try {
+      // Use Obsidian's MarkdownRenderer with proper Component
+      ObsidianMarkdownRenderer.renderMarkdown(
+        markdownString,
+        container,
+        sourcePath,
+        componentRef.current
+      );
+    } catch (error) {
+      console.warn('[TimelineMarkdownRenderer] Error rendering markdown:', error);
+      // Fallback to plain text if markdown rendering fails
+      container.textContent = markdownString;
+    }
+
+    // Handle internal links
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.tagName === 'A' && target.hasClass('internal-link')) {
+        event.preventDefault();
+        event.stopPropagation();
+        const href = target.getAttribute('data-href') || target.getAttribute('href');
+        if (href) {
+          try {
+            app.workspace.openLinkText(
+              href,
+              sourcePath,
+              event.ctrlKey || event.metaKey || event.button === 1
+            );
+          } catch (error) {
+            console.warn('[TimelineMarkdownRenderer] Error opening link:', error);
+          }
+        }
+      }
+    };
+
+    container.addEventListener('click', handleClick);
+    return () => {
+      container.removeEventListener('click', handleClick);
+      // Clean up the component when unmounting
+      if (componentRef.current) {
+        componentRef.current.unload();
+        componentRef.current = null;
+      }
+    };
+  }, [markdownString, app, sourcePath]);
+
+  return <div ref={contentRef} style={{ fontSize: '0.9em', lineHeight: '1.3' }} />;
+}
 
 // Renamed imported TimelineCardData
 
@@ -58,10 +131,74 @@ function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
 }
 
+// Helper function to clean title for display while preserving lists
+function getCleanTitleForDisplay(titleRaw: string, stateManager: StateManager): string {
+  if (!titleRaw) return '';
+
+  let cleanTitle = titleRaw;
+
+  // Remove priority tags
+  const priorityRegex = /(?:^|\s)(!low|!medium|!high)(?=\s|$)/gi;
+  cleanTitle = cleanTitle.replace(priorityRegex, ' ');
+
+  // Remove member assignments
+  const memberRegex = /(?:^|\s)(@@\w+)(?=\s|$)/gi;
+  cleanTitle = cleanTitle.replace(memberRegex, ' ');
+
+  // Remove tags
+  const tagRegex = /(?:^|\s)(#\w+(?:\/\w+)*)(?=\s|$)/gi;
+  cleanTitle = cleanTitle.replace(tagRegex, ' ');
+
+  // Remove date triggers
+  const dateTrigger = stateManager.getSetting('date-trigger');
+  if (dateTrigger) {
+    const escapeRegExpStr = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Handle basic date trigger format: @{date}
+    const dateBraceRegex = new RegExp(`(?:^|\\s)${escapeRegExpStr(dateTrigger)}{([^}]+)}`, 'gi');
+    cleanTitle = cleanTitle.replace(dateBraceRegex, ' ');
+
+    // Handle date trigger with wikilinks: @[[date]]
+    const dateBracketRegex = new RegExp(
+      `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\[\\[([^]]+)\\]\\]`,
+      'gi'
+    );
+    cleanTitle = cleanTitle.replace(dateBracketRegex, ' ');
+
+    // Handle date trigger with prefixes like @start{date}, @end{date}, etc.
+    const dateWithPrefixBraceRegex = new RegExp(
+      `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\w*{([^}]+)}`,
+      'gi'
+    );
+    cleanTitle = cleanTitle.replace(dateWithPrefixBraceRegex, ' ');
+
+    // Handle date trigger with prefixes and wikilinks like @start[[date]], @end[[date]], etc.
+    const dateWithPrefixBracketRegex = new RegExp(
+      `(?:^|\\s)${escapeRegExpStr(dateTrigger)}\\w*\\[\\[([^]]+)\\]\\]`,
+      'gi'
+    );
+    cleanTitle = cleanTitle.replace(dateWithPrefixBracketRegex, ' ');
+  }
+
+  // Remove time triggers
+  const timeTrigger = stateManager.getSetting('time-trigger');
+  if (timeTrigger) {
+    const escapeRegExpStr = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const timeRegex = new RegExp(`(?:^|\\s)${escapeRegExpStr(timeTrigger)}{([^}]+)}`, 'gi');
+    cleanTitle = cleanTitle.replace(timeRegex, ' ');
+  }
+
+  // Clean up multiple spaces but preserve newlines
+  cleanTitle = cleanTitle.replace(/[ \t]{2,}/g, ' ').trim();
+
+  return cleanTitle;
+}
+
 export function TimelineViewComponent(props: TimelineViewComponentProps) {
   const [cards, setCards] = useState<TimelineCardData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const isMounted = useRef(true);
 
   // Access DAY_WIDTH_PX from settings
@@ -468,47 +605,55 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
     };
   }, []);
 
-  // useEffect to adjust card positions and total height dynamically
+  // State to store calculated card positions
+  const [cardPositions, setCardPositions] = useState<number[]>([]);
+
+  // useEffect to calculate card positions and total height based on actual card heights
   useEffect(() => {
-    if (
-      isLoading ||
-      !timelineGridRef.current ||
-      cards.length === 0 ||
-      !timelineStartDate ||
-      !timelineEndDate
-    ) {
-      // If still loading, or no cards/grid, or timeline range not set, do nothing or reset height
-      if (!isLoading && cards.length === 0) {
-        setActualTotalTimelineHeight(TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX * 2); // Minimal height
-      }
+    if (isLoading || cards.length === 0 || !timelineStartDate || !timelineEndDate) {
+      // If still loading, or no cards, or timeline range not set, use minimal height
+      // Using minimal height when no cards or still loading
+      setActualTotalTimelineHeight(TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX * 2);
+      setCardPositions([]);
       return;
     }
 
-    let currentCumulativeTop = TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX;
-    let maxRowBottom = currentCumulativeTop;
+    // Use a timeout to ensure card elements are rendered and have their heights calculated
+    const timeoutId = setTimeout(() => {
+      let currentTop = TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX;
+      const newCardPositions: number[] = [];
+      // Calculate positions for all cards based on their actual heights
 
-    for (let i = 0; i < cards.length; i++) {
-      const cardElement = cardElementRefs.current[i];
-      if (cardElement) {
-        // Ensure cardElement's display is not none, and it's part of the layout
-        // This is important as offsetHeight would be 0 for hidden elements.
-        // The cards are absolutely positioned, so this check is mainly about visibility.
-        if (cardElement.style.display !== 'none') {
-          cardElement.style.top = `${currentCumulativeTop}px`;
-          currentCumulativeTop += cardElement.offsetHeight + ROW_GAP_PX;
-          maxRowBottom = Math.max(maxRowBottom, currentCumulativeTop);
+      for (let i = 0; i < cards.length; i++) {
+        const cardElement = cardElementRefs.current[i];
+
+        // Set the position for this card
+        newCardPositions[i] = currentTop;
+
+        if (cardElement) {
+          // Get the actual height of the card
+          const cardHeight = Math.max(cardElement.offsetHeight, CARD_HEIGHT_PX);
+          // Card positioned at currentTop with actual height
+          // Move to the next position
+          currentTop += cardHeight + ROW_GAP_PX;
+        } else {
+          // Fallback calculation if ref is not available
+          // Fallback: using default height for positioning
+          // Move to the next position using default height
+          currentTop += CARD_HEIGHT_PX + ROW_GAP_PX;
         }
-      } else {
-        // Fallback if ref is not yet available, use min height (CARD_HEIGHT_PX)
-        // This scenario should be less common if refs are populated correctly during render.
-        currentCumulativeTop += CARD_HEIGHT_PX + ROW_GAP_PX;
-        maxRowBottom = Math.max(maxRowBottom, currentCumulativeTop);
       }
-    }
-    // Ensure the total height is at least the header height plus some padding
-    setActualTotalTimelineHeight(
-      Math.max(maxRowBottom, TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX * 2)
-    );
+
+      const totalHeight = currentTop + ROW_GAP_PX; // Add some padding at the bottom
+      // Set the calculated positions and total height
+
+      setCardPositions(newCardPositions);
+      setActualTotalTimelineHeight(
+        Math.max(totalHeight, TIMELINE_HEADER_HEIGHT_PX + ROW_GAP_PX * 2)
+      );
+    }, 50); // Small delay to ensure DOM elements are rendered
+
+    return () => clearTimeout(timeoutId);
   }, [cards, isLoading, timelineStartDate, timelineEndDate, CARD_HEIGHT_PX, ROW_GAP_PX]); // Rerun if cards, loading state, or layout params change
 
   useEffect(() => {
@@ -840,9 +985,13 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
 
       const left = startOffsetDays * DAY_WIDTH_PX;
       const width = durationDays * DAY_WIDTH_PX - 2;
-      const top = TIMELINE_HEADER_HEIGHT_PX + index * (CARD_HEIGHT_PX + ROW_GAP_PX) + ROW_GAP_PX;
+      // Use calculated position if available, otherwise fall back to fixed calculation
+      const top =
+        cardPositions[index] !== undefined
+          ? cardPositions[index]
+          : TIMELINE_HEADER_HEIGHT_PX + index * (CARD_HEIGHT_PX + ROW_GAP_PX) + ROW_GAP_PX;
 
-      //   console.log(`[TimelineView] Card ${card.id} position: left=${left}, top=${top}, width=${width}, durationDays=${durationDays}, startOffsetDays=${startOffsetDays}`);
+      // Card positioned using dynamic or fallback calculation
 
       return (
         <div
@@ -861,7 +1010,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             minHeight: `${CARD_HEIGHT_PX}px`,
             height: 'auto',
             backgroundColor: card.laneColor || (card.blockId ? '#e0e0e0' : '#f0f0f0'),
-            // border: '1px solid #ccc',
+            // border: '1px solid var(--background-modifier-border)',
             borderRadius: '8px',
             padding: '5px',
             boxSizing: 'border-box',
@@ -912,8 +1061,39 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                     : '0px',
               }}
             >
-              <InteractiveMarkdownCell
-                markdownText={card.title}
+              <TimelineMarkdownRenderer
+                markdownString={(() => {
+                  // Create a temporary StateManager to get settings for cleaning
+                  try {
+                    const file = props.app.vault.getAbstractFileByPath(card.sourceBoardPath);
+                    if (!file) {
+                      console.warn(
+                        '[TimelineView] Could not find file for path:',
+                        card.sourceBoardPath
+                      );
+                      return card.titleRaw || card.title || '';
+                    }
+
+                    const tempStateManager = new StateManager(
+                      props.app,
+                      { file } as any,
+                      () => {},
+                      () => props.plugin.settings
+                    );
+
+                    const cleanedTitle = getCleanTitleForDisplay(
+                      card.titleRaw || card.title || '',
+                      tempStateManager
+                    );
+                    return cleanedTitle || card.titleRaw || card.title || '';
+                  } catch (e) {
+                    console.warn(
+                      '[TimelineView] Could not create StateManager for cleaning title, using raw title:',
+                      e
+                    );
+                    return card.titleRaw || card.title || '';
+                  }
+                })()}
                 app={props.app}
                 sourcePath={card.sourceBoardPath}
               />
@@ -1060,47 +1240,60 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
       ? (timelineEndDate.diff(timelineStartDate, 'days') + 1) * DAY_WIDTH_PX
       : 0;
 
-  return (
-    <div style={{ padding: '10px', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <h2 style={{ flexShrink: 0 }}>Timeline View</h2>
-      {isLoading && (
-        <p style={{ flexShrink: 0 }}>
-          <i>Loading cards...</i>
-        </p>
-      )}
-      {error && <p style={{ color: 'red', flexShrink: 0 }}>Error: {error}</p>}
-      {!isLoading && !error && cards.length === 0 && (
-        <p style={{ flexShrink: 0 }}>
-          <i>No cards to display on the timeline.</i>
-        </p>
-      )}
-      {!isLoading && !error && timelineStartDate && timelineEndDate && (
-        // console.log('[TimelineView] Rendering main timeline grid. Width:', totalTimelineWidth, 'Height:', totalTimelineHeight),
-        <div
-          style={{
-            flexGrow: 1,
-            overflow: 'auto',
-            border: '1px solid var(--background-modifier-border)',
-          }}
-        >
+  // Add error boundary for rendering
+  try {
+    return (
+      <div style={{ padding: '10px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <h2 style={{ flexShrink: 0 }}>Timeline View</h2>
+        {isLoading && (
+          <p style={{ flexShrink: 0 }}>
+            <i>Loading cards...</i>
+          </p>
+        )}
+        {error && <p style={{ color: 'red', flexShrink: 0 }}>Error: {error}</p>}
+        {renderError && <p style={{ color: 'red', flexShrink: 0 }}>Render Error: {renderError}</p>}
+        {!isLoading && !error && !renderError && cards.length === 0 && (
+          <p style={{ flexShrink: 0 }}>
+            <i>No cards to display on the timeline.</i>
+          </p>
+        )}
+        {!isLoading && !error && !renderError && timelineStartDate && timelineEndDate && (
+          // console.log('[TimelineView] Rendering main timeline grid. Width:', totalTimelineWidth, 'Height:', totalTimelineHeight),
           <div
-            ref={timelineGridRef}
             style={{
-              width: `${totalTimelineWidth}px`,
-              minHeight: `${actualTotalTimelineHeight}px`,
-              position: 'relative',
+              flexGrow: 1,
+              overflow: 'auto',
+              border: '1px solid var(--background-modifier-border)',
             }}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
           >
-            {renderDateHeaders()}
-            {renderDayBackgroundLines()}
-            {renderTimelineCards()}
+            <div
+              ref={timelineGridRef}
+              style={{
+                width: `${totalTimelineWidth}px`,
+                minHeight: `${actualTotalTimelineHeight}px`,
+                position: 'relative',
+              }}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+            >
+              {renderDateHeaders()}
+              {renderDayBackgroundLines()}
+              {renderTimelineCards()}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
+        )}
+      </div>
+    );
+  } catch (renderErr) {
+    console.error('[TimelineView] Render error:', renderErr);
+    return (
+      <div style={{ padding: '10px', color: 'red' }}>
+        <h2>Timeline View - Render Error</h2>
+        <p>An error occurred while rendering the timeline: {String(renderErr)}</p>
+        <p>Check the console for more details.</p>
+      </div>
+    );
+  }
 }
 
 // Placeholder for recursivelyGetAllMdFilesInFolder if not moved to a shared location
