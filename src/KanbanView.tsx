@@ -469,10 +469,56 @@ export class KanbanView extends TextFileView implements HoverParent {
   async setState(state: any, result: ViewStateResult) {
     console.log('[KanbanView] setState called with state:', state, 'and result:', result);
 
+    // Debug: Log all properties of state to see where the hash might be
+    console.log('[KanbanView] setState: Full state object keys:', Object.keys(state));
+    if (state.eState) {
+      console.log('[KanbanView] setState: eState object keys:', Object.keys(state.eState));
+      console.log('[KanbanView] setState: eState object:', state.eState);
+    }
+
     this.currentSearchMatch = null;
     this.targetHighlightLocation = null;
 
-    if (state?.eState) {
+    // Check for blockId from URL hash (subpath)
+    if (state?.subpath && state.subpath.startsWith('#^')) {
+      const blockId = state.subpath.substring(2); // Remove #^
+      this.targetHighlightLocation = { blockId };
+      console.log(
+        '[KanbanView] setState: Determined targetHighlightLocation from URL subpath (blockId):',
+        this.targetHighlightLocation
+      );
+    }
+
+    // Check for blockId in other possible locations
+    if (!this.targetHighlightLocation && state?.hash) {
+      console.log('[KanbanView] setState: Found hash in state:', state.hash);
+      if (state.hash.startsWith('^') || state.hash.startsWith('%5E')) {
+        const blockId = state.hash.startsWith('%5E')
+          ? decodeURIComponent(state.hash).substring(1)
+          : state.hash.substring(1);
+        this.targetHighlightLocation = { blockId };
+        console.log(
+          '[KanbanView] setState: Determined targetHighlightLocation from state.hash (blockId):',
+          this.targetHighlightLocation
+        );
+      }
+    }
+
+    // Check window location hash as fallback
+    if (!this.targetHighlightLocation) {
+      const windowHash = this.getWindow().location.hash;
+      console.log('[KanbanView] setState: Window location hash:', windowHash);
+      if (windowHash && windowHash.startsWith('#^')) {
+        const blockId = windowHash.substring(2); // Remove #^
+        this.targetHighlightLocation = { blockId };
+        console.log(
+          '[KanbanView] setState: Determined targetHighlightLocation from window.location.hash (blockId):',
+          this.targetHighlightLocation
+        );
+      }
+    }
+
+    if (!this.targetHighlightLocation && state?.eState) {
       if (state.eState.blockId || state.eState.cardTitle || state.eState.listName) {
         this.targetHighlightLocation = {
           blockId: state.eState.blockId,
@@ -994,38 +1040,79 @@ export class KanbanView extends TextFileView implements HoverParent {
               '[KanbanView] setReactState (renderBoardCallback): Scheduling applyHighlight after render with a short delay for target:',
               JSON.stringify(this.targetHighlightLocation)
             );
-            this.getWindow().setTimeout(() => {
-              const hasFocus = this.contentEl.contains(document.activeElement);
-              const viewStillActive = this.contentEl && !(this.leaf as any).detached;
-              let targetHighlightLocationString = 'null';
-              try {
-                targetHighlightLocationString = JSON.stringify(this.targetHighlightLocation);
-              } catch (e_shl) {
-                console.error(
-                  '[KanbanView] ERROR stringifying this.targetHighlightLocation in setReactState:',
-                  e_shl.message
-                );
-                targetHighlightLocationString = `UNSTRINGIFIABLE: ${Object.keys(this.targetHighlightLocation || {}).join(', ')}`;
-              }
-              console.log(
-                `[KanbanView] setReactState (renderBoardCallback setTimeout): Checking conditions before applyHighlight. Target: ${targetHighlightLocationString}, HasFocus: ${hasFocus}, ViewStillActive: ${viewStillActive}`
-              );
-              if (this.targetHighlightLocation && viewStillActive) {
-                console.log(
-                  '[KanbanView] setReactState (renderBoardCallback setTimeout): Conditions met. Calling applyHighlight.'
-                );
-                this.applyHighlight();
-              } else if (this.targetHighlightLocation) {
-                if (!viewStillActive)
-                  console.log(
-                    '[KanbanView] setReactState (renderBoardCallback setTimeout): Aborted applyHighlight because view is no longer active or contentEl is missing.'
+
+            // Try highlighting with increasing delays to ensure DOM is ready
+            const tryHighlight = (attempt: number, maxAttempts: number = 5) => {
+              const delay = attempt * 200; // 0ms, 200ms, 400ms, 600ms, 800ms
+
+              this.getWindow().setTimeout(() => {
+                const hasFocus = this.contentEl.contains(document.activeElement);
+                const viewStillActive = this.contentEl && !(this.leaf as any).detached;
+                let targetHighlightLocationString = 'null';
+                try {
+                  targetHighlightLocationString = JSON.stringify(this.targetHighlightLocation);
+                } catch (e_shl) {
+                  console.error(
+                    '[KanbanView] ERROR stringifying this.targetHighlightLocation in setReactState:',
+                    e_shl.message
                   );
-              } else {
+                  targetHighlightLocationString = `UNSTRINGIFIABLE: ${Object.keys(this.targetHighlightLocation || {}).join(', ')}`;
+                }
                 console.log(
-                  '[KanbanView] setReactState (renderBoardCallback setTimeout): Aborted applyHighlight because targetHighlightLocation is now null.'
+                  `[KanbanView] setReactState (renderBoardCallback setTimeout attempt ${attempt + 1}): Checking conditions before applyHighlight. Target: ${targetHighlightLocationString}, HasFocus: ${hasFocus}, ViewStillActive: ${viewStillActive}`
                 );
-              }
-            }, 100);
+
+                if (this.targetHighlightLocation && viewStillActive) {
+                  console.log(
+                    `[KanbanView] setReactState (renderBoardCallback setTimeout attempt ${attempt + 1}): Conditions met. Calling applyHighlight.`
+                  );
+
+                  // Check if we can find the element before calling applyHighlight
+                  const blockId = this.targetHighlightLocation.blockId;
+                  if (blockId) {
+                    const normalizedBlockId = blockId.replace(/^[#^]+/, '');
+                    const testElement = this.contentEl.querySelector(
+                      `[data-id='${normalizedBlockId}']`
+                    );
+
+                    if (testElement) {
+                      console.log(
+                        `[KanbanView] setReactState: Element found on attempt ${attempt + 1}, proceeding with highlight.`
+                      );
+                      this.applyHighlight();
+                      return; // Success, don't retry
+                    } else if (attempt < maxAttempts - 1) {
+                      console.log(
+                        `[KanbanView] setReactState: Element not found on attempt ${attempt + 1}, will retry...`
+                      );
+                      tryHighlight(attempt + 1, maxAttempts);
+                      return; // Retry
+                    } else {
+                      console.log(
+                        `[KanbanView] setReactState: Element not found after ${maxAttempts} attempts, calling applyHighlight anyway for debugging.`
+                      );
+                      this.applyHighlight();
+                      return;
+                    }
+                  } else {
+                    // No blockId, just call applyHighlight
+                    this.applyHighlight();
+                  }
+                } else if (this.targetHighlightLocation) {
+                  if (!viewStillActive)
+                    console.log(
+                      `[KanbanView] setReactState (renderBoardCallback setTimeout attempt ${attempt + 1}): Aborted applyHighlight because view is no longer active or contentEl is missing.`
+                    );
+                } else {
+                  console.log(
+                    `[KanbanView] setReactState (renderBoardCallback setTimeout attempt ${attempt + 1}): Aborted applyHighlight because targetHighlightLocation is now null.`
+                  );
+                }
+              }, delay);
+            };
+
+            // Start the retry sequence
+            tryHighlight(0);
           }
         } else {
           console.error(
@@ -1219,32 +1306,106 @@ export class KanbanView extends TextFileView implements HoverParent {
     if (blockIdToSearch) {
       const normalizedBlockId = blockIdToSearch.replace(/^[#^]+/, '');
       console.log(
-        `[KanbanView] applyHighlight: Attempting to find parent item element by data-id: '${normalizedBlockId}'`
+        `[KanbanView] applyHighlight: Searching for card with blockId: '${normalizedBlockId}'`
       );
-      const parentItemElement = this.contentEl.querySelector(
-        `div.kanban-plugin__item[data-id='${normalizedBlockId}']`
-      ) as HTMLElement;
 
-      if (parentItemElement) {
-        console.log('[KanbanView] applyHighlight: Found parent item element:', parentItemElement);
-        targetItemElement =
-          (parentItemElement.querySelector(
-            'div.kanban-plugin__item-content-wrapper'
-          ) as HTMLElement) || parentItemElement;
-        if (targetItemElement) {
+      // First, search through the board data to find which card contains this blockId
+      let targetCardInternalId: string | null = null;
+
+      if (board) {
+        console.log(
+          `[KanbanView] applyHighlight: Searching through ${board.children.length} lanes for blockId '${normalizedBlockId}'`
+        );
+
+        for (const lane of board.children) {
           console.log(
-            '[KanbanView] applyHighlight: Found content wrapper for blockId:',
-            targetItemElement
+            `[KanbanView] applyHighlight: Checking lane '${lane.data.title}' with ${lane.children.length} cards`
           );
+
+          for (const item of lane.children) {
+            // Check if this item has the blockId we're looking for
+            const itemBlockId = item.data.blockId;
+            const itemId = item.id;
+
+            console.log(
+              `[KanbanView] applyHighlight: Card '${item.data.title}' - itemId: '${itemId}', blockId: '${itemBlockId}'`
+            );
+
+            if (itemBlockId === normalizedBlockId || itemBlockId === `^${normalizedBlockId}`) {
+              targetCardInternalId = itemId;
+              console.log(
+                `[KanbanView] applyHighlight: Found matching card! Internal ID: '${targetCardInternalId}', blockId: '${itemBlockId}'`
+              );
+              break;
+            }
+
+            // Also check if the blockId appears in the card's raw content
+            if (item.data.titleRaw && item.data.titleRaw.includes(`^${normalizedBlockId}`)) {
+              targetCardInternalId = itemId;
+              console.log(
+                `[KanbanView] applyHighlight: Found matching card by titleRaw content! Internal ID: '${targetCardInternalId}'`
+              );
+              break;
+            }
+          }
+
+          if (targetCardInternalId) break;
+        }
+      }
+
+      if (targetCardInternalId) {
+        console.log(
+          `[KanbanView] applyHighlight: Looking for DOM element with data-id: '${targetCardInternalId}'`
+        );
+
+        // Now find the DOM element using the internal ID
+        const parentItemElement = this.contentEl.querySelector(
+          `div.kanban-plugin__item[data-id='${targetCardInternalId}']`
+        ) as HTMLElement;
+
+        if (parentItemElement) {
+          console.log(
+            '[KanbanView] applyHighlight: Found parent item element by internal ID:',
+            parentItemElement
+          );
+          targetItemElement =
+            (parentItemElement.querySelector(
+              'div.kanban-plugin__item-content-wrapper'
+            ) as HTMLElement) || parentItemElement;
+
+          if (targetItemElement) {
+            console.log(
+              '[KanbanView] applyHighlight: Found content wrapper for blockId:',
+              targetItemElement
+            );
+          } else {
+            console.log(
+              '[KanbanView] applyHighlight: Parent item found, but .kanban-plugin__item-content-wrapper not found. Using parent.'
+            );
+            targetItemElement = parentItemElement;
+          }
         } else {
           console.log(
-            '[KanbanView] applyHighlight: Parent item found, but .kanban-plugin__item-content-wrapper not found. Using parent.'
+            `[KanbanView] applyHighlight: DOM element with data-id '${targetCardInternalId}' not found`
           );
         }
       } else {
         console.log(
-          `[KanbanView] applyHighlight: Element with data-id '${normalizedBlockId}' not found directly.`
+          `[KanbanView] applyHighlight: No card found with blockId '${normalizedBlockId}' in board data`
         );
+
+        // Debug: Log all available cards and their blockIds
+        if (board) {
+          console.log('[KanbanView] applyHighlight: Available cards in board:');
+          for (const lane of board.children) {
+            console.log(`  Lane '${lane.data.title}':`);
+            for (const item of lane.children) {
+              console.log(
+                `    - Card '${item.data.title}' (ID: ${item.id}, blockId: ${item.data.blockId})`
+              );
+            }
+          }
+        }
       }
     }
 

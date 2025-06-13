@@ -144,7 +144,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
     if (!itemData.metadata.priority) {
       // Take the first one found
       itemData.metadata.priority = priorityValue;
-      console.log(`[listItemToItemData] Extracted priority: ${priorityValue}`);
+      // Priority extracted
     }
 
     // Mark the original matched tag (including leading space if present) for deletion from the main 'title'
@@ -155,9 +155,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
       start: matchStartIndex,
       end: matchEndIndex,
     });
-    console.log(
-      `[listItemToItemData] Marked priority string "${matchedPriorityTag}" for deletion from title.`
-    );
+    // Priority marked for deletion
   }
 
   // Regex for @start{date}
@@ -167,14 +165,12 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
   let startDateMatch;
   let tempTitleForStartDateExtraction = title; // Use a temporary copy for regex exec
 
-  console.log(`[listItemToItemData] Searching for start dates with regex: ${startDateRawRegex}`);
+  // Searching for start dates
 
   while ((startDateMatch = startDateRawRegex.exec(tempTitleForStartDateExtraction)) !== null) {
     const fullMatchedStartDateTag = startDateMatch[0]; // e.g., " @start{date}" or "@start{date}"
     const actualStartDateTag = startDateMatch[1]; // e.g., "@start{date}"
-    console.log(
-      `[listItemToItemData] Found potential start date tag: ${actualStartDateTag} (full match: ${fullMatchedStartDateTag})`
-    );
+    // Found potential start date tag
 
     // Extract the date part from actualStartDateTag: @start{DATE_HERE}
     const dateContentMatch = actualStartDateTag.match(/\{([^}]+)\}$/);
@@ -182,7 +178,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
       const extractedDateStr = dateContentMatch[1];
       if (!itemData.metadata.startDateStr) {
         itemData.metadata.startDateStr = extractedDateStr;
-        console.log(`[listItemToItemData] Extracted startDateStr: ${extractedDateStr}`);
+        // Start date extracted
 
         if (moveDates) {
           // Mark the actual matched tag (e.g., "@start{date}") for deletion
@@ -196,9 +192,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
             start: absoluteStartIndex,
             end: absoluteStartIndex + actualStartDateTag.length,
           });
-          console.log(
-            `[listItemToItemData] Marked start date string "${actualStartDateTag}" for deletion from title.`
-          );
+          // Start date marked for deletion
         }
       }
     } else {
@@ -258,10 +252,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
         originalTextSlice = toString(dateNode).trim();
       }
 
-      // DEBUG LOGGING
-      console.log(
-        `[listItemToItemData] Date Node Processing: originalTextSlice="${originalTextSlice}", startDateTrigger="${startDateTrigger}", isStartDateMatch=${originalTextSlice.startsWith(startDateTrigger + '{')}, dateTrigger="${dateTrigger}", isDueDateMatch=${originalTextSlice.startsWith(dateTrigger + '{')}`
-      );
+      // Date node processing
 
       if (originalTextSlice.startsWith(startDateTrigger + '{')) {
         if (!itemData.metadata.startDateStr) {
@@ -416,12 +407,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
   // In such cases, we might want to revert to a less aggressively cleaned title or a placeholder.
   // For now, we'll leave it as potentially empty.
 
-  console.log(
-    '[listItemToItemData] Final itemData.title:',
-    `'${itemData.title}'`,
-    'itemData.metadata.priority:',
-    itemData.metadata.priority
-  );
+  // Final processing complete
 
   // Last, hydrate the date field for consistency
   if (itemData.metadata.dateStr) {
@@ -459,10 +445,7 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
 
   itemData.metadata.tags?.sort(defaultSort);
 
-  console.log(
-    `[listItemToItemData] Returning metadata:`,
-    JSON.parse(JSON.stringify(itemData.metadata))
-  );
+  // Metadata processing complete
   return itemData;
 }
 
@@ -510,7 +493,7 @@ export function astToUnhydratedBoard(
             const idMatch = idCommentRegex.exec(currentNode.value as string);
             if (idMatch && idMatch[1]) {
               parsedLaneId = idMatch[1].trim();
-              console.log(`[list.ts] Parsed lane ID: ${parsedLaneId} for lane titled: ${title}`);
+              // Lane ID parsed
               idNodeIndex = i;
             }
           }
@@ -520,9 +503,7 @@ export function astToUnhydratedBoard(
             const colorMatch = colorCommentRegex.exec(currentNode.value as string);
             if (colorMatch && colorMatch[1]) {
               parsedLaneBackgroundColor = colorMatch[1].trim();
-              console.log(
-                `[list.ts] Parsed background color: ${parsedLaneBackgroundColor} for lane titled: ${title}`
-              );
+              // Background color parsed
             }
           }
         }
@@ -617,11 +598,22 @@ export function astToUnhydratedBoard(
 }
 
 export function updateItemContent(stateManager: StateManager, oldItem: Item, newContent: string) {
-  const md = `- [${oldItem.data.checkChar}] ${addBlockId(indentNewLines(newContent), oldItem)}`;
+  // Generate a blockId if the item doesn't already have one
+  let itemWithBlockId = oldItem;
+  if (!oldItem.data.blockId) {
+    const newBlockId = generateInstanceId(6);
+    itemWithBlockId = update(oldItem, {
+      data: {
+        blockId: { $set: newBlockId },
+      },
+    });
+  }
+
+  const md = `- [${itemWithBlockId.data.checkChar}] ${addBlockId(indentNewLines(newContent), itemWithBlockId)}`;
 
   const ast = parseFragment(stateManager, md);
   const itemData = listItemToItemData(stateManager, md, (ast.children[0] as List).children[0]);
-  const newItem = update(oldItem, {
+  const newItem = update(itemWithBlockId, {
     data: {
       $set: itemData,
     },
