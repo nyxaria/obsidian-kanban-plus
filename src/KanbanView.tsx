@@ -1043,7 +1043,7 @@ export class KanbanView extends TextFileView implements HoverParent {
 
             // Try highlighting with increasing delays to ensure DOM is ready
             const tryHighlight = (attempt: number, maxAttempts: number = 5) => {
-              const delay = attempt * 200; // 0ms, 200ms, 400ms, 600ms, 800ms
+              const delay = attempt * 100; // 0ms, 100ms, 200ms, 300ms, 400ms (faster retries)
 
               this.getWindow().setTimeout(() => {
                 const hasFocus = this.contentEl.contains(document.activeElement);
