@@ -142,8 +142,148 @@ export default class KanbanPlugin extends Plugin {
 
     this.MarkdownEditor = getEditorClass(this.app);
 
+    // Intercept URL actions directly by listening to the console or app events
+    // Since we can see "Received URL action" in the logs, let's try to capture it
+    this.app.workspace.onLayoutReady(() => {
+      // Try to hook into the URL action processing after layout is ready
+      const originalConsoleLog = console.log;
+      console.log = (...args: any[]) => {
+        // Check if this is the "Received URL action" log we see
+        if (
+          args.length >= 2 &&
+          typeof args[0] === 'string' &&
+          args[0].includes('Received URL action') &&
+          typeof args[1] === 'object' &&
+          args[1].hash
+        ) {
+          const action = args[1];
+          console.log('[Kanban Main] Intercepted URL action from console:', action);
+
+          if (action.hash && action.hash.includes('%5E')) {
+            const hashMatch = action.hash.match(/%5E([a-zA-Z0-9]+)/);
+            if (hashMatch && hashMatch[1]) {
+              const blockId = hashMatch[1];
+              console.log('[Kanban Main] Storing blockId from intercepted URL action:', blockId);
+              // Store on the app for later retrieval
+              (this.app as any)._kanbanPendingBlockId = blockId;
+              // Clear it after a short delay to prevent stale data
+              setTimeout(() => {
+                delete (this.app as any)._kanbanPendingBlockId;
+              }, 5000);
+            }
+          }
+        }
+
+        // Call the original console.log
+        return originalConsoleLog.apply(console, args);
+      };
+
+      // Restore original console.log when plugin unloads
+      this.register(() => {
+        console.log = originalConsoleLog;
+      });
+    });
+
     this.registerEditorSuggest(new TimeSuggest(this.app, this));
     this.registerEditorSuggest(new DateSuggest(this.app, this));
+
+    // Hook into URL handling by monkey patching the app's openWithDefaultApp method
+    this.register(
+      around(this.app as any, {
+        openWithDefaultApp(next: any) {
+          return function (path: string) {
+            console.log('[Kanban Main] openWithDefaultApp called with path:', path);
+            // Check if this is an obsidian:// URL with a hash
+            if (path && path.includes('#%5E')) {
+              const hashMatch = path.match(/#%5E([a-zA-Z0-9]+)/);
+              if (hashMatch && hashMatch[1]) {
+                const blockId = hashMatch[1];
+                console.log('[Kanban Main] Storing blockId from URL path:', blockId);
+                // Store on the app for later retrieval
+                (this.app as any)._kanbanPendingBlockId = blockId;
+                // Clear it after a short delay to prevent stale data
+                setTimeout(() => {
+                  delete (this.app as any)._kanbanPendingBlockId;
+                }, 5000);
+              }
+            }
+            return next.call(this, path);
+          };
+        },
+      })
+    );
+
+    // Also hook into the URL action handler that processes obsidian:// URLs
+    // Try multiple possible method names for URL handling
+    const urlHandlerMethods = ['handleUrlAction', 'handleOpenUrl', 'openUrl', 'processUrl'];
+
+    urlHandlerMethods.forEach((methodName) => {
+      if (typeof (this.app as any)[methodName] === 'function') {
+        console.log(`[Kanban Main] Found URL handler method: ${methodName}`);
+        this.register(
+          around(this.app as any, {
+            [methodName](next: any) {
+              return function (action: any) {
+                console.log(`[Kanban Main] ${methodName} called with action:`, action);
+                // Check if this action has a hash with blockId
+                if (action && action.hash && action.hash.includes('%5E')) {
+                  const hashMatch = action.hash.match(/%5E([a-zA-Z0-9]+)/);
+                  if (hashMatch && hashMatch[1]) {
+                    const blockId = hashMatch[1];
+                    console.log(`[Kanban Main] Storing blockId from ${methodName} hash:`, blockId);
+                    // Store on the app for later retrieval
+                    (this.app as any)._kanbanPendingBlockId = blockId;
+                    // Clear it after a short delay to prevent stale data
+                    setTimeout(() => {
+                      delete (this.app as any)._kanbanPendingBlockId;
+                    }, 5000);
+                  }
+                }
+                return next.call(this, action);
+              };
+            },
+          })
+        );
+      }
+    });
+
+    // Also try to hook into workspace methods that might handle URL actions
+    this.register(
+      around(this.app.workspace as any, {
+        openLinkText(next: any) {
+          return function (
+            linktext: string,
+            sourcePath: string,
+            newLeaf?: boolean,
+            openViewState?: any
+          ) {
+            console.log('[Kanban Main] openLinkText called with:', {
+              linktext,
+              sourcePath,
+              newLeaf,
+              openViewState,
+            });
+
+            // Check if linktext contains a blockId hash
+            if (linktext && linktext.includes('#^')) {
+              const hashMatch = linktext.match(/#\^([a-zA-Z0-9]+)/);
+              if (hashMatch && hashMatch[1]) {
+                const blockId = hashMatch[1];
+                console.log('[Kanban Main] Storing blockId from openLinkText:', blockId);
+                // Store on the app for later retrieval
+                (this.app as any)._kanbanPendingBlockId = blockId;
+                // Clear it after a short delay to prevent stale data
+                setTimeout(() => {
+                  delete (this.app as any)._kanbanPendingBlockId;
+                }, 5000);
+              }
+            }
+
+            return next.call(this, linktext, sourcePath, newLeaf, openViewState);
+          };
+        },
+      })
+    );
 
     this.registerEvent(
       this.app.workspace.on('window-open', (_: any, win: Window) => {
@@ -991,32 +1131,60 @@ export default class KanbanPlugin extends Plugin {
 
         setViewState: (originalMethod: any) => {
           return async function (viewState: ViewState, navState?: any) {
-            // console.log(
-            //   '[Kanban Main] setViewState MONKEYPATCH ENTRY. Incoming ViewState (JSON):',
-            //   JSON.stringify(viewState, null, 2),
-            //   'Incoming navState:',
-            //   JSON.stringify(navState, null, 2)
-            // );
+            console.log(
+              '[Kanban Main] setViewState MONKEYPATCH ENTRY. Incoming ViewState (JSON):',
+              JSON.stringify(viewState, null, 2),
+              'Incoming navState:',
+              JSON.stringify(navState, null, 2)
+            );
 
             let eStateForHighlighting: any = null;
-            if (viewState.state?.eState) {
-              eStateForHighlighting = viewState.state.eState;
-              // console.log(
-              //   '[Kanban Main] setViewState: Found eState directly in viewState.state.eState:',
-              //   JSON.stringify(eStateForHighlighting, null, 2)
-              // );
-            } else if ((viewState as any).eState) {
-              eStateForHighlighting = (viewState as any).eState;
-              // console.log(
-              //   '[Kanban Main] setViewState: Found eState at viewState.eState (top-level):',
-              //   JSON.stringify(eStateForHighlighting, null, 2)
-              // );
-            } else if (navState) {
-              eStateForHighlighting = navState;
-              // console.log(
-              //   '[Kanban Main] setViewState: Using eState from explicit navState argument:',
-              //   JSON.stringify(eStateForHighlighting, null, 2)
-              // );
+
+            // Check for blockId from URL hash first
+            const windowHash = window.location.hash;
+            console.log('[Kanban Main] setViewState: Window location hash:', windowHash);
+            if (windowHash && windowHash.startsWith('#^')) {
+              const blockId = windowHash.substring(2); // Remove #^
+              eStateForHighlighting = { blockId };
+              console.log(
+                '[Kanban Main] setViewState: Determined eState from window.location.hash (blockId):',
+                eStateForHighlighting
+              );
+            }
+
+            // Check for pending blockId stored from URL action
+            if (!eStateForHighlighting && (self.app as any)._kanbanPendingBlockId) {
+              const blockId = (self.app as any)._kanbanPendingBlockId;
+              eStateForHighlighting = { blockId };
+              console.log(
+                '[Kanban Main] setViewState: Determined eState from pending blockId:',
+                eStateForHighlighting
+              );
+              // Clear the pending blockId since we've used it
+              delete (self.app as any)._kanbanPendingBlockId;
+            }
+
+            // If no hash found, check existing eState sources
+            if (!eStateForHighlighting) {
+              if (viewState.state?.eState) {
+                eStateForHighlighting = viewState.state.eState;
+                console.log(
+                  '[Kanban Main] setViewState: Found eState directly in viewState.state.eState:',
+                  JSON.stringify(eStateForHighlighting, null, 2)
+                );
+              } else if ((viewState as any).eState) {
+                eStateForHighlighting = (viewState as any).eState;
+                console.log(
+                  '[Kanban Main] setViewState: Found eState at viewState.eState (top-level):',
+                  JSON.stringify(eStateForHighlighting, null, 2)
+                );
+              } else if (navState) {
+                eStateForHighlighting = navState;
+                console.log(
+                  '[Kanban Main] setViewState: Using eState from explicit navState argument:',
+                  JSON.stringify(eStateForHighlighting, null, 2)
+                );
+              }
             }
 
             if (
@@ -1379,6 +1547,71 @@ export default class KanbanPlugin extends Plugin {
     }
   }
 
+  createDirectCardLink(
+    cardTitle: string,
+    boardName: string,
+    boardPath: string,
+    blockId: string | undefined,
+    isHtml: boolean
+  ): string {
+    // Get the vault name for the obsidian:// URL
+    const vaultName = this.app.vault.getName();
+
+    // Encode the file path for URL
+    const encodedPath = encodeURIComponent(boardPath);
+
+    let obsidianUrl: string;
+    if (blockId) {
+      // Create URL with blockId for direct card navigation and highlighting
+      obsidianUrl = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodedPath}#^${blockId}`;
+    } else {
+      // Fallback to board URL if no blockId available
+      obsidianUrl = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodedPath}`;
+    }
+
+    if (isHtml) {
+      // Escape HTML characters in card title
+      const escapedCardTitle = cardTitle
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return `<a href="${obsidianUrl}">${escapedCardTitle}</a>`;
+    } else {
+      // Text version
+      return `${cardTitle} (${obsidianUrl})`;
+    }
+  }
+
+  createDirectCardLinkIcon(
+    boardName: string,
+    boardPath: string,
+    blockId: string | undefined,
+    isHtml: boolean
+  ): string {
+    // Get the vault name for the obsidian:// URL
+    const vaultName = this.app.vault.getName();
+
+    // Encode the file path for URL
+    const encodedPath = encodeURIComponent(boardPath);
+
+    let obsidianUrl: string;
+    if (blockId) {
+      // Create URL with blockId for direct card navigation and highlighting
+      obsidianUrl = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodedPath}#^${blockId}`;
+    } else {
+      // Fallback to board URL if no blockId available
+      obsidianUrl = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodedPath}`;
+    }
+
+    if (isHtml) {
+      // HTML version with chain link icon
+      return `<a href="${obsidianUrl}" title="Open card in Obsidian" style="text-decoration: none; margin-right: 8px;">🔗</a>`;
+    } else {
+      // Text version with simple link indicator
+      return `🔗 `;
+    }
+  }
+
   cleanTitleForEmail(titleRaw: string): string {
     if (!titleRaw) return '';
 
@@ -1447,6 +1680,7 @@ export default class KanbanPlugin extends Plugin {
         tags?: string[];
         priority?: 'high' | 'medium' | 'low';
         laneName: string;
+        blockId?: string; // Add blockId for direct card linking
       }>
     > = {};
 
@@ -1551,6 +1785,7 @@ export default class KanbanPlugin extends Plugin {
                             tags: cardItemData.metadata?.tags || [],
                             priority: cardItemData.metadata?.priority,
                             laneName: lane.data.title,
+                            blockId: cardItemData.blockId, // Add blockId for direct card linking
                           });
                         }
                       }
@@ -1616,13 +1851,21 @@ export default class KanbanPlugin extends Plugin {
               // Clean the title while preserving newlines and list structure
               const cleanTitle = this.cleanTitleForEmail(task.title);
 
-              // Convert wikilinks to clickable Obsidian URLs for text version
-              const titleWithObsidianLinksText = this.convertWikilinksToObsidianUrls(cleanTitle);
+              // Create direct card link icons (with highlighting if blockId available)
+              const cardLinkIconText = this.createDirectCardLinkIcon(
+                task.boardName,
+                task.boardPath,
+                task.blockId,
+                false
+              );
+              const cardLinkIconHtml = this.createDirectCardLinkIcon(
+                task.boardName,
+                task.boardPath,
+                task.blockId,
+                true
+              );
 
-              // Convert wikilinks to HTML links for HTML version
-              const titleWithObsidianLinksHtml = this.convertWikilinksToHtmlLinks(cleanTitle);
-
-              // Create board links
+              // Create board links for context
               const boardLinkText = this.createBoardLink(task.boardName, task.boardPath, false);
               const boardLinkHtml = this.createBoardLink(task.boardName, task.boardPath, true);
 
@@ -1631,12 +1874,15 @@ export default class KanbanPlugin extends Plugin {
                 priorityDisplay = `[${task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}] `;
               }
 
+              // Process the clean title for wikilinks
+              const titleWithObsidianLinksText = this.convertWikilinksToObsidianUrls(cleanTitle);
+              const titleWithObsidianLinksHtml = this.convertWikilinksToHtmlLinks(cleanTitle);
+
               // Text version
-              
-              emailBodyText += `- ${titleWithObsidianLinksText} @ ${boardLinkText}:${task.laneName} ${priorityDisplay}[${dueInText}]\n\n`;
+              emailBodyText += `- ${cardLinkIconText}${titleWithObsidianLinksText} @ ${boardLinkText}:${task.laneName} ${priorityDisplay}[${dueInText}]\n\n`;
 
               // HTML version
-              emailBodyHtml += `<li>${titleWithObsidianLinksHtml} @ <strong>${boardLinkHtml}:${task.laneName}</strong> ${priorityDisplay}<em>[${dueInText}]</em></li>`;
+              emailBodyHtml += `<li>${cardLinkIconHtml}${titleWithObsidianLinksHtml} @ <strong>${boardLinkHtml}:${task.laneName}</strong> ${priorityDisplay}<em>[${dueInText}]</em></li>`;
             });
 
             emailBodyText += 'Regards,\nYour Kanban Plugin';

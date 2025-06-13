@@ -23981,7 +23981,7 @@ Output:
       n = e.useSetting('date-display-format'),
       r = JSON.stringify(t);
     return We(
-      () => (console.log('[useGetDateColorFn] useMemo for getDateColorFn re-running.'), Nh(t, n)),
+      () => Nh(t, n),
       [r, n]
     );
   }

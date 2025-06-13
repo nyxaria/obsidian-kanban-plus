@@ -430,10 +430,7 @@ const ItemContentComponent = function ItemContent({
     safeTitleRaw = '';
   }
 
-  // USEITEMCONTENT LOG
-  console.log(
-    `[ItemContent ${item.id}] Render START. EditState: ${editState}, TitleRaw (safe): ${JSON.stringify(safeTitleRaw?.slice(0, 20))}`
-  );
+  // Render start
 
   const { stateManager, view, boardModifiers, filePath } = useContext(KanbanContext);
   const { onEditDate, onEditTime } = useDatePickers(item);
@@ -469,11 +466,7 @@ const ItemContentComponent = function ItemContent({
 
   useEffect(() => {
     if (showCardTitleEditor) {
-      console.log(
-        `[ItemContent ${item.id}] EditorSetupEffect RUN. showCardTitleEditor: ${showCardTitleEditor}, Current titleForEditor: "${titleForEditor}"`
-      );
       const rawTitle = safeTitleRaw;
-      console.log('[ItemContent] Editing starts. Raw title (safe):', JSON.stringify(rawTitle));
 
       const originalTagsFromMetadata = item.data.metadata?.tags || [];
       const originalMembersFromMetadata = item.data.assignedMembers || [];
@@ -568,12 +561,8 @@ const ItemContentComponent = function ItemContent({
       }
 
       cleanTitle = cleanTitle.replace(/\\s{2,}/g, ' ').trim();
-      console.log('[ItemContent] Clean title for editor:', JSON.stringify(cleanTitle));
       setTitleForEditor(cleanTitle);
       titleRef.current = cleanTitle;
-      console.log(
-        `[ItemContent ${item.id}] EditorSetupEffect END. titleForEditor set to: "${cleanTitle}", titleRef.current set to: "${titleRef.current}"`
-      );
     }
   }, [
     showCardTitleEditor,
@@ -585,16 +574,9 @@ const ItemContentComponent = function ItemContent({
 
   useEffect(() => {
     const currentEditStateProp = editState; // Capture prop value at effect run time
-    console.log(
-      `[ItemContent ${item.id}] SaveEffect TRIGGERED. Captured editStateProp: ${JSON.stringify(currentEditStateProp)} (type: ${typeof currentEditStateProp})` +
-        `, Compared against Complete: 1, Cancel: 2`
-    );
 
     if (currentEditStateProp === 1) {
       // Explicitly use 1 for EditingProcessState.Complete
-      console.log(
-        `[ItemContent ${item.id}] SaveEffect RUN COMPLETE. Matched editState: ${JSON.stringify(currentEditStateProp)}, titleRef.current: ${JSON.stringify(titleRef.current)}, extractedPartsRef.current: ${JSON.stringify(extractedPartsRef.current)}`
-      );
       const workTitle = titleRef.current; // Capture current title for processing
       const capturedPriorityTagFromRef = extractedPartsRef.current?.priorityTag; // Capture priority tag BEFORE clearing refs
 
@@ -602,8 +584,6 @@ const ItemContentComponent = function ItemContent({
       extractedPartsRef.current = null; // Also clear other extracted parts
 
       if (workTitle !== null) {
-        console.log('[ItemContent] Submission: User edited clean text:', JSON.stringify(workTitle));
-
         let finalTitle = workTitle;
 
         // Re-accessing original parts from item.data for reconstruction
@@ -613,18 +593,6 @@ const ItemContentComponent = function ItemContent({
         const originalTimeStr = item.data.metadata?.timeStr;
         const originalStartDateStr = item.data.metadata?.startDateStr;
         // capturedPriorityTagFromRef is already defined above
-
-        console.log(
-          '[ItemContent] Reconstructing from item.data.metadata. Extracted Parts estimate:',
-          JSON.stringify({
-            tags: originalTagsFromMetadata,
-            members: originalMembersFromMetadata,
-            dateStr: originalDateStr,
-            timeStr: originalTimeStr,
-            startDateStr: originalStartDateStr,
-            priorityTag: capturedPriorityTagFromRef,
-          })
-        );
 
         const dateTrigger = stateManager.getSetting('date-trigger');
         const timeTrigger = stateManager.getSetting('time-trigger');
@@ -646,7 +614,6 @@ const ItemContentComponent = function ItemContent({
 
         // Add start date first if it exists
         if (originalStartDateStr) {
-          console.log('[ItemContent] Reconstructing: Adding start date', originalStartDateStr);
           const startDatePart = shouldLinkDateToDailyNote
             ? `[[${originalStartDateStr}]]`
             : `{${originalStartDateStr}}`;
@@ -654,7 +621,6 @@ const ItemContentComponent = function ItemContent({
         }
 
         if (originalDateStr) {
-          console.log('[ItemContent] Reconstructing: Adding date', originalDateStr);
           const datePart = shouldLinkDateToDailyNote
             ? `[[${originalDateStr}]]`
             : `{${originalDateStr}}`;
@@ -662,15 +628,12 @@ const ItemContentComponent = function ItemContent({
         }
 
         if (originalTimeStr && originalDateStr) {
-          console.log('[ItemContent] Reconstructing: Adding time (with date)', originalTimeStr);
           addMetadata(`${timeTrigger}{${originalTimeStr}}`);
         } else if (originalTimeStr && !originalDateStr) {
-          console.log('[ItemContent] Reconstructing: Adding time (standalone)', originalTimeStr);
           addMetadata(`${timeTrigger}{${originalTimeStr}}`);
         }
 
         if (originalMembersFromMetadata && originalMembersFromMetadata.length > 0) {
-          console.log('[ItemContent] Reconstructing: Adding members', originalMembersFromMetadata);
           const membersString = originalMembersFromMetadata
             .map((m) => `@@${m.replace(/^@@/, '')}`)
             .join(' ');
@@ -678,54 +641,29 @@ const ItemContentComponent = function ItemContent({
         }
 
         if (originalTagsFromMetadata && originalTagsFromMetadata.length > 0) {
-          console.log('[ItemContent] Reconstructing: Adding tags', originalTagsFromMetadata);
           const tagsString = originalTagsFromMetadata.join(' ');
           addMetadata(tagsString);
         }
 
         // Re-append priority tag if it was captured
         if (capturedPriorityTagFromRef) {
-          console.log(
-            '[ItemContent] Reconstructing: Adding priority tag',
-            capturedPriorityTagFromRef
-          );
           addMetadata(capturedPriorityTagFromRef);
         }
 
         // Clean up multiple spaces but preserve newlines
         finalTitle = finalTitle.replace(/[ \t]{2,}/g, ' ').trim();
 
-        console.log(
-          `[ItemContent ${item.id}] SaveEffect: About to call updateItem. Current item.data.titleRaw (safe): "${safeTitleRaw}", New finalTitle: "${finalTitle}"`
-        );
-
-        if (finalTitle !== safeTitleRaw) {
-          console.log(
-            `[ItemContent ${item.id}] SaveEffect: Calling boardModifiers.updateItem. Path: ${JSON.stringify(path)}`
-          );
+        if (finalTitle !== safeTitleRaw || !item.data.blockId) {
           boardModifiers.updateItem(path, stateManager.updateItemContent(item, finalTitle));
-        } else {
-          console.log(
-            `[ItemContent ${item.id}] SaveEffect: finalTitle is same as item.data.titleRaw, skipping updateItem.`
-          );
         }
-      } else {
-        console.log(
-          `[ItemContent ${item.id}] SaveEffect: workTitle is null, skipping update logic.`
-        );
       }
       // Always transition out of edit mode if state was 'complete'
       setEditState(false);
-      console.log(`[ItemContent ${item.id}] SaveEffect COMPLETE END. Set editState to false.`);
     } else if (currentEditStateProp === 2) {
       // Explicitly use 2 for EditingProcessState.Cancel
-      console.log(
-        `[ItemContent ${item.id}] SaveEffect RUN CANCEL. Matched editState: ${JSON.stringify(currentEditStateProp)}`
-      );
       setEditState(false);
       titleRef.current = null;
       extractedPartsRef.current = null;
-      console.log(`[ItemContent ${item.id}] SaveEffect CANCEL END. Set editState to false.`);
     }
   }, [editState, boardModifiers, item, path, stateManager, setEditState]);
 
@@ -830,11 +768,6 @@ const ItemContentComponent = function ItemContent({
 };
 
 function areItemPropsEqual(prevProps: ItemContentProps, nextProps: ItemContentProps): boolean {
-  // USEITEMCONTENTMEMO LOG
-  console.log(
-    `[ItemContentMemo] Comparing props for item ${nextProps.item.id}. Prev titleRaw (safe): "${prevProps.item.data.titleRaw && typeof prevProps.item.data.titleRaw === 'string' ? prevProps.item.data.titleRaw.slice(0, 25) : '[INVALID_PREV_RAW_TITLE]'}", Next titleRaw (safe): "${nextProps.item.data.titleRaw && typeof nextProps.item.data.titleRaw === 'string' ? nextProps.item.data.titleRaw.slice(0, 25) : '[INVALID_NEXT_RAW_TITLE]'}"`
-  );
-
   const prevItemData = prevProps.item.data;
   const nextItemData = nextProps.item.data;
 
@@ -866,53 +799,7 @@ function areItemPropsEqual(prevProps: ItemContentProps, nextProps: ItemContentPr
     isStaticSame &&
     targetHighlightSame;
 
-  if (!criticalPropsSame) {
-    console.log(`[ItemContentMemo] সিদ্ধান্ত Re-rendering item ${nextProps.item.id}. Reason:`);
-    if (!itemDataBasicallySame) {
-      console.log('  - itemDataBasicallySame: false');
-      if (itemInstanceSame) {
-        // This case implies item instance is same, but some other check made itemDataBasicallySame false (should not happen with current logic)
-        console.log(
-          '    - item prop instance IS THE SAME, but itemDataBasicallySame is false (logical error in checks?).'
-        );
-      } else {
-        console.log('    - item prop instance changed.');
-      }
-      if (!idSame) console.log('    - item.id changed.');
-      if (!titleRawSame) {
-        console.log('    - item.data.titleRaw changed.');
-        // console.log(`      Prev: "${prevItemData.titleRaw}"`);
-        // console.log(`      Next: "${nextItemData.titleRaw}"`);
-      }
-      if (!metadataRefSame) console.log('    - item.data.metadata reference changed.');
-      if (!assignedMembersRefSame)
-        console.log('    - item.data.assignedMembers reference changed.');
-    }
-    if (!editStateSame)
-      console.log(
-        `  - editState changed (prev: ${prevProps.editState}, next: ${nextProps.editState})`
-      );
-    if (!searchQuerySame)
-      console.log(
-        `  - searchQuery changed (prev: ${prevProps.searchQuery}, next: ${nextProps.searchQuery})`
-      );
-    if (!showMetadataSame)
-      console.log(
-        `  - showMetadata changed (prev: ${prevProps.showMetadata}, next: ${nextProps.showMetadata})`
-      );
-    if (!isStaticSame)
-      console.log(
-        `  - isStatic changed (prev: ${prevProps.isStatic}, next: ${nextProps.isStatic})`
-      );
-    if (!targetHighlightSame)
-      console.log(
-        `  - targetHighlight changed (prev: ${JSON.stringify(prevProps.targetHighlight)}, next: ${JSON.stringify(nextProps.targetHighlight)})`
-      );
-    return false; // Props are not equal, re-render
-  } else {
-    // console.log(`[ItemContentMemo] Skipping re-render for item ${nextProps.item.id}`);
-    return true; // Props are equal, skip re-render
-  }
+  return criticalPropsSame;
 }
 
 export const ItemContent = memo(ItemContentComponent, areItemPropsEqual);

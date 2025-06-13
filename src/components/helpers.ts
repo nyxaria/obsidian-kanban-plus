@@ -360,7 +360,6 @@ export function useGetDateColorFn(
   const dateColorsString = JSON.stringify(dateColors);
 
   return useMemo(() => {
-    console.log('[useGetDateColorFn] useMemo for getDateColorFn re-running.');
     return getDateColorFn(dateColors, dateDisplayFormat);
   }, [dateColorsString, dateDisplayFormat]); // Use stringified version as dependency
 }

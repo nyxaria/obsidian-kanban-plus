@@ -66,28 +66,20 @@ export function DateAndTime({
   style,
 }: DateProps & DateAndTimeProps) {
   const moveDates = stateManager.useSetting('move-dates');
-  console.log('[DateAndTime] moveDates setting value:', moveDates); // DEBUG LOG
+  // Move dates setting retrieved
   const dateFormat = stateManager.useSetting('date-format'); // User's date format
   const timeFormat = stateManager.useSetting('time-format');
   const dateDisplayFormat = stateManager.useSetting('date-display-format');
   const shouldLinkDate = stateManager.useSetting('link-date-to-daily-note');
 
-  // Refined DEBUG LOG for metadata
-  console.log(
-    '[DateAndTime] item.data.metadata received. dateStr:',
-    item.data.metadata.dateStr,
-    'date (Moment obj exist?):',
-    !!item.data.metadata.date,
-    'time (Moment obj exist?):',
-    !!item.data.metadata.time
-  );
+  // Metadata processing
   const targetDate = item.data.metadata.time ?? item.data.metadata.date;
   const dateColor = useMemo(() => {
     if (!targetDate) return null;
     return getDateColor(targetDate);
   }, [targetDate, getDateColor]);
 
-  console.log('[DateAndTime] dateColor:', JSON.stringify(dateColor));
+  // Date color calculated
 
   if (!moveDates || !targetDate) return null;
 
@@ -110,12 +102,7 @@ export function DateAndTime({
   };
   // END MODIFICATION
 
-  console.log(
-    '[DateAndTime] Rendering with RawDate:',
-    JSON.stringify(rawDateStr),
-    'RawTime:',
-    rawTimeStr
-  ); // DEBUG LOG
+  // Rendering date and time
 
   const dateProps: HTMLAttributes<HTMLSpanElement> = {}; // This seems to be for the main div for editing
   dateProps['aria-label'] = t('Edit card');
