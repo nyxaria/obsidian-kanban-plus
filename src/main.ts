@@ -77,6 +77,12 @@ export default class KanbanPlugin extends Plugin {
 
   isShiftPressed: boolean = false;
 
+  // Global tag colors CSS injection
+  private globalTagColorsStyleEl: HTMLStyleElement | null = null;
+
+  // Global tag symbols CSS injection
+  private globalTagSymbolsStyleEl: HTMLStyleElement | null = null;
+
   // Added properties
   public archive: any = {
     getArchive: (file: TFile): Item[] => {
@@ -107,6 +113,182 @@ export default class KanbanPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+
+    // Update global tag colors when settings change
+    this.updateGlobalTagColors();
+
+    // Update global tag symbols when settings change
+    this.updateGlobalTagSymbols();
+  }
+
+  private updateGlobalTagColors() {
+    // Remove existing global styles
+    this.removeGlobalTagColors();
+
+    // Add new global styles if enabled
+    if (this.settings['apply-tag-colors-globally'] && this.settings['tag-colors']) {
+      this.injectGlobalTagColors();
+    }
+  }
+
+  private injectGlobalTagColors() {
+    if (!this.settings['tag-colors'] || this.settings['tag-colors'].length === 0) {
+      return;
+    }
+
+    // Remove any existing global tag colors style element
+    const existingStyle = document.head.querySelector('#kanban-global-tag-colors');
+    if (existingStyle) {
+      existingStyle.remove();
+    }
+
+    // Create CSS rules for each tag color
+    const cssRules: string[] = [];
+
+    this.settings['tag-colors'].forEach((tagColor) => {
+      if (tagColor.tagKey && (tagColor.color || tagColor.backgroundColor)) {
+        // Remove leading # from tagKey if present, then handle nested tags by escaping forward slashes
+        const cleanTagKey = tagColor.tagKey.startsWith('#')
+          ? tagColor.tagKey.slice(1)
+          : tagColor.tagKey;
+        const tagForSelector = cleanTagKey.replace(/\//g, '\\/');
+        const tagForClass = cleanTagKey.replace(/\//g, '');
+
+        // Create CSS rules for both reading mode and editing mode
+        // Reading mode: a.tag elements
+        const readingModeRule = `body a.tag[href="#${tagForSelector}"] {
+          ${tagColor.color ? `color: ${tagColor.color} !important;` : ''}
+          ${tagColor.backgroundColor ? `background-color: ${tagColor.backgroundColor} !important;` : ''}
+        }`;
+
+        // Editing mode: CodeMirror spans with tag classes
+        const editingModeRule = `body .cm-s-obsidian .cm-line span.cm-tag-${tagForClass}.cm-hashtag {
+          ${tagColor.color ? `color: ${tagColor.color} !important;` : ''}
+          ${tagColor.backgroundColor ? `background-color: ${tagColor.backgroundColor} !important;` : ''}
+        }`;
+
+        cssRules.push(readingModeRule);
+        cssRules.push(editingModeRule);
+      }
+    });
+
+    if (cssRules.length > 0) {
+      // Create and inject the style element with custom attribute for easy removal
+      this.globalTagColorsStyleEl = document.createElement('style');
+      this.globalTagColorsStyleEl.id = 'kanban-global-tag-colors';
+      this.globalTagColorsStyleEl.setAttribute('kanban-global-tag-style', '');
+      this.globalTagColorsStyleEl.textContent = cssRules.join('\n');
+      document.head.appendChild(this.globalTagColorsStyleEl);
+    }
+  }
+
+  private removeGlobalTagColors() {
+    // Remove by element reference
+    if (this.globalTagColorsStyleEl) {
+      this.globalTagColorsStyleEl.remove();
+      this.globalTagColorsStyleEl = null;
+    }
+
+    // Also remove by selector as a fallback
+    const existingStyles = document.head.querySelectorAll('[kanban-global-tag-style]');
+    existingStyles.forEach((style) => style.remove());
+  }
+
+  private updateGlobalTagSymbols() {
+    // Remove existing global styles
+    this.removeGlobalTagSymbols();
+
+    // Add new global styles if enabled
+    if (this.settings['apply-tag-symbols-globally'] && this.settings['tag-symbols']) {
+      this.injectGlobalTagSymbols();
+    }
+  }
+
+  private injectGlobalTagSymbols() {
+    if (!this.settings['tag-symbols'] || this.settings['tag-symbols'].length === 0) {
+      return;
+    }
+
+    // Remove any existing global tag symbols style element
+    const existingStyle = document.head.querySelector('#kanban-global-tag-symbols');
+    if (existingStyle) {
+      existingStyle.remove();
+    }
+
+    // Create CSS rules for each tag symbol
+    const cssRules: string[] = [];
+
+    this.settings['tag-symbols'].forEach((tagSymbolSetting) => {
+      if (tagSymbolSetting.data && tagSymbolSetting.data.tagKey && tagSymbolSetting.data.symbol) {
+        const tagKey = tagSymbolSetting.data.tagKey;
+        const symbol = tagSymbolSetting.data.symbol;
+        const hideTag = tagSymbolSetting.data.hideTag;
+
+        // Remove leading # from tagKey if present
+        const cleanTagKey = tagKey.startsWith('#') ? tagKey.slice(1) : tagKey;
+        const tagForSelector = cleanTagKey.replace(/\//g, '\\/');
+        const tagForClass = cleanTagKey.replace(/\//g, '');
+
+        // Create CSS rules for both reading mode and editing mode
+        // Reading mode: a.tag elements - hide text but keep background styling
+        const readingModeRule = `body a.tag[href="#${tagForSelector}"] {
+          color: transparent !important;
+          position: relative;
+          padding-right: 15px;
+        }
+        body a.tag[href="#${tagForSelector}"]:before {
+          content: "${symbol}${cleanTagKey}";
+          color: var(--text-on-accent);
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }`;
+
+        // Editing mode: CodeMirror spans with tag classes
+        // Hide the # text but keep background, show symbol instead
+        const editingModeRule = `body .cm-s-obsidian .cm-line span.cm-tag-${tagForClass}.cm-hashtag.cm-hashtag-begin {
+          color: transparent !important;
+          position: relative;
+          padding-right: 7px;
+        }
+        body .cm-s-obsidian .cm-line span.cm-tag-${tagForClass}.cm-hashtag.cm-hashtag-begin:before {
+          content: "${symbol}";
+          color: var(--text-on-accent);
+          position: absolute;
+          left: 7px;
+          top: 1px;
+        }`;
+
+        cssRules.push(readingModeRule);
+        cssRules.push(editingModeRule);
+      }
+    });
+
+    if (cssRules.length > 0) {
+      // Create and inject the style element with custom attribute for easy removal
+      this.globalTagSymbolsStyleEl = document.createElement('style');
+      this.globalTagSymbolsStyleEl.id = 'kanban-global-tag-symbols';
+      this.globalTagSymbolsStyleEl.setAttribute('kanban-global-tag-symbols-style', '');
+      this.globalTagSymbolsStyleEl.textContent = cssRules.join('\n');
+      document.head.appendChild(this.globalTagSymbolsStyleEl);
+    }
+  }
+
+  private removeGlobalTagSymbols() {
+    // Remove by element reference
+    if (this.globalTagSymbolsStyleEl) {
+      this.globalTagSymbolsStyleEl.remove();
+      this.globalTagSymbolsStyleEl = null;
+    }
+
+    // Also remove by selector as a fallback
+    const existingStyles = document.head.querySelectorAll('[kanban-global-tag-symbols-style]');
+    existingStyles.forEach((style) => style.remove());
   }
 
   unload(): void {
@@ -131,6 +313,12 @@ export default class KanbanPlugin extends Plugin {
     this.stateManagers.clear();
     this.windowRegistry.clear();
     this.kanbanFileModes = {};
+
+    // Clean up global tag colors
+    this.removeGlobalTagColors();
+
+    // Clean up global tag symbols
+    this.removeGlobalTagSymbols();
 
     (this.app.workspace as any).unregisterHoverLinkSource(frontmatterKey);
   }
@@ -403,6 +591,12 @@ export default class KanbanPlugin extends Plugin {
     this.app.workspace.onLayoutReady(async () => {
       // Wait for layout to be ready to ensure settings are loaded and workspace is available
       await this.processDueDateReminders();
+
+      // Initialize global tag colors after layout is ready
+      this.updateGlobalTagColors();
+
+      // Initialize global tag symbols after layout is ready
+      this.updateGlobalTagSymbols();
     });
   }
 
