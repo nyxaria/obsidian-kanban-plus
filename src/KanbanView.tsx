@@ -100,6 +100,22 @@ export class KanbanView extends TextFileView implements HoverParent {
       teamMemberColors: DEFAULT_SETTINGS.teamMemberColors || {},
       editable: DEFAULT_SETTINGS.editable || false,
       'auto-move-done-to-lane': DEFAULT_SETTINGS['auto-move-done-to-lane'] || false,
+      'auto-add-lane-tag': false,
+      'auto-add-board-tag': false,
+      'hide-lane-tag-display': false,
+      'hide-board-tag-display': false,
+      memberAssignmentPrefix: '@@',
+      enableDueDateEmailReminders: false,
+      dueDateReminderLastRun: 0,
+      dueDateReminderTimeframeDays: 1,
+      enableAutomaticEmailSending: false,
+      automaticEmailSenderAddress: '',
+      automaticEmailAppPassword: '',
+      automaticEmailSendingFrequencyDays: 1,
+      hideDoneLane: false,
+      'timeline-day-width': 50,
+      'timeline-card-height': 40,
+      'enable-kanban-card-embeds': true,
     };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));

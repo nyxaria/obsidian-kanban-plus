@@ -140,6 +140,8 @@ export interface KanbanSettings {
   'auto-move-done-to-lane'?: boolean;
   'auto-add-lane-tag'?: boolean;
   'auto-add-board-tag'?: boolean;
+  'hide-lane-tag-display'?: boolean;
+  'hide-board-tag-display'?: boolean;
   enableDueDateEmailReminders?: boolean;
   dueDateReminderLastRun?: number;
   dueDateReminderTimeframeDays?: number;
@@ -165,6 +167,8 @@ export interface KanbanViewSettings {
   'auto-move-done-to-lane': boolean;
   'auto-add-lane-tag': boolean;
   'auto-add-board-tag': boolean;
+  'hide-lane-tag-display': boolean;
+  'hide-board-tag-display': boolean;
   memberAssignmentPrefix: '@@';
   enableDueDateEmailReminders: false;
   dueDateReminderLastRun: 0;
@@ -230,6 +234,8 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'auto-move-done-to-lane',
   'auto-add-lane-tag',
   'auto-add-board-tag',
+  'hide-lane-tag-display',
+  'hide-board-tag-display',
   'enableDueDateEmailReminders',
   'dueDateReminderLastRun',
   'dueDateReminderTimeframeDays',
@@ -1991,6 +1997,104 @@ export class SettingsManager {
           });
       });
 
+    new Setting(contentEl)
+      .setName(t('Hide lane tags from kanban view'))
+      .setDesc(
+        t(
+          'When enabled, lane tags (added automatically) will be hidden from cards in the kanban view but remain in the markdown.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('hide-lane-tag-display', local);
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['hide-lane-tag-display'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'hide-lane-tag-display': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('hide-lane-tag-display', local);
+                const defaultValue =
+                  globalValue !== undefined
+                    ? globalValue
+                    : DEFAULT_SETTINGS['hide-lane-tag-display'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['hide-lane-tag-display'],
+                });
+              });
+          });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Hide board tags from kanban view'))
+      .setDesc(
+        t(
+          'When enabled, board tags (added automatically) will be hidden from cards in the kanban view but remain in the markdown.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('hide-board-tag-display', local);
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['hide-board-tag-display'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'hide-board-tag-display': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('hide-board-tag-display', local);
+                const defaultValue =
+                  globalValue !== undefined
+                    ? globalValue
+                    : DEFAULT_SETTINGS['hide-board-tag-display'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['hide-board-tag-display'],
+                });
+              });
+          });
+      });
+
     this.tagColorSettingsEl = contentEl.createDiv({ cls: c('tag-color-setting-wrapper') });
     this.tagSymbolSettingsEl = contentEl.createDiv({ cls: c('tag-symbol-setting-wrapper') });
   }
@@ -2462,6 +2566,8 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'auto-move-done-to-lane': false,
   'auto-add-lane-tag': false,
   'auto-add-board-tag': false,
+  'hide-lane-tag-display': false,
+  'hide-board-tag-display': false,
   enableDueDateEmailReminders: false,
   dueDateReminderLastRun: 0,
   dueDateReminderTimeframeDays: 1,
