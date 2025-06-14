@@ -47,6 +47,12 @@ export interface DueDateFilterConfig {
 
 export type TagSymbol = '#' | '🏷️' | string;
 
+export interface TagSymbolData {
+  tagKey: string;
+  symbol: string;
+  hideTag?: boolean;
+}
+
 export interface DateColor {
   isToday?: boolean;
   isBefore?: boolean;
@@ -135,7 +141,7 @@ export type Board = Nestable<BoardData, Lane>;
 export type MetadataSetting = Nestable<DataKey>;
 export type TagColorSetting = Nestable<TagColor>;
 export type TagSortSetting = Nestable<TagSort>;
-export type TagSymbolSetting = Nestable<TagSymbol>;
+export type TagSymbolSetting = Nestable<TagSymbolData>;
 export type DateColorSetting = Nestable<DateColor>;
 
 export const DataTypes = {

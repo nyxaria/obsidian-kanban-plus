@@ -142,6 +142,8 @@ export interface KanbanSettings {
   'auto-add-board-tag'?: boolean;
   'hide-lane-tag-display'?: boolean;
   'hide-board-tag-display'?: boolean;
+  'apply-tag-colors-globally'?: boolean;
+  'apply-tag-symbols-globally'?: boolean;
   enableDueDateEmailReminders?: boolean;
   dueDateReminderLastRun?: number;
   dueDateReminderTimeframeDays?: number;
@@ -236,6 +238,8 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'auto-add-board-tag',
   'hide-lane-tag-display',
   'hide-board-tag-display',
+  'apply-tag-colors-globally',
+  'apply-tag-symbols-globally',
   'enableDueDateEmailReminders',
   'dueDateReminderLastRun',
   'dueDateReminderTimeframeDays',
@@ -873,6 +877,55 @@ export class SettingsManager {
       });
     });
 
+    new Setting(contentEl)
+      .setName(t('Apply tag colors globally'))
+      .setDesc(
+        t(
+          'When enabled, tag colors defined above will be applied to all tags across Obsidian, not just in Kanban boards.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('apply-tag-colors-globally', local);
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['apply-tag-colors-globally'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'apply-tag-colors-globally': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('apply-tag-colors-globally', local);
+                const defaultValue =
+                  globalValue !== undefined
+                    ? globalValue
+                    : DEFAULT_SETTINGS['apply-tag-colors-globally'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['apply-tag-colors-globally'],
+                });
+              });
+          });
+      });
+
     new Setting(contentEl).then((setting) => {
       const [value] = this.getSetting('tag-symbols', local);
       const tagSymbolData = value as TagSymbolSetting[] | undefined;
@@ -890,6 +943,55 @@ export class SettingsManager {
         if (setting.settingEl) unmountTagSymbolSettings(setting.settingEl);
       });
     });
+
+    new Setting(contentEl)
+      .setName(t('Apply tag symbols globally'))
+      .setDesc(
+        t(
+          'When enabled, tag symbols defined above will be applied to all tags across Obsidian, not just in Kanban boards.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('apply-tag-symbols-globally', local);
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['apply-tag-symbols-globally'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'apply-tag-symbols-globally': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('apply-tag-symbols-globally', local);
+                const defaultValue =
+                  globalValue !== undefined
+                    ? globalValue
+                    : DEFAULT_SETTINGS['apply-tag-symbols-globally'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['apply-tag-symbols-globally'],
+                });
+              });
+          });
+      });
 
     this.settingElements.push(
       new Setting(contentEl)
@@ -2568,6 +2670,8 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'auto-add-board-tag': false,
   'hide-lane-tag-display': false,
   'hide-board-tag-display': false,
+  'apply-tag-colors-globally': false,
+  'apply-tag-symbols-globally': false,
   enableDueDateEmailReminders: false,
   dueDateReminderLastRun: 0,
   dueDateReminderTimeframeDays: 1,

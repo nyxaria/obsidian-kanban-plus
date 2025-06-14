@@ -369,6 +369,12 @@ const en = {
   'Hide board tags from kanban view': 'Hide board tags from kanban view',
   'When enabled, board tags (added automatically) will be hidden from cards in the kanban view but remain in the markdown.':
     'When enabled, board tags (added automatically) will be hidden from cards in the kanban view but remain in the markdown.',
+  'Apply tag colors globally': 'Apply tag colors globally',
+  'When enabled, tag colors defined above will be applied to all tags across Obsidian, not just in Kanban boards.':
+    'When enabled, tag colors defined above will be applied to all tags across Obsidian, not just in Kanban boards.',
+  'Apply tag symbols globally': 'Apply tag symbols globally',
+  'When enabled, tag symbols defined above will be applied to all tags across Obsidian, not just in Kanban boards.':
+    'When enabled, tag symbols defined above will be applied to all tags across Obsidian, not just in Kanban boards.',
 };
 
 export type Lang = typeof en;
