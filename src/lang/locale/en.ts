@@ -307,6 +307,9 @@ const en = {
   'Member Assignment Prefix': 'Member Assignment Prefix',
   'The prefix used to identify member assignments in card text (e.g., @@User)':
     'The prefix used to identify member assignments in card text (e.g., @@User)',
+  'Enable Kanban card embeds': 'Enable Kanban card embeds',
+  'When enabled, internal links to Kanban cards (e.g., [[Board#^blockId]]) will be rendered as card previews instead of regular links.':
+    'When enabled, internal links to Kanban cards (e.g., [[Board#^blockId]]) will be rendered as card previews instead of regular links.',
 
   // Workspace View Specific
   'Kanban Workspace': 'Kanban Workspace',
@@ -351,6 +354,15 @@ const en = {
   'Display card count in list header': 'Display card count in list header',
   'When toggled, the number of cards in a list will be displayed in the list header':
     'When toggled, the number of cards in a list will be displayed in the list header',
+
+  // Automation settings
+  Automation: 'Automation',
+  'Automatically add lane tag to new cards': 'Automatically add lane tag to new cards',
+  'When enabled, new cards will automatically include a tag with the lane name (e.g., #todo, #in-progress).':
+    'When enabled, new cards will automatically include a tag with the lane name (e.g., #todo, #in-progress).',
+  'Automatically add board tag to new cards': 'Automatically add board tag to new cards',
+  'When enabled, new cards will automatically include a tag with the board name (e.g., #project-board, #daily-tasks).':
+    'When enabled, new cards will automatically include a tag with the board name (e.g., #project-board, #daily-tasks).',
 };
 
 export type Lang = typeof en;

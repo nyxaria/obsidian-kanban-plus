@@ -187,6 +187,11 @@ export default class KanbanPlugin extends Plugin {
     this.registerEditorSuggest(new TimeSuggest(this.app, this));
     this.registerEditorSuggest(new DateSuggest(this.app, this));
 
+    // Register markdown post-processor for Kanban card embeds
+    this.registerMarkdownPostProcessor((element, context) => {
+      this.processKanbanCardEmbeds(element, context);
+    });
+
     // Hook into URL handling by monkey patching the app's openWithDefaultApp method
     this.register(
       around(this.app as any, {
@@ -1946,6 +1951,68 @@ export default class KanbanPlugin extends Plugin {
     console.log('[KanbanPlugin] Due date reminders processing finished.');
   }
   // --- END ADDED METHOD for Due Date Reminders ---
+
+  // --- BEGIN Kanban Card Embed Post-Processor ---
+  processKanbanCardEmbeds(element: HTMLElement, context: any) {
+    // Check if the feature is enabled
+    if (this.settings['enable-kanban-card-embeds'] === false) {
+      return;
+    }
+
+    // Find all internal links with block references
+    const internalLinks = element.querySelectorAll('a.internal-link');
+
+    for (const linkEl of Array.from(internalLinks)) {
+      const href = linkEl.getAttribute('href') || linkEl.getAttribute('data-href');
+      if (!href || !href.includes('#^')) continue;
+
+      // Extract file path and block ID
+      const [filePath, blockRef] = href.split('#');
+      if (!blockRef || !blockRef.startsWith('^')) continue;
+
+      const blockId = blockRef.substring(1); // Remove ^
+
+      // Check if the target file is a Kanban board
+      const file = this.app.metadataCache.getFirstLinkpathDest(filePath, context.sourcePath);
+      if (!file || !hasFrontmatterKey(file)) continue;
+
+      // Create the card embed
+      this.createCardEmbed(linkEl as HTMLElement, file.path, blockId, context.sourcePath);
+    }
+  }
+
+  createCardEmbed(linkEl: HTMLElement, filePath: string, blockId: string, sourcePath: string) {
+    // Import the necessary components
+    const { createElement } = require('preact');
+    const { render } = require('preact/compat');
+
+    // Dynamically import the SimpleKanbanCardEmbed component
+    import('./components/SimpleKanbanCardEmbed')
+      .then(({ SimpleKanbanCardEmbed }) => {
+        // Create a container for the embed
+        const embedContainer = document.createElement('div');
+        // Card embed uses kanban-plugin__item structure now
+
+        // Render the SimpleKanbanCardEmbed component
+        render(
+          createElement(SimpleKanbanCardEmbed, {
+            filePath,
+            blockId,
+            plugin: this,
+            sourcePath,
+            displayText: linkEl.textContent || linkEl.getAttribute('aria-label') || '',
+          }),
+          embedContainer
+        );
+
+        // Replace the link with the embed
+        linkEl.parentNode?.replaceChild(embedContainer, linkEl);
+      })
+      .catch((error) => {
+        console.error('[KanbanPlugin] Failed to load SimpleKanbanCardEmbed component:', error);
+      });
+  }
+  // --- END Kanban Card Embed Post-Processor ---
 }
 
 // --- SMTP Email Sending Function ---

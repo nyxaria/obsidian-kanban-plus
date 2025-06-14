@@ -9,7 +9,7 @@ import { t } from 'src/lang/helpers';
 import { BoardModifiers } from '../../helpers/boardModifiers';
 import { TagNameModal } from '../../modals/TagNameModal';
 import { getAllTagsFromKanbanBoards } from '../../utils/kanbanTags';
-import { applyTemplate, escapeRegExpStr, generateInstanceId } from '../helpers';
+import { applyTemplate, escapeRegExpStr, generateInstanceId, getTagSymbolFn } from '../helpers';
 import { EditState, Item, ItemMetadata } from '../types';
 import {
   constructDatePicker,
@@ -229,6 +229,10 @@ function addAssignTagOptions(
           t.replace(/^#/, '').toLowerCase()
         );
 
+        // Get tag symbol function
+        const tagSymbols = stateManager.getSetting('tag-symbols') || [];
+        const getTagSymbol = getTagSymbolFn(tagSymbols);
+
         kanbanBoardTags.forEach((tag) => {
           if (tag && typeof tag === 'string' && tag.trim() !== '') {
             tagSubMenu.addItem((subMenuItem: MenuItem) => {
@@ -236,8 +240,22 @@ function addAssignTagOptions(
               const menuTagLower = menuTagClean.toLowerCase();
               const isAssigned = cardMetaTagsLower.includes(menuTagLower);
 
+              // Get tag symbol for display
+              const tagWithHash = menuTagClean.startsWith('#') ? menuTagClean : `#${menuTagClean}`;
+              const symbolInfo = getTagSymbol(tagWithHash);
+
+              let displayTitle = menuTagClean;
+              if (symbolInfo) {
+                const tagNameWithoutHash = menuTagClean.replace(/^#/, '');
+                if (symbolInfo.hideTag) {
+                  displayTitle = symbolInfo.symbol;
+                } else {
+                  displayTitle = `${symbolInfo.symbol} ${tagNameWithoutHash}`;
+                }
+              }
+
               subMenuItem
-                .setTitle(menuTagClean)
+                .setTitle(displayTitle)
                 .setChecked(isAssigned)
                 .onClick(async () => {
                   const clickedTagOriginalCasing = menuTagClean;

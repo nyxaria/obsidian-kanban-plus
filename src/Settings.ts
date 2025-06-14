@@ -138,6 +138,8 @@ export interface KanbanSettings {
   editable?: boolean;
   memberAssignmentPrefix?: string;
   'auto-move-done-to-lane'?: boolean;
+  'auto-add-lane-tag'?: boolean;
+  'auto-add-board-tag'?: boolean;
   enableDueDateEmailReminders?: boolean;
   dueDateReminderLastRun?: number;
   dueDateReminderTimeframeDays?: number;
@@ -147,7 +149,8 @@ export interface KanbanSettings {
   automaticEmailSendingFrequencyDays?: number;
   hideDoneLane?: boolean;
   timelineDayWidth?: number;
-  timelineCardHeight?: number; // Added
+  timelineCardHeight?: number;
+  'enable-kanban-card-embeds'?: boolean; // Added
 }
 
 export interface KanbanViewSettings {
@@ -160,6 +163,8 @@ export interface KanbanViewSettings {
   teamMemberColors: Record<string, TeamMemberColorConfig>;
   editable: boolean;
   'auto-move-done-to-lane': boolean;
+  'auto-add-lane-tag': boolean;
+  'auto-add-board-tag': boolean;
   memberAssignmentPrefix: '@@';
   enableDueDateEmailReminders: false;
   dueDateReminderLastRun: 0;
@@ -171,6 +176,7 @@ export interface KanbanViewSettings {
   hideDoneLane: false;
   'timeline-day-width': 50;
   'timeline-card-height': 40; // Added for consistency, though primarily global
+  'enable-kanban-card-embeds': boolean;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -222,6 +228,8 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'editable',
   'memberAssignmentPrefix',
   'auto-move-done-to-lane',
+  'auto-add-lane-tag',
+  'auto-add-board-tag',
   'enableDueDateEmailReminders',
   'dueDateReminderLastRun',
   'dueDateReminderTimeframeDays',
@@ -232,6 +240,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'hideDoneLane',
   'timelineDayWidth',
   'timelineCardHeight',
+  'enable-kanban-card-embeds',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -698,55 +707,6 @@ export class SettingsManager {
           });
       });
 
-    new Setting(contentEl)
-      .setName(t('Automatically move done cards to "Done" lane'))
-      .setDesc(
-        t(
-          'When a card is marked as done, automatically move it to a lane named "Done". If the lane doesn\'t exist, it will be created.'
-        )
-      )
-      .then((setting) => {
-        let toggleComponent: ToggleComponent;
-
-        setting
-          .addToggle((toggle) => {
-            toggleComponent = toggle;
-
-            const [value, globalValue] = this.getSetting('auto-move-done-to-lane', local);
-            const currentActualValue =
-              value !== undefined
-                ? value
-                : globalValue !== undefined
-                  ? globalValue
-                  : DEFAULT_SETTINGS['auto-move-done-to-lane'];
-            toggle.setValue(currentActualValue as boolean);
-
-            toggle.onChange((newValue) => {
-              this.applySettingsUpdate({
-                'auto-move-done-to-lane': {
-                  $set: newValue,
-                },
-              });
-            });
-          })
-          .addExtraButton((b) => {
-            b.setIcon('lucide-rotate-ccw')
-              .setTooltip(t('Reset to default'))
-              .onClick(() => {
-                const [, globalValue] = this.getSetting('auto-move-done-to-lane', local);
-                const defaultValue =
-                  globalValue !== undefined
-                    ? globalValue
-                    : DEFAULT_SETTINGS['auto-move-done-to-lane'];
-                toggleComponent.setValue(defaultValue as boolean);
-
-                this.applySettingsUpdate({
-                  $unset: ['auto-move-done-to-lane'],
-                });
-              });
-          });
-      });
-
     contentEl.createEl('h4', { text: t('Tags') });
 
     new Setting(contentEl)
@@ -812,6 +772,52 @@ export class SettingsManager {
             },
           });
         });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Enable Kanban card embeds'))
+      .setDesc(
+        t(
+          'When enabled, internal links to Kanban cards (e.g., [[Board#^blockId]]) will be rendered as card previews instead of regular links.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('enable-kanban-card-embeds', local);
+
+            if (value !== undefined) {
+              toggle.setValue(value as boolean);
+            } else if (globalValue !== undefined) {
+              toggle.setValue(globalValue as boolean);
+            } else {
+              toggle.setValue(true); // Default to enabled
+            }
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'enable-kanban-card-embeds': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('enable-kanban-card-embeds', local);
+                toggleComponent.setValue(globalValue !== undefined ? !!globalValue : true);
+
+                this.applySettingsUpdate({
+                  $unset: ['enable-kanban-card-embeds'],
+                });
+              });
+          });
       });
 
     new Setting(contentEl).then((setting) => {
@@ -1839,6 +1845,152 @@ export class SettingsManager {
         });
     });
 
+    // Automation section
+    contentEl.createEl('h4', { text: t('Automation') });
+
+    new Setting(contentEl)
+      .setName(t('Automatically add lane tag to new cards'))
+      .setDesc(
+        t(
+          'When enabled, new cards will automatically include a tag with the lane name (e.g., #todo, #in-progress).'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('auto-add-lane-tag', local);
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['auto-add-lane-tag'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'auto-add-lane-tag': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('auto-add-lane-tag', local);
+                const defaultValue =
+                  globalValue !== undefined ? globalValue : DEFAULT_SETTINGS['auto-add-lane-tag'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['auto-add-lane-tag'],
+                });
+              });
+          });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Automatically add board tag to new cards'))
+      .setDesc(
+        t(
+          'When enabled, new cards will automatically include a tag with the board name (e.g., #project-board, #daily-tasks).'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('auto-add-board-tag', local);
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['auto-add-board-tag'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'auto-add-board-tag': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('auto-add-board-tag', local);
+                const defaultValue =
+                  globalValue !== undefined ? globalValue : DEFAULT_SETTINGS['auto-add-board-tag'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['auto-add-board-tag'],
+                });
+              });
+          });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Automatically move done cards to "Done" lane'))
+      .setDesc(
+        t(
+          'When a card is marked as done, automatically move it to a lane named "Done". If the lane doesn\'t exist, it will be created.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('auto-move-done-to-lane', local);
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['auto-move-done-to-lane'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'auto-move-done-to-lane': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('auto-move-done-to-lane', local);
+                const defaultValue =
+                  globalValue !== undefined
+                    ? globalValue
+                    : DEFAULT_SETTINGS['auto-move-done-to-lane'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['auto-move-done-to-lane'],
+                });
+              });
+          });
+      });
+
     this.tagColorSettingsEl = contentEl.createDiv({ cls: c('tag-color-setting-wrapper') });
     this.tagSymbolSettingsEl = contentEl.createDiv({ cls: c('tag-symbol-setting-wrapper') });
   }
@@ -2308,6 +2460,8 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   editable: true,
   memberAssignmentPrefix: '@@',
   'auto-move-done-to-lane': false,
+  'auto-add-lane-tag': false,
+  'auto-add-board-tag': false,
   enableDueDateEmailReminders: false,
   dueDateReminderLastRun: 0,
   dueDateReminderTimeframeDays: 1,
@@ -2317,7 +2471,8 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   automaticEmailSendingFrequencyDays: 1,
   hideDoneLane: false,
   timelineDayWidth: 50,
-  timelineCardHeight: 40, // Added
+  timelineCardHeight: 40,
+  'enable-kanban-card-embeds': true,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {
