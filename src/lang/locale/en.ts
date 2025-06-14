@@ -363,6 +363,12 @@ const en = {
   'Automatically add board tag to new cards': 'Automatically add board tag to new cards',
   'When enabled, new cards will automatically include a tag with the board name (e.g., #project-board, #daily-tasks).':
     'When enabled, new cards will automatically include a tag with the board name (e.g., #project-board, #daily-tasks).',
+  'Hide lane tags from kanban view': 'Hide lane tags from kanban view',
+  'When enabled, lane tags (added automatically) will be hidden from cards in the kanban view but remain in the markdown.':
+    'When enabled, lane tags (added automatically) will be hidden from cards in the kanban view but remain in the markdown.',
+  'Hide board tags from kanban view': 'Hide board tags from kanban view',
+  'When enabled, board tags (added automatically) will be hidden from cards in the kanban view but remain in the markdown.':
+    'When enabled, board tags (added automatically) will be hidden from cards in the kanban view but remain in the markdown.',
 };
 
 export type Lang = typeof en;

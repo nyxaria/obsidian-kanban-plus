@@ -171,13 +171,48 @@ export function Tags(props: TagsProps) {
   const shouldShow = stateManager.useSetting('move-tags') || alwaysShow;
   const hideHashForTagsWithoutSymbols = stateManager.useSetting('hideHashForTagsWithoutSymbols');
 
+  // Get the hide tag settings
+  const hideLaneTagDisplay = stateManager.useSetting('hide-lane-tag-display');
+  const hideBoardTagDisplay = stateManager.useSetting('hide-board-tag-display');
+
   if (!tags || !tags.length || !shouldShow) {
     return null;
   }
 
+  // Filter out lane and board tags if the settings are enabled
+  let filteredTags = tags;
+  if (hideLaneTagDisplay || hideBoardTagDisplay) {
+    const board = stateManager.state;
+    const boardName = stateManager.file?.basename;
+
+    filteredTags = tags.filter((tag) => {
+      const tagWithoutHash = tag.replace(/^#/, '').toLowerCase();
+
+      // Check if this is a board tag (matches board name)
+      if (hideBoardTagDisplay && boardName) {
+        const boardTagPattern = boardName.toLowerCase().replace(/\s+/g, '-');
+        if (tagWithoutHash === boardTagPattern) {
+          return false; // Hide this tag
+        }
+      }
+
+      // Check if this is a lane tag
+      if (hideLaneTagDisplay && board) {
+        for (const lane of board.children) {
+          const laneTagPattern = lane.data.title.toLowerCase().replace(/\s+/g, '-');
+          if (tagWithoutHash === laneTagPattern) {
+            return false; // Hide this tag
+          }
+        }
+      }
+
+      return true; // Show this tag
+    });
+  }
+
   return (
     <div className={c('item-tags')} style={style}>
-      {tags.map((originalTag, i) => {
+      {filteredTags.map((originalTag, i) => {
         const tagColor = getTagColor(originalTag);
         const symbolInfo = getTagSymbol(originalTag);
 
