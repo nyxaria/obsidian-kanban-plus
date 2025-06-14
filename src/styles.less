@@ -826,6 +826,27 @@ button.kanban-plugin__new-item-button {
   }
 }
 
+// Kanban Card Embed Styles - Using exact kanban item structure
+.kanban-plugin__card-embed-item {
+  &:hover {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+}
+
+.kanban-plugin__card-embed-header-info {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: var(--size-4-1);
+}
+
+.kanban-plugin__card-embed-title-content {
+  font-weight: 600;
+  color: var(--text-normal);
+  line-height: var(--line-height-tight);
+}
+
 .kanban-plugin__item-metadata-date-relative::first-letter {
   text-transform: uppercase;
 }

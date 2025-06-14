@@ -638,14 +638,20 @@ export function newItem(
   const trimmedContent = newContent.trim();
   const tagsArray = [];
 
-  if (laneName) {
+  // Check if lane tag should be added
+  const shouldAddLaneTag = stateManager.getSetting('auto-add-lane-tag');
+  if (shouldAddLaneTag && laneName) {
     const listNameTag = `#${laneName.toLowerCase().replace(/\s+/g, '-')}`;
     tagsArray.push(listNameTag);
   }
 
-  const fileNameBase = stateManager.file.basename;
-  const fileNameTag = `#${fileNameBase.toLowerCase().replace(/\s+/g, '-')}`;
-  tagsArray.push(fileNameTag);
+  // Check if board tag should be added
+  const shouldAddBoardTag = stateManager.getSetting('auto-add-board-tag');
+  if (shouldAddBoardTag) {
+    const fileNameBase = stateManager.file.basename;
+    const fileNameTag = `#${fileNameBase.toLowerCase().replace(/\s+/g, '-')}`;
+    tagsArray.push(fileNameTag);
+  }
 
   let tagsString = '';
   if (tagsArray.length > 0) {

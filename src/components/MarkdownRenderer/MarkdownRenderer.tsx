@@ -3,13 +3,17 @@ import classcat from 'classcat';
 import Mark from 'mark.js';
 import moment from 'moment';
 import { Component, MarkdownRenderer as ObsidianRenderer, getLinkpath } from 'obsidian';
+import { createElement } from 'preact';
 import { CSSProperties, memo, useEffect, useRef } from 'preact/compat';
+import { render } from 'preact/compat';
 import { useContext } from 'preact/hooks';
 import { KanbanView } from 'src/KanbanView';
 import { DndManagerContext, EntityManagerContext } from 'src/dnd/components/context';
+import { hasFrontmatterKey } from 'src/helpers';
 import { PromiseCapability } from 'src/helpers/util';
 
 import { applyCheckboxIndexes } from '../../helpers/renderMarkdown';
+import { KanbanCardEmbed } from '../KanbanCardEmbed';
 import { IntersectionObserverContext, KanbanContext, SortContext } from '../context';
 import { c, useGetDateColorFn, useGetTagColorFn } from '../helpers';
 import { DateColor, TagColor } from '../types';
@@ -253,7 +257,43 @@ export class BasicMarkdownRenderer extends Component {
       const path = getLinkpath(href);
       const file = view.app.metadataCache.getFirstLinkpathDest(path, view.file.path);
       internalLinkEl.toggleClass('is-unresolved', !file);
+
+      // Check if Kanban card embeds are enabled and this is a link to a Kanban card block reference
+      const embedsEnabled = view.plugin.settings['enable-kanban-card-embeds'] !== false;
+      if (embedsEnabled && href.includes('#^') && file && hasFrontmatterKey(file)) {
+        this.processKanbanCardLink(internalLinkEl, href, file.path);
+      }
     }
+  }
+
+  processKanbanCardLink(linkEl: HTMLElement, href: string, filePath: string) {
+    const { view } = this;
+
+    // Extract the block ID from the href
+    const blockIdMatch = href.match(/#\^([a-zA-Z0-9]+)/);
+    if (!blockIdMatch) return;
+
+    const blockId = blockIdMatch[1];
+    const displayText = linkEl.textContent || href;
+
+    // Create a container for the card embed
+    const embedContainer = createDiv();
+    embedContainer.addClass(c('card-embed-container'));
+
+    // Render the KanbanCardEmbed component
+    render(
+      createElement(KanbanCardEmbed, {
+        filePath,
+        blockId,
+        plugin: view.plugin,
+        sourcePath: view.file.path,
+        displayText,
+      }),
+      embedContainer
+    );
+
+    // Replace the link with the embed
+    linkEl.parentNode?.replaceChild(embedContainer, linkEl);
   }
 
   getInternalLinkHref(el: HTMLElement) {
