@@ -2,7 +2,7 @@ import update from 'immutability-helper';
 import moment from 'moment';
 import { Notice, TFile } from 'obsidian';
 import { createElement } from 'preact';
-import { memo, useEffect, useMemo, useState } from 'preact/compat';
+import { memo, useEffect, useMemo, useRef, useState } from 'preact/compat';
 import { DEFAULT_SETTINGS } from 'src/Settings';
 import { StateManager } from 'src/StateManager';
 import { generateInstanceId } from 'src/components/helpers';
@@ -12,6 +12,114 @@ import KanbanPlugin from 'src/main';
 import { ListFormat } from 'src/parsers/List';
 
 import { getTagColorFn, getTagSymbolFn, useGetDateColorFn } from './helpers';
+
+// Interactive Markdown Renderer Component for handling both internal and external links
+function InteractiveMarkdownRenderer(props: {
+  markdownText: string;
+  plugin: KanbanPlugin;
+  sourcePath: string;
+}) {
+  const { markdownText, plugin, sourcePath } = props;
+  const contentRef = useRef<HTMLSpanElement>(null);
+
+  // Regex for external links: [text](url)
+  const externalLinkRegex = /\[([^\][]*)\]\((https?:\/\/[^)]+)\)/g;
+  // Regex for internal links: [[file]] or [[file|alias]]
+  const internalLinkRegex = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+
+  // Combined regex to find either type of link
+  const combinedRegex = new RegExp(`${externalLinkRegex.source}|${internalLinkRegex.source}`, 'g');
+
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = combinedRegex.exec(markdownText)) !== null) {
+    // Text before the link
+    if (match.index > lastIndex) {
+      parts.push(markdownText.substring(lastIndex, match.index));
+    }
+
+    const externalText = match[1];
+    const externalUrl = match[2];
+    const internalFile = match[3];
+    const internalAlias = match[4];
+
+    if (externalUrl) {
+      // External link
+      parts.push(
+        createElement(
+          'a',
+          {
+            href: externalUrl,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            class: 'external-link',
+            style: { color: 'var(--link-color)', textDecoration: 'underline' },
+          },
+          externalText || externalUrl
+        )
+      );
+    } else if (internalFile) {
+      // Internal link
+      const displayText = internalAlias || internalFile;
+      const linkText = internalFile + (internalAlias ? `|${internalAlias}` : ''); // Original [[content]]
+      parts.push(
+        createElement(
+          'a',
+          {
+            href: '#', // Placeholder, click is handled
+            class: 'internal-link',
+            'data-link-text': linkText, // Store original link for Obsidian to handle
+            style: { color: 'var(--link-color)', textDecoration: 'underline', cursor: 'pointer' },
+          },
+          displayText
+        )
+      );
+    }
+    lastIndex = combinedRegex.lastIndex;
+  }
+
+  // Text after the last link
+  if (lastIndex < markdownText.length) {
+    parts.push(markdownText.substring(lastIndex));
+  }
+
+  // Click handler for internal links
+  useEffect(() => {
+    const currentContentRef = contentRef.current;
+    if (!currentContentRef) return;
+
+    const handleClick = (event: MouseEvent) => {
+      let target = event.target as HTMLElement | null;
+      // Traverse up to find the link if the click was on a child element
+      for (let i = 0; i < 3 && target && target !== currentContentRef; i++) {
+        if (target.tagName === 'A' && target.classList.contains('internal-link')) {
+          event.preventDefault();
+          event.stopPropagation();
+          const link = target.getAttribute('data-link-text');
+          if (link) {
+            plugin.app.workspace.openLinkText(
+              link,
+              sourcePath,
+              event.ctrlKey || event.metaKey || event.button === 1 // Open in new tab/split on Ctrl/Cmd click or middle mouse click
+            );
+          }
+          return;
+        }
+        target = target.parentElement;
+      }
+    };
+
+    currentContentRef.addEventListener('click', handleClick);
+    return () => {
+      currentContentRef.removeEventListener('click', handleClick);
+    };
+  }, [plugin, sourcePath]); // Dependencies for the click handler
+
+  // Render the parts into a span
+  return createElement('span', { ref: contentRef }, ...parts);
+}
 
 // Helper function to move a card to the "Done" lane in markdown
 async function moveCardToDoneLane(
@@ -499,14 +607,27 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
     }
   };
 
-  const renderMarkdownLists = (content: string): string => {
-    if (!content) return '';
+  const renderMarkdownLists = (content: string, plugin: KanbanPlugin, sourcePath: string) => {
+    if (!content) return null;
 
     // Split content into lines for processing
     const lines = content.split('\n');
-    const processedLines: string[] = [];
+    const processedElements: any[] = [];
     let inList = false;
     let listType: 'ul' | 'ol' | null = null;
+    let currentListItems: any[] = [];
+
+    const flushList = () => {
+      if (currentListItems.length > 0) {
+        const listElement = createElement(
+          listType === 'ol' ? 'ol' : 'ul',
+          { className: listType === 'ul' ? 'kanban-mixed-list' : undefined },
+          ...currentListItems
+        );
+        processedElements.push(listElement);
+        currentListItems = [];
+      }
+    };
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -523,70 +644,103 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
       if (taskMatch) {
         // Task list item - convert to mixed list if we're already in a regular ul
         if (!inList) {
-          processedLines.push('<ul class="kanban-mixed-list">');
           inList = true;
           listType = 'ul';
         } else if (listType === 'ol') {
-          processedLines.push('</ol>');
-          processedLines.push('<ul class="kanban-mixed-list">');
+          flushList();
           listType = 'ul';
         }
         const isChecked = taskMatch[2].trim() === 'x';
         const content = taskMatch[3];
-        const checkbox = isChecked
-          ? '<input type="checkbox" checked disabled style="margin-right: 6px;">'
-          : '<input type="checkbox" disabled style="margin-right: 6px;">';
-        processedLines.push(`<li class="task-item">${checkbox}${content}</li>`);
+        const checkbox = createElement('input', {
+          type: 'checkbox',
+          checked: isChecked,
+          disabled: true,
+          style: { marginRight: '6px' },
+        });
+        currentListItems.push(
+          createElement(
+            'li',
+            { className: 'task-item' },
+            checkbox,
+            createElement(InteractiveMarkdownRenderer, {
+              markdownText: content,
+              plugin,
+              sourcePath,
+            })
+          )
+        );
       } else if (unorderedMatch) {
         // Regular unordered list item
         if (!inList) {
-          processedLines.push('<ul class="kanban-mixed-list">');
           inList = true;
           listType = 'ul';
         } else if (listType === 'ol') {
-          processedLines.push('</ol>');
-          processedLines.push('<ul class="kanban-mixed-list">');
+          flushList();
           listType = 'ul';
         }
-        processedLines.push(`<li class="bullet-item">${unorderedMatch[3]}</li>`);
+        currentListItems.push(
+          createElement(
+            'li',
+            { className: 'bullet-item' },
+            createElement(InteractiveMarkdownRenderer, {
+              markdownText: unorderedMatch[3],
+              plugin,
+              sourcePath,
+            })
+          )
+        );
       } else if (orderedMatch) {
         // Ordered list item
         if (!inList || listType !== 'ol') {
-          if (inList) processedLines.push(listType === 'ul' ? '</ul>' : '</ol>');
-          processedLines.push('<ol>');
+          if (inList) flushList();
           inList = true;
           listType = 'ol';
         }
-        processedLines.push(`<li>${orderedMatch[3]}</li>`);
+        currentListItems.push(
+          createElement(
+            'li',
+            {},
+            createElement(InteractiveMarkdownRenderer, {
+              markdownText: orderedMatch[3],
+              plugin,
+              sourcePath,
+            })
+          )
+        );
       } else {
         // Not a list item
         if (inList) {
-          processedLines.push(listType === 'ol' ? '</ol>' : '</ul>');
+          flushList();
           inList = false;
           listType = null;
         }
-        // Escape HTML in non-list content and preserve line breaks
+        // Handle non-list content
         if (trimmedLine === '') {
-          processedLines.push('<br>');
+          processedElements.push(createElement('br', {}));
         } else {
-          const escapedLine = line
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+          processedElements.push(
+            createElement(InteractiveMarkdownRenderer, {
+              markdownText: line,
+              plugin,
+              sourcePath,
+            })
+          );
           // Add line break only if this isn't the last line and the next line isn't empty
           const isLastLine = i === lines.length - 1;
-          const nextLineIsEmpty = !isLastLine && lines[i + 1].trim() === '';
-          processedLines.push(escapedLine + (isLastLine ? '' : '<br>'));
+          if (!isLastLine) {
+            processedElements.push(createElement('br', {}));
+          }
         }
       }
     }
 
     // Close any open list
     if (inList) {
-      processedLines.push(listType === 'ol' ? '</ol>' : '</ul>');
+      flushList();
     }
 
-    return processedLines.join('');
+    return createElement('div', {}, ...processedElements);
   };
 
   const extractCardContent = (titleRaw: string): string => {
@@ -884,12 +1038,13 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
             </div>
 
             <div className="kanban-plugin__linked-card-content">
-              <div
-                className="kanban-plugin__linked-card-title"
-                dangerouslySetInnerHTML={{
-                  __html: renderMarkdownLists(cleanCardTitle(card.titleRaw || card.title)),
-                }}
-              />
+              <div className="kanban-plugin__linked-card-title">
+                {renderMarkdownLists(
+                  cleanCardTitle(card.titleRaw || card.title),
+                  plugin,
+                  currentFilePath
+                )}
+              </div>
             </div>
 
             {card.tags &&

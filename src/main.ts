@@ -2359,6 +2359,51 @@ export default class KanbanPlugin extends Plugin {
         this.container = document.createElement('div');
         this.container.className = 'kanban-plugin__linked-cards-global-edit-mode-container';
 
+        // Prevent clicks on the container background from propagating to the editor
+        // Prevent clicks on background elements but allow interactive elements to work
+        this.container.addEventListener('mousedown', (e: MouseEvent) => {
+          const target = e.target as HTMLElement;
+          // Prevent if clicking on container or background elements, but not interactive elements
+          if (
+            target === this.container ||
+            ((target.classList.contains('kanban-plugin__linked-cards-container') ||
+              target.classList.contains('kanban-plugin__linked-cards-grid') ||
+              target.classList.contains('kanban-plugin__linked-cards-header')) &&
+              !target.closest('input, button, a, label, [role="button"], [tabindex]'))
+          ) {
+            e.stopPropagation();
+            e.preventDefault();
+          }
+        });
+        this.container.addEventListener('click', (e: MouseEvent) => {
+          const target = e.target as HTMLElement;
+          // Prevent if clicking on container or background elements, but not interactive elements
+          if (
+            target === this.container ||
+            ((target.classList.contains('kanban-plugin__linked-cards-container') ||
+              target.classList.contains('kanban-plugin__linked-cards-grid') ||
+              target.classList.contains('kanban-plugin__linked-cards-header')) &&
+              !target.closest('input, button, a, label, [role="button"], [tabindex]'))
+          ) {
+            e.stopPropagation();
+            e.preventDefault();
+          }
+        });
+        this.container.addEventListener('mouseup', (e: MouseEvent) => {
+          const target = e.target as HTMLElement;
+          // Prevent if clicking on container or background elements, but not interactive elements
+          if (
+            target === this.container ||
+            ((target.classList.contains('kanban-plugin__linked-cards-container') ||
+              target.classList.contains('kanban-plugin__linked-cards-grid') ||
+              target.classList.contains('kanban-plugin__linked-cards-header')) &&
+              !target.closest('input, button, a, label, [role="button"], [tabindex]'))
+          ) {
+            e.stopPropagation();
+            e.preventDefault();
+          }
+        });
+
         // Check if the feature is enabled
         if (this.plugin.settings['enable-kanban-code-blocks'] === false) {
           this.container.innerHTML =
@@ -2400,7 +2445,20 @@ export default class KanbanPlugin extends Plugin {
         }
       }
 
-      ignoreEvent() {
+      ignoreEvent(event: Event) {
+        // Ignore mouse events within the widget to prevent cursor position changes
+        // that would switch back to raw markdown mode
+        if (
+          event.type === 'mousedown' ||
+          event.type === 'click' ||
+          event.type === 'mouseup' ||
+          event.type === 'mouseover' ||
+          event.type === 'mouseout' ||
+          event.type === 'mousemove'
+        ) {
+          return true;
+        }
+        // Allow other events (like keyboard events) to pass through
         return false;
       }
     }
@@ -2635,6 +2693,51 @@ export default class KanbanPlugin extends Plugin {
                     this.container.className =
                       'kanban-plugin__linked-cards-global-edit-mode-container';
 
+                    // Prevent clicks on the container background from propagating to the editor
+                    // Prevent clicks on background elements but allow interactive elements to work
+                    this.container.addEventListener('mousedown', (e: MouseEvent) => {
+                      const target = e.target as HTMLElement;
+                      // Prevent if clicking on container or background elements, but not interactive elements
+                      if (
+                        target === this.container ||
+                        ((target.classList.contains('kanban-plugin__linked-cards-container') ||
+                          target.classList.contains('kanban-plugin__linked-cards-grid') ||
+                          target.classList.contains('kanban-plugin__linked-cards-header')) &&
+                          !target.closest('input, button, a, label, [role="button"], [tabindex]'))
+                      ) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }
+                    });
+                    this.container.addEventListener('click', (e: MouseEvent) => {
+                      const target = e.target as HTMLElement;
+                      // Prevent if clicking on container or background elements, but not interactive elements
+                      if (
+                        target === this.container ||
+                        ((target.classList.contains('kanban-plugin__linked-cards-container') ||
+                          target.classList.contains('kanban-plugin__linked-cards-grid') ||
+                          target.classList.contains('kanban-plugin__linked-cards-header')) &&
+                          !target.closest('input, button, a, label, [role="button"], [tabindex]'))
+                      ) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }
+                    });
+                    this.container.addEventListener('mouseup', (e: MouseEvent) => {
+                      const target = e.target as HTMLElement;
+                      // Prevent if clicking on container or background elements, but not interactive elements
+                      if (
+                        target === this.container ||
+                        ((target.classList.contains('kanban-plugin__linked-cards-container') ||
+                          target.classList.contains('kanban-plugin__linked-cards-grid') ||
+                          target.classList.contains('kanban-plugin__linked-cards-header')) &&
+                          !target.closest('input, button, a, label, [role="button"], [tabindex]'))
+                      ) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }
+                    });
+
                     // Check if the feature is enabled
                     if (
                       this.plugin.settings &&
@@ -2683,7 +2786,20 @@ export default class KanbanPlugin extends Plugin {
                     }
                   }
 
-                  ignoreEvent() {
+                  ignoreEvent(event: Event) {
+                    // Ignore mouse events within the widget to prevent cursor position changes
+                    // that would switch back to raw markdown mode
+                    if (
+                      event.type === 'mousedown' ||
+                      event.type === 'click' ||
+                      event.type === 'mouseup' ||
+                      event.type === 'mouseover' ||
+                      event.type === 'mouseout' ||
+                      event.type === 'mousemove'
+                    ) {
+                      return true;
+                    }
+                    // Allow other events (like keyboard events) to pass through
                     return false;
                   }
                 })(),
