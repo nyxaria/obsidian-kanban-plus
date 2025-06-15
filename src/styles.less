@@ -2407,3 +2407,42 @@ body:not(.native-scrollbars) .kanban-plugin__scroll-container::-webkit-scrollbar
   // box-decoration-break: clone; /* Ensures background applies nicely across line breaks */
   // -webkit-box-decoration-break: clone;
 }
+
+// Card embed edit mode styles
+.kanban-plugin__card-embed-edit-mode-container {
+  margin: var(--size-4-2) 0;
+  display: inline-block;
+  vertical-align: top;
+
+  // Ensure the card embed displays properly in edit mode
+  .kanban-plugin__card-embed-item {
+    display: inline-block;
+    max-width: 400px;
+    min-width: 200px;
+
+    // Add proper card styling
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    padding: var(--size-4-3);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: var(--interactive-accent);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      transform: translateY(-1px);
+    }
+  }
+
+  // Ensure proper spacing and alignment in edit mode
+  .kanban-plugin__card-embed-header-info {
+    font-size: var(--font-ui-smaller);
+    opacity: 0.8;
+  }
+
+  .kanban-plugin__card-embed-title-content {
+    font-weight: 500;
+    line-height: var(--line-height-tight);
+  }
+}

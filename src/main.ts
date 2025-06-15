@@ -382,6 +382,9 @@ export default class KanbanPlugin extends Plugin {
     // Register global CodeMirror extension for kanban code blocks in edit mode
     this.registerEditorExtension([this.createGlobalKanbanCodeBlockExtension()]);
 
+    // Register global CodeMirror extension for kanban card embeds in edit mode
+    this.registerEditorExtension([this.createKanbanCardEmbedExtension()]);
+
     // Register markdown post-processor for Kanban card embeds
     this.registerMarkdownPostProcessor((element, context) => {
       this.processKanbanCardEmbeds(element, context);
@@ -2258,7 +2261,9 @@ export default class KanbanPlugin extends Plugin {
       .then(({ SimpleKanbanCardEmbed }) => {
         // Create a container for the embed
         const embedContainer = document.createElement('div');
-        // Card embed uses kanban-plugin__item structure now
+        // Make the container inline-block so multiple cards can appear side by side
+        embedContainer.style.display = 'inline-block';
+        embedContainer.style.verticalAlign = 'top';
 
         // Render the SimpleKanbanCardEmbed component
         render(
@@ -2858,6 +2863,289 @@ export default class KanbanPlugin extends Plugin {
     return Decoration.set(decorations);
   }
   // --- END Global Kanban Code Block Extension ---
+
+  // --- BEGIN Kanban Card Embed Extension ---
+  createKanbanCardEmbedExtension() {
+    const { StateField } = require('@codemirror/state');
+    const { ViewPlugin, Decoration } = require('@codemirror/view');
+
+    // Define state field for plugin instance
+    const pluginStateField = StateField.define({
+      create: () => this,
+      update: (value: any) => value,
+    });
+
+    // Plugin that handles the card link detection and replacement
+    const kanbanCardEmbedPlugin = ViewPlugin.define(
+      (view: any) => {
+        const pluginInstance = {
+          decorations: this.buildKanbanCardEmbedDecorations(view),
+          lastCursorInLinkState: new Map(), // Track which links had cursor last time
+          update: (update: any) => {
+            let shouldRebuild = false;
+
+            if (update.docChanged) {
+              // Only rebuild for very specific wikilink-related changes
+              let changesAffectWikilinks = false;
+
+              update.changes.iterChanges(
+                (fromA: number, toA: number, fromB: number, toB: number, inserted: any) => {
+                  const insertedText = inserted.toString();
+                  const deletedLength = toA - fromA;
+
+                  // Only rebuild for these specific cases:
+                  // 1. Text contains complete wikilink patterns
+                  // 2. Large deletions that might remove entire links
+                  if (
+                    /\[\[.*?#\^.*?\]\]/.test(insertedText) ||
+                    deletedLength > 20 // Large deletions
+                  ) {
+                    changesAffectWikilinks = true;
+                    return;
+                  }
+
+                  // Check for completing wikilink patterns
+                  if ((insertedText === ']' || insertedText === '^') && deletedLength === 0) {
+                    // Get context to see if we're completing a wikilink
+                    const doc = update.view.state.doc;
+                    const contextStart = Math.max(0, fromB - 20);
+                    const contextEnd = Math.min(doc.length, toB);
+                    const contextText = doc.sliceString(contextStart, contextEnd);
+
+                    if (/\[\[.*?#\^[a-zA-Z0-9]*$/.test(contextText)) {
+                      changesAffectWikilinks = true;
+                      return;
+                    }
+                  }
+                }
+              );
+
+              if (changesAffectWikilinks) {
+                shouldRebuild = true;
+              }
+            }
+
+            // Smart selection change detection - only rebuild if cursor moves between inside/outside wikilinks
+            if (update.selectionSet && !update.docChanged) {
+              const oldSelection = update.startState.selection.main;
+              const newSelection = update.state.selection.main;
+
+              // Only check if cursor head position actually changed
+              if (oldSelection.head !== newSelection.head) {
+                const doc = update.view.state.doc;
+                const text = doc.toString();
+                const cursorPos = newSelection.head;
+                const editorHasFocus = update.view.hasFocus;
+
+                // Find all wikilinks and check if cursor state changed for any of them
+                const wikilinkRegex = /\[\[([^\]|]+)#\^([a-zA-Z0-9]+)(?:\|([^\]]+))?\]\]/g;
+                let match;
+
+                while ((match = wikilinkRegex.exec(text)) !== null) {
+                  const fullMatch = match[0];
+                  const from = match.index;
+                  const to = match.index + fullMatch.length;
+                  const linkId = `${from}-${to}`;
+
+                  const cursorInLink = editorHasFocus && cursorPos >= from && cursorPos <= to;
+                  const lastState = pluginInstance.lastCursorInLinkState.get(linkId);
+
+                  if (lastState !== cursorInLink) {
+                    pluginInstance.lastCursorInLinkState.set(linkId, cursorInLink);
+                    shouldRebuild = true;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (shouldRebuild) {
+              pluginInstance.decorations = this.buildKanbanCardEmbedDecorations(update.view);
+            }
+          },
+        };
+        return pluginInstance;
+      },
+      {
+        decorations: (plugin: any) => plugin.decorations,
+      }
+    );
+
+    return [pluginStateField, kanbanCardEmbedPlugin];
+  }
+
+  buildKanbanCardEmbedDecorations(view: any) {
+    const { Decoration } = require('@codemirror/view');
+    const { hasFrontmatterKey } = require('./helpers');
+
+    const decorations = [];
+    const doc = view.state.doc;
+    const text = doc.toString();
+    const selection = view.state.selection.main;
+    const cursorPos = selection.head;
+    const editorHasFocus = view.hasFocus;
+
+    // Get current file path
+    let currentFilePath = '';
+    try {
+      const activeFile = this.app.workspace.getActiveFile();
+      if (activeFile) {
+        currentFilePath = activeFile.path;
+      }
+    } catch (e) {
+      console.warn('[KanbanPlugin] Could not determine current file path:', e);
+    }
+
+    // Regular expression to match wikilinks with block references
+    const wikilinkRegex = /\[\[([^\]|]+)#\^([a-zA-Z0-9]+)(?:\|([^\]]+))?\]\]/g;
+    let match;
+
+    while ((match = wikilinkRegex.exec(text)) !== null) {
+      const fullMatch = match[0];
+      const filePath = match[1];
+      const blockId = match[2];
+      const displayText = match[3] || fullMatch;
+      const from = match.index;
+      const to = match.index + fullMatch.length;
+
+      // Check if cursor is within this link (cursor-aware behavior)
+      const cursorInLink = editorHasFocus && cursorPos >= from && cursorPos <= to;
+
+      // Only show the card embed if cursor is NOT in this link
+      if (!cursorInLink) {
+        // Check if the target file is a Kanban board
+        const file = this.app.metadataCache.getFirstLinkpathDest(filePath, currentFilePath);
+        if (!file || !hasFrontmatterKey(file)) continue;
+
+        // Create a widget decoration to replace the link
+        const pluginInstance = this;
+        decorations.push(
+          Decoration.replace({
+            widget: new (class extends require('@codemirror/view').WidgetType {
+              constructor() {
+                super();
+                this.plugin = pluginInstance;
+                this.filePath = file.path;
+                this.blockId = blockId;
+                this.sourcePath = currentFilePath;
+                this.displayText = displayText;
+                this.container = null;
+              }
+
+              eq(widget: any) {
+                return (
+                  this.filePath === widget.filePath &&
+                  this.blockId === widget.blockId &&
+                  this.sourcePath === widget.sourcePath &&
+                  this.displayText === widget.displayText
+                );
+              }
+
+              toDOM() {
+                this.container = document.createElement('div');
+                this.container.className = 'kanban-plugin__card-embed-edit-mode-container';
+
+                // Check if the feature is enabled
+                if (this.plugin.settings['enable-kanban-card-embeds'] === false) {
+                  this.container.innerHTML =
+                    '<div class="kanban-plugin__linked-cards-disabled">Kanban card embeds are disabled in settings</div>';
+                  return this.container;
+                }
+
+                // Dynamically import and render the SimpleKanbanCardEmbed component
+                import('./components/SimpleKanbanCardEmbed')
+                  .then(({ SimpleKanbanCardEmbed }) => {
+                    if (this.container) {
+                      const { createElement } = require('preact');
+                      const { render } = require('preact/compat');
+
+                      render(
+                        createElement(SimpleKanbanCardEmbed, {
+                          filePath: this.filePath,
+                          blockId: this.blockId,
+                          plugin: this.plugin,
+                          sourcePath: this.sourcePath,
+                          displayText: this.displayText,
+                        }),
+                        this.container
+                      );
+                    }
+                  })
+                  .catch((error) => {
+                    console.error(
+                      '[KanbanPlugin] Failed to load SimpleKanbanCardEmbed in edit mode:',
+                      error
+                    );
+                    if (this.container) {
+                      this.container.innerHTML =
+                        '<div class="kanban-plugin__linked-cards-error">⚠️ Error loading card embed</div>';
+                    }
+                  });
+
+                return this.container;
+              }
+
+              destroy() {
+                if (this.container) {
+                  const { unmountComponentAtNode } = require('preact/compat');
+                  unmountComponentAtNode(this.container);
+                  this.container = null;
+                }
+              }
+
+              ignoreEvent(event: Event) {
+                const target = event.target as HTMLElement;
+
+                // Handle events without a target or with non-element targets
+                if (!target || typeof target.closest !== 'function') {
+                  return false;
+                }
+
+                // Always allow interactive elements to work, but exclude CodeMirror elements
+                const interactiveElement = target.closest(
+                  'input, button, a, label, [role="button"], [tabindex]'
+                );
+                const isCodeMirrorElement = target.closest('.cm-editor, .cm-scroller, .cm-content');
+                const isInteractive = interactiveElement && !isCodeMirrorElement;
+
+                if (isInteractive) {
+                  return false; // Let CodeMirror process these events normally
+                }
+
+                // Check if this is a card click - allow it but prevent cursor movement
+                const isCardClick = target.closest('.kanban-plugin__card-embed-item');
+                if (isCardClick) {
+                  // Allow the card click but prevent cursor movement
+                  if (event.type === 'click' || event.type === 'mousedown') {
+                    event.stopPropagation();
+                    event.preventDefault();
+                  }
+                  return true;
+                }
+
+                // For other mouse events, ignore them to prevent cursor movement
+                if (
+                  event.type === 'mousedown' ||
+                  event.type === 'click' ||
+                  event.type === 'mouseup' ||
+                  event.type === 'mouseover' ||
+                  event.type === 'mouseout' ||
+                  event.type === 'mousemove'
+                ) {
+                  return true;
+                }
+
+                return false;
+              }
+            })(),
+          }).range(from, to)
+        );
+      }
+    }
+
+    return Decoration.set(decorations);
+  }
+  // --- END Kanban Card Embed Extension ---
 
   // Methods for managing settings change listeners
   onSettingChange(settingKey: string, callback: (value: any) => void) {
