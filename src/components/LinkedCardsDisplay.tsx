@@ -64,13 +64,20 @@ function InteractiveMarkdownRenderer(props: {
       // Internal link
       const displayText = internalAlias || internalFile;
       const linkText = internalFile + (internalAlias ? `|${internalAlias}` : ''); // Original [[content]]
+
+      // Resolve the file path for proper hover preview
+      const resolvedFile = plugin.app.metadataCache.getFirstLinkpathDest(internalFile, sourcePath);
+      const resolvedPath = resolvedFile ? resolvedFile.path : internalFile;
+
       parts.push(
         createElement(
           'a',
           {
-            href: '#', // Placeholder, click is handled
+            href: resolvedPath, // Use resolved path for hover preview
+            'data-href': resolvedPath, // Obsidian also uses data-href
             class: 'internal-link',
-            'data-link-text': linkText, // Store original link for Obsidian to handle
+            'data-link-text': linkText, // Store original link for click handling
+            'aria-label': displayText, // For accessibility
             style: { color: 'var(--link-color)', textDecoration: 'underline', cursor: 'pointer' },
           },
           displayText
@@ -778,11 +785,19 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
   };
 
   const handleCardClick = (card: LinkedCard) => {
+    console.log('[LinkedCardsDisplay] handleCardClick called:', {
+      cardTitle: card.title,
+      boardPath: card.boardPath,
+      blockId: card.blockId,
+      currentFilePath,
+    });
+
     let linkText = card.boardPath;
     if (card.blockId) {
       linkText += `#^${card.blockId.replace(/^\^/, '')}`;
     }
 
+    console.log('[LinkedCardsDisplay] Opening link:', linkText);
     plugin.app.workspace.openLinkText(linkText, currentFilePath, false);
   };
 
@@ -1011,7 +1026,14 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
           <div
             key={`${card.boardPath}-${card.blockId || index}`}
             className="kanban-plugin__linked-card-item"
-            onClick={() => handleCardClick(card)}
+            onClick={(e) => {
+              console.log('[LinkedCardsDisplay] Card div clicked:', {
+                target: e.target,
+                currentTarget: e.currentTarget,
+                cardTitle: card.title,
+              });
+              handleCardClick(card);
+            }}
           >
             <div className="kanban-plugin__linked-card-header">
               <div className="kanban-plugin__linked-card-board-info" style={{ marginTop: '4px' }}>
