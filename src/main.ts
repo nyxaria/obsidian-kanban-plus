@@ -3,6 +3,7 @@ import moment from 'moment';
 import { around } from 'monkey-around';
 import {
   MarkdownView,
+  Notice,
   Platform,
   Plugin,
   TAbstractFile,
@@ -375,9 +376,17 @@ export default class KanbanPlugin extends Plugin {
     this.registerEditorSuggest(new TimeSuggest(this.app, this));
     this.registerEditorSuggest(new DateSuggest(this.app, this));
 
+    // Register global CodeMirror extension for kanban code blocks in edit mode
+    this.registerEditorExtension([this.createGlobalKanbanCodeBlockExtension()]);
+
     // Register markdown post-processor for Kanban card embeds
     this.registerMarkdownPostProcessor((element, context) => {
       this.processKanbanCardEmbeds(element, context);
+    });
+
+    // Register markdown post-processor for ```kanban``` code blocks
+    this.registerMarkdownPostProcessor((element, context) => {
+      this.processKanbanCodeBlocks(element, context);
     });
 
     // Hook into URL handling by monkey patching the app's openWithDefaultApp method
@@ -875,6 +884,40 @@ export default class KanbanPlugin extends Plugin {
   }
 
   registerEvents() {
+    // Register editor-menu event for right-click context menu in editor
+    this.registerEvent(
+      this.app.workspace.on('editor-menu', (menu, editor, view) => {
+        // Only add the menu item for markdown views that are NOT kanban boards
+        if (view instanceof MarkdownView && view.file && !hasFrontmatterKey(view.file)) {
+          console.log('[Kanban Plugin] Adding Insert linked kanbans to editor context menu');
+          menu.addItem((item) => {
+            item
+              .setTitle('Insert linked kanbans')
+              .setIcon('lucide-kanban-square')
+              .onClick(() => {
+                console.log('[Kanban Plugin] Insert linked kanbans clicked from editor menu');
+                // Check if the feature is enabled
+                if (this.settings['enable-kanban-code-blocks'] === false) {
+                  new Notice('Kanban code blocks are disabled in settings');
+                  return;
+                }
+
+                // Insert the kanban code block at cursor position
+                const cursor = editor.getCursor();
+                const kanbanCodeBlock = '```kanban\n```\n';
+
+                editor.replaceRange(kanbanCodeBlock, cursor);
+
+                // Position cursor between the code blocks for potential content
+                editor.setCursor(cursor.line + 1, 0);
+
+                new Notice('Linked kanban code block inserted');
+              });
+          });
+        }
+      })
+    );
+
     this.registerEvent(
       this.app.workspace.on('file-menu', (menu, file, source, leaf) => {
         if (source === 'link-context-menu') return;
@@ -1270,6 +1313,29 @@ export default class KanbanPlugin extends Plugin {
           type: TIMELINE_VIEW_TYPE,
           active: true,
         });
+      },
+    });
+
+    this.addCommand({
+      id: 'insert-linked-kanbans',
+      name: 'Insert linked kanbans',
+      editorCallback: (editor, view) => {
+        // Check if the feature is enabled
+        if (this.settings['enable-kanban-code-blocks'] === false) {
+          new Notice('Kanban code blocks are disabled in settings');
+          return;
+        }
+
+        // Insert the kanban code block at cursor position
+        const cursor = editor.getCursor();
+        const kanbanCodeBlock = '```kanban\n```';
+
+        editor.replaceRange(kanbanCodeBlock, cursor);
+
+        // Position cursor between the code blocks for potential content
+        editor.setCursor(cursor.line + 1, 0);
+
+        new Notice('Linked kanban code block inserted');
       },
     });
   }
@@ -2207,6 +2273,338 @@ export default class KanbanPlugin extends Plugin {
       });
   }
   // --- END Kanban Card Embed Post-Processor ---
+
+  // --- BEGIN Kanban Code Block Post-Processor ---
+  processKanbanCodeBlocks(element: HTMLElement, context: any) {
+    // Check if the feature is enabled
+    if (this.settings['enable-kanban-code-blocks'] === false) {
+      return;
+    }
+
+    // Find all code blocks with language "kanban"
+    const codeBlocks = element.querySelectorAll('pre > code.language-kanban');
+
+    for (const codeEl of Array.from(codeBlocks)) {
+      const preEl = codeEl.parentElement;
+      if (!preEl || preEl.tagName !== 'PRE') continue;
+
+      // Create the linked cards display
+      this.createLinkedCardsDisplay(preEl, context.sourcePath);
+    }
+  }
+
+  createLinkedCardsDisplay(preEl: HTMLElement, sourcePath: string) {
+    // Import the necessary components
+    const { createElement } = require('preact');
+    const { render } = require('preact/compat');
+
+    // Dynamically import the LinkedCardsDisplay component
+    import('./components/LinkedCardsDisplay')
+      .then(({ LinkedCardsDisplay }) => {
+        // Create a container for the linked cards display
+        const linkedCardsContainer = document.createElement('div');
+        linkedCardsContainer.className = 'kanban-plugin__linked-cards-code-block-container';
+
+        // Render the LinkedCardsDisplay component
+        render(
+          createElement(LinkedCardsDisplay, {
+            plugin: this,
+            currentFilePath: sourcePath,
+          }),
+          linkedCardsContainer
+        );
+
+        // Replace the code block with the linked cards display
+        preEl.parentNode?.replaceChild(linkedCardsContainer, preEl);
+      })
+      .catch((error) => {
+        console.error('[KanbanPlugin] Failed to load LinkedCardsDisplay component:', error);
+
+        // Show error message in place of code block
+        const errorContainer = document.createElement('div');
+        errorContainer.className = 'kanban-plugin__linked-cards-error';
+        errorContainer.innerHTML =
+          '⚠️ Error loading linked Kanban cards. Check console for details.';
+        preEl.parentNode?.replaceChild(errorContainer, preEl);
+      });
+  }
+  // --- END Kanban Code Block Post-Processor ---
+
+  // --- BEGIN Global Kanban Code Block Extension ---
+  createGlobalKanbanCodeBlockExtension() {
+    // Import necessary modules
+    const { Extension, StateField } = require('@codemirror/state');
+    const { ViewPlugin, WidgetType, Decoration, DecorationSet } = require('@codemirror/view');
+    const { createElement } = require('preact');
+    const { render, unmountComponentAtNode } = require('preact/compat');
+
+    // Define state field for plugin instance
+    const pluginStateField = StateField.define({
+      create: () => this,
+      update: (value: any) => value,
+    });
+
+    // Widget for rendering LinkedCardsDisplay
+    class GlobalKanbanCodeBlockWidget extends WidgetType {
+      constructor(plugin: any, currentFilePath: any) {
+        super();
+        this.plugin = plugin;
+        this.currentFilePath = currentFilePath;
+        this.container = null;
+      }
+
+      eq(widget: any) {
+        return this.plugin === widget.plugin && this.currentFilePath === widget.currentFilePath;
+      }
+
+      toDOM() {
+        this.container = document.createElement('div');
+        this.container.className = 'kanban-plugin__linked-cards-global-edit-mode-container';
+
+        // Check if the feature is enabled
+        if (this.plugin.settings['enable-kanban-code-blocks'] === false) {
+          this.container.innerHTML =
+            '<div class="kanban-plugin__linked-cards-disabled">Kanban code blocks are disabled in settings</div>';
+          return this.container;
+        }
+
+        // Dynamically import and render the LinkedCardsDisplay component
+        import('./components/LinkedCardsDisplay')
+          .then(({ LinkedCardsDisplay }) => {
+            if (this.container) {
+              render(
+                createElement(LinkedCardsDisplay, {
+                  plugin: this.plugin,
+                  currentFilePath: this.currentFilePath,
+                }),
+                this.container
+              );
+            }
+          })
+          .catch((error) => {
+            console.error(
+              '[KanbanPlugin] Failed to load LinkedCardsDisplay in global edit mode:',
+              error
+            );
+            if (this.container) {
+              this.container.innerHTML =
+                '<div class="kanban-plugin__linked-cards-error">⚠️ Error loading linked cards</div>';
+            }
+          });
+
+        return this.container;
+      }
+
+      destroy() {
+        if (this.container) {
+          unmountComponentAtNode(this.container);
+          this.container = null;
+        }
+      }
+
+      ignoreEvent() {
+        return false;
+      }
+    }
+
+    // Plugin that handles the code block detection and replacement
+    const globalKanbanCodeBlockPlugin = ViewPlugin.define(
+      (view: any) => {
+        const pluginInstance = {
+          decorations: this.buildGlobalKanbanDecorations(view),
+          update: (update: any) => {
+            // Only rebuild decorations when document changes and it might affect kanban blocks
+            if (update.docChanged) {
+              // Check if the changes might involve kanban code blocks
+              let shouldRebuild = false;
+
+              update.changes.iterChanges(
+                (fromA: number, toA: number, fromB: number, toB: number, inserted: any) => {
+                  const insertedText = inserted.toString();
+                  const deletedLength = toA - fromA;
+
+                  // Rebuild if:
+                  // 1. Text contains "```kanban" (complete kanban code block start)
+                  // 2. Text contains "kanban" and we're potentially completing a kanban block
+                  // 3. Significant deletion that might remove code blocks
+                  if (
+                    insertedText.includes('```kanban') ||
+                    (insertedText.includes('kanban') && insertedText.includes('```')) ||
+                    deletedLength > 10
+                  ) {
+                    shouldRebuild = true;
+                  }
+
+                  // Also check if the insertion might complete a ```kanban pattern
+                  // by looking at the context around the insertion point
+                  if (insertedText.includes('kanban') || insertedText === 'n') {
+                    // Get some context around the insertion to see if we're completing ```kanban
+                    const doc = update.view.state.doc;
+                    const contextStart = Math.max(0, fromB - 10);
+                    const contextEnd = Math.min(doc.length, toB + 10);
+                    const contextText = doc.sliceString(contextStart, contextEnd);
+
+                    if (contextText.includes('```kanban')) {
+                      shouldRebuild = true;
+                    }
+                  }
+                }
+              );
+
+              if (shouldRebuild) {
+                pluginInstance.decorations = this.buildGlobalKanbanDecorations(update.view);
+              }
+            } else if (update.viewportChanged) {
+              // Still rebuild on viewport changes for scrolling
+              pluginInstance.decorations = this.buildGlobalKanbanDecorations(update.view);
+            }
+          },
+        };
+        return pluginInstance;
+      },
+      {
+        decorations: (plugin: any) => plugin.decorations,
+      }
+    );
+
+    return [pluginStateField, globalKanbanCodeBlockPlugin];
+  }
+
+  buildGlobalKanbanDecorations(view: any) {
+    const { Decoration } = require('@codemirror/view');
+
+    const decorations = [];
+    const doc = view.state.doc;
+
+    // Get current file path
+    let currentFilePath = '';
+    try {
+      // Try to get the file path from the editor
+      const activeFile = this.app.workspace.getActiveFile();
+      if (activeFile) {
+        currentFilePath = activeFile.path;
+      }
+    } catch (e) {
+      console.warn('[KanbanPlugin] Could not determine current file path:', e);
+    }
+
+    // Look for ```kanban blocks line by line to avoid line break issues
+    for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
+      const line = doc.line(lineNum);
+      const lineText = line.text;
+
+      // Check if this line starts a kanban code block
+      if (lineText.trim() === '```kanban') {
+        // Find the end of the code block
+        let endLineNum = lineNum + 1;
+        let foundEnd = false;
+
+        while (endLineNum <= doc.lines) {
+          const endLine = doc.line(endLineNum);
+          if (endLine.text.trim() === '```') {
+            foundEnd = true;
+            break;
+          }
+          endLineNum++;
+        }
+
+        if (foundEnd) {
+          // Add a widget decoration after the opening ``` line
+          const insertPos = line.to;
+          const pluginInstance = this; // Capture the KanbanPlugin instance
+          decorations.push(
+            Decoration.widget({
+              widget: new (class extends require('@codemirror/view').WidgetType {
+                constructor() {
+                  super();
+                  this.plugin = pluginInstance; // Use the actual KanbanPlugin instance
+                  this.currentFilePath = currentFilePath;
+                  this.container = null;
+                }
+
+                eq(widget: any) {
+                  return this.currentFilePath === widget.currentFilePath;
+                }
+
+                toDOM() {
+                  this.container = document.createElement('div');
+                  this.container.className =
+                    'kanban-plugin__linked-cards-global-edit-mode-container';
+
+                  // Check if the feature is enabled
+                  if (
+                    this.plugin.settings &&
+                    this.plugin.settings['enable-kanban-code-blocks'] === false
+                  ) {
+                    this.container.innerHTML =
+                      '<div class="kanban-plugin__linked-cards-disabled">Kanban code blocks are disabled in settings</div>';
+                    return this.container;
+                  }
+
+                  // Dynamically import and render the LinkedCardsDisplay component
+                  import('./components/LinkedCardsDisplay')
+                    .then(({ LinkedCardsDisplay }) => {
+                      if (this.container) {
+                        const { createElement } = require('preact');
+                        const { render } = require('preact/compat');
+
+                        render(
+                          createElement(LinkedCardsDisplay, {
+                            plugin: this.plugin,
+                            currentFilePath: this.currentFilePath,
+                          }),
+                          this.container
+                        );
+                      }
+                    })
+                    .catch((error) => {
+                      console.error(
+                        '[KanbanPlugin] Failed to load LinkedCardsDisplay in global edit mode:',
+                        error
+                      );
+                      if (this.container) {
+                        this.container.innerHTML =
+                          '<div class="kanban-plugin__linked-cards-error">⚠️ Error loading linked cards</div>';
+                      }
+                    });
+
+                  return this.container;
+                }
+
+                destroy() {
+                  if (this.container) {
+                    const { unmountComponentAtNode } = require('preact/compat');
+                    unmountComponentAtNode(this.container);
+                    this.container = null;
+                  }
+                }
+
+                ignoreEvent() {
+                  return false;
+                }
+              })(),
+              side: 1,
+            }).range(insertPos)
+          );
+
+          // Also hide the content between the ``` markers
+          for (let hideLineNum = lineNum + 1; hideLineNum < endLineNum; hideLineNum++) {
+            const hideLine = doc.line(hideLineNum);
+            if (hideLine.text.trim() !== '') {
+              decorations.push(Decoration.replace({}).range(hideLine.from, hideLine.to));
+            }
+          }
+
+          // Skip past this code block
+          lineNum = endLineNum;
+        }
+      }
+    }
+
+    const { Decoration: DecorationSet } = require('@codemirror/view');
+    return Decoration.set(decorations);
+  }
+  // --- END Global Kanban Code Block Extension ---
 }
 
 // --- SMTP Email Sending Function ---

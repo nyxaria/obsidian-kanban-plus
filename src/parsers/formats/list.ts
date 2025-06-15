@@ -665,6 +665,8 @@ export function newItem(
   const itemData = listItemToItemData(stateManager, md, (ast.children[0] as List).children[0]);
 
   itemData.forceEditMode = !!forceEdit;
+  // Generate a blockId for the new item
+  itemData.blockId = generateInstanceId(6);
 
   const newItem: Item = {
     ...ItemTemplate,

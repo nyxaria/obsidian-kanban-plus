@@ -116,6 +116,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       'timeline-day-width': 50,
       'timeline-card-height': 40,
       'enable-kanban-card-embeds': true,
+      'enable-kanban-code-blocks': true,
     };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));

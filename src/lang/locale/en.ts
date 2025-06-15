@@ -307,9 +307,15 @@ const en = {
   'Member Assignment Prefix': 'Member Assignment Prefix',
   'The prefix used to identify member assignments in card text (e.g., @@User)':
     'The prefix used to identify member assignments in card text (e.g., @@User)',
+
+  // Embeds section
+  Embeds: 'Embeds',
   'Enable Kanban card embeds': 'Enable Kanban card embeds',
   'When enabled, internal links to Kanban cards (e.g., [[Board#^blockId]]) will be rendered as card previews instead of regular links.':
     'When enabled, internal links to Kanban cards (e.g., [[Board#^blockId]]) will be rendered as card previews instead of regular links.',
+  'Enable Kanban code blocks': 'Enable Kanban code blocks',
+  'When enabled, ```kanban``` code blocks will be replaced with a display of all Kanban cards that link to the current note.':
+    'When enabled, ```kanban``` code blocks will be replaced with a display of all Kanban cards that link to the current note.',
 
   // Workspace View Specific
   'Kanban Workspace': 'Kanban Workspace',
@@ -375,6 +381,12 @@ const en = {
   'Apply tag symbols globally': 'Apply tag symbols globally',
   'When enabled, tag symbols defined above will be applied to all tags across Obsidian, not just in Kanban boards.':
     'When enabled, tag symbols defined above will be applied to all tags across Obsidian, not just in Kanban boards.',
+  'Hide linked cards when none exist': 'Hide linked cards when none exist',
+  'When enabled, the linked cards display will be hidden if no linked cards are found.':
+    'When enabled, the linked cards display will be hidden if no linked cards are found.',
+  'Hide linked cards when only done cards exist': 'Hide linked cards when only done cards exist',
+  'When enabled, the linked cards display will be hidden if all linked cards are marked as done.':
+    'When enabled, the linked cards display will be hidden if all linked cards are marked as done.',
 };
 
 export type Lang = typeof en;

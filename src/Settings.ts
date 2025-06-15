@@ -155,6 +155,9 @@ export interface KanbanSettings {
   timelineDayWidth?: number;
   timelineCardHeight?: number;
   'enable-kanban-card-embeds'?: boolean; // Added
+  'enable-kanban-code-blocks'?: boolean; // Added for ```kanban``` code block feature
+  'hide-linked-cards-when-none-exist'?: boolean; // Hide linked cards display when no cards exist
+  'hide-linked-cards-when-only-done'?: boolean; // Hide linked cards display when only done cards exist
 }
 
 export interface KanbanViewSettings {
@@ -183,6 +186,7 @@ export interface KanbanViewSettings {
   'timeline-day-width': 50;
   'timeline-card-height': 40; // Added for consistency, though primarily global
   'enable-kanban-card-embeds': boolean;
+  'enable-kanban-code-blocks': boolean;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -251,6 +255,9 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'timelineDayWidth',
   'timelineCardHeight',
   'enable-kanban-card-embeds',
+  'enable-kanban-code-blocks',
+  'hide-linked-cards-when-none-exist',
+  'hide-linked-cards-when-only-done',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -717,6 +724,199 @@ export class SettingsManager {
           });
       });
 
+    contentEl.createEl('h4', { text: t('Embeds') });
+
+    new Setting(contentEl)
+      .setName(t('Enable Kanban card embeds'))
+      .setDesc(
+        t(
+          'When enabled, internal links to Kanban cards (e.g., [[Board#^blockId]]) will be rendered as card previews instead of regular links.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('enable-kanban-card-embeds', local);
+
+            if (value !== undefined) {
+              toggle.setValue(value as boolean);
+            } else if (globalValue !== undefined) {
+              toggle.setValue(globalValue as boolean);
+            } else {
+              toggle.setValue(true); // Default to enabled
+            }
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'enable-kanban-card-embeds': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('enable-kanban-card-embeds', local);
+                toggleComponent.setValue(globalValue !== undefined ? !!globalValue : true);
+
+                this.applySettingsUpdate({
+                  $unset: ['enable-kanban-card-embeds'],
+                });
+              });
+          });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Enable Kanban code blocks'))
+      .setDesc(
+        t(
+          'When enabled, ```kanban``` code blocks will be replaced with a display of all Kanban cards that link to the current note.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('enable-kanban-code-blocks', local);
+
+            if (value !== undefined) {
+              toggle.setValue(value as boolean);
+            } else if (globalValue !== undefined) {
+              toggle.setValue(globalValue as boolean);
+            } else {
+              toggle.setValue(true); // Default to enabled
+            }
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'enable-kanban-code-blocks': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('enable-kanban-code-blocks', local);
+                toggleComponent.setValue(globalValue !== undefined ? !!globalValue : true);
+
+                this.applySettingsUpdate({
+                  $unset: ['enable-kanban-code-blocks'],
+                });
+              });
+          });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Hide linked cards when none exist'))
+      .setDesc(
+        t('When enabled, the linked cards display will be hidden if no linked cards are found.')
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting(
+              'hide-linked-cards-when-none-exist',
+              local
+            );
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['hide-linked-cards-when-none-exist'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'hide-linked-cards-when-none-exist': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('hide-linked-cards-when-none-exist', local);
+                const defaultValue =
+                  globalValue !== undefined
+                    ? globalValue
+                    : DEFAULT_SETTINGS['hide-linked-cards-when-none-exist'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['hide-linked-cards-when-none-exist'],
+                });
+              });
+          });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Hide linked cards when only done cards exist'))
+      .setDesc(
+        t(
+          'When enabled, the linked cards display will be hidden if all linked cards are marked as done.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting('hide-linked-cards-when-only-done', local);
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['hide-linked-cards-when-only-done'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'hide-linked-cards-when-only-done': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting('hide-linked-cards-when-only-done', local);
+                const defaultValue =
+                  globalValue !== undefined
+                    ? globalValue
+                    : DEFAULT_SETTINGS['hide-linked-cards-when-only-done'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['hide-linked-cards-when-only-done'],
+                });
+              });
+          });
+      });
+
     contentEl.createEl('h4', { text: t('Tags') });
 
     new Setting(contentEl)
@@ -782,52 +982,6 @@ export class SettingsManager {
             },
           });
         });
-      });
-
-    new Setting(contentEl)
-      .setName(t('Enable Kanban card embeds'))
-      .setDesc(
-        t(
-          'When enabled, internal links to Kanban cards (e.g., [[Board#^blockId]]) will be rendered as card previews instead of regular links.'
-        )
-      )
-      .then((setting) => {
-        let toggleComponent: ToggleComponent;
-
-        setting
-          .addToggle((toggle) => {
-            toggleComponent = toggle;
-
-            const [value, globalValue] = this.getSetting('enable-kanban-card-embeds', local);
-
-            if (value !== undefined) {
-              toggle.setValue(value as boolean);
-            } else if (globalValue !== undefined) {
-              toggle.setValue(globalValue as boolean);
-            } else {
-              toggle.setValue(true); // Default to enabled
-            }
-
-            toggle.onChange((newValue) => {
-              this.applySettingsUpdate({
-                'enable-kanban-card-embeds': {
-                  $set: newValue,
-                },
-              });
-            });
-          })
-          .addExtraButton((b) => {
-            b.setIcon('lucide-rotate-ccw')
-              .setTooltip(t('Reset to default'))
-              .onClick(() => {
-                const [, globalValue] = this.getSetting('enable-kanban-card-embeds', local);
-                toggleComponent.setValue(globalValue !== undefined ? !!globalValue : true);
-
-                this.applySettingsUpdate({
-                  $unset: ['enable-kanban-card-embeds'],
-                });
-              });
-          });
       });
 
     new Setting(contentEl).then((setting) => {
@@ -2683,6 +2837,9 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   timelineDayWidth: 50,
   timelineCardHeight: 40,
   'enable-kanban-card-embeds': true,
+  'enable-kanban-code-blocks': true,
+  'hide-linked-cards-when-none-exist': true,
+  'hide-linked-cards-when-only-done': false,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {
