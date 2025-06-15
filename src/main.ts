@@ -2934,27 +2934,44 @@ export default class KanbanPlugin extends Plugin {
               if (oldSelection.head !== newSelection.head) {
                 const doc = update.view.state.doc;
                 const text = doc.toString();
-                const cursorPos = newSelection.head;
+                const newCursorPos = newSelection.head;
+                const oldCursorPos = oldSelection.head;
                 const editorHasFocus = update.view.hasFocus;
 
                 // Find all wikilinks and check if cursor state changed for any of them
                 const wikilinkRegex = /\[\[([^\]|]+)#\^([a-zA-Z0-9]+)(?:\|([^\]]+))?\]\]/g;
                 let match;
+                let hasStateChanges = false;
 
+                // Check all links and track state changes
                 while ((match = wikilinkRegex.exec(text)) !== null) {
                   const fullMatch = match[0];
                   const from = match.index;
                   const to = match.index + fullMatch.length;
                   const linkId = `${from}-${to}`;
 
-                  const cursorInLink = editorHasFocus && cursorPos >= from && cursorPos <= to;
+                  const newCursorInLink =
+                    editorHasFocus && newCursorPos >= from && newCursorPos <= to;
+                  const oldCursorInLink =
+                    editorHasFocus && oldCursorPos >= from && oldCursorPos <= to;
                   const lastState = pluginInstance.lastCursorInLinkState.get(linkId);
 
-                  if (lastState !== cursorInLink) {
-                    pluginInstance.lastCursorInLinkState.set(linkId, cursorInLink);
-                    shouldRebuild = true;
-                    break;
+                  // Only rebuild if the cursor actually crossed a link boundary
+                  if (lastState !== undefined && lastState !== newCursorInLink) {
+                    // Double-check: did the cursor actually cross this specific link's boundary?
+                    if (oldCursorInLink !== newCursorInLink) {
+                      pluginInstance.lastCursorInLinkState.set(linkId, newCursorInLink);
+                      hasStateChanges = true;
+                    }
+                  } else if (lastState === undefined) {
+                    // Initialize the state without triggering a rebuild
+                    pluginInstance.lastCursorInLinkState.set(linkId, newCursorInLink);
                   }
+                }
+
+                // Only rebuild if there were actual state changes
+                if (hasStateChanges) {
+                  shouldRebuild = true;
                 }
               }
             }

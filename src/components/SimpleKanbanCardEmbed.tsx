@@ -461,6 +461,10 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
       metadata.priority = priorityMatch[1].toLowerCase();
     }
 
+    // Look for assigned members (@@member syntax)
+    const memberMatches = fullCardText.match(/@@(\w+)/g) || [];
+    const assignedMembers = memberMatches.map((match) => match.substring(2)); // Remove @@
+
     return {
       title,
       titleRaw: title, // Use the cleaned title as titleRaw
@@ -471,7 +475,7 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
       laneColor,
       boardName,
       checked: false,
-      assignedMembers: [],
+      assignedMembers,
       priority: metadata.priority as 'high' | 'medium' | 'low' | undefined,
       date: metadata.date,
     };
@@ -589,7 +593,7 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
           e.preventDefault();
         }}
       >
-        <div className="kanban-plugin__card-embed-header-info" style={{ marginTop: '4px' }}>
+        <div className="kanban-plugin__card-embed-header-info">
           <span className="kanban-plugin__linked-card-board-name">{card.boardName}</span>
           <span className="kanban-plugin__linked-card-separator">→</span>
           <span className="kanban-plugin__linked-card-lane-name">{card.laneName}</span>
@@ -686,14 +690,11 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
         {(card.date ||
           (card.assignedMembers && card.assignedMembers.length > 0) ||
           card.priority) && (
-          <div
-            className="kanban-plugin__linked-card-metadata"
-            style={{ marginTop: 'var(--size-4-2)' }}
-          >
+          <div className="kanban-plugin__linked-card-metadata" style={{ marginTop: '4px' }}>
             <div className="kanban-plugin__linked-card-metadata-left">
               {card.date && (
                 <span className="kanban-plugin__linked-card-date">
-                  📅{' '}
+                  {' '}
                   <span
                     style={(() => {
                       // Try to parse the date using the configured date format first, then fallback to common formats
@@ -752,6 +753,8 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
                         backgroundColor: dateColor?.backgroundColor || fallbackBackground,
                         padding: dateColor?.backgroundColor ? '2px 4px' : '0',
                         borderRadius: dateColor?.backgroundColor ? '3px' : '0',
+                        marginTop: '-4px',
+                        marginLeft: '-4px',
                       };
                     })()}
                   >
