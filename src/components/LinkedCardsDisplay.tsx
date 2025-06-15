@@ -232,6 +232,7 @@ interface LinkedCard {
   boardName: string;
   boardPath: string;
   laneName: string;
+  laneColor?: string;
   blockId?: string;
   tags?: string[];
   metadata?: any;
@@ -250,10 +251,11 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
   plugin,
   currentFilePath,
 }: LinkedCardsDisplayProps) {
-  const [linkedCards, setLinkedCards] = useState<LinkedCard[]>([]);
+  const [showDone, setShowDone] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showDone, setShowDone] = useState(false);
+  const [linkedCards, setLinkedCards] = useState<LinkedCard[]>([]);
+  const [forceRenderKey, setForceRenderKey] = useState(0); // Add force render key
 
   // Get tag color and symbol functions
   const getTagColor = useMemo(
@@ -375,6 +377,19 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
     };
   }, [hideWhenNoneExistSetting, hideWhenOnlyDoneSetting, plugin]);
 
+  // Listen for settings changes to trigger re-render
+  useEffect(() => {
+    const handleSettingsChange = (value: any) => {
+      setForceRenderKey((prev) => prev + 1); // Force re-render by changing key
+    };
+
+    plugin.onSettingChange('use-kanban-board-background-colors', handleSettingsChange);
+
+    return () => {
+      plugin.offSettingChange('use-kanban-board-background-colors', handleSettingsChange);
+    };
+  }, [plugin]);
+
   const loadLinkedCards = async () => {
     try {
       setLoading(true);
@@ -479,6 +494,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
               boardName: boardFile.basename,
               boardPath: boardFile.path,
               laneName: lane.data.title,
+              laneColor: lane.data.backgroundColor,
               blockId: itemData.blockId,
               tags: itemData.metadata?.tags || [],
               metadata: itemData.metadata,
@@ -1022,286 +1038,313 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
       </div>
 
       <div className="kanban-plugin__linked-cards-grid">
-        {filteredCards.map((card, index) => (
-          <div
-            key={`${card.boardPath}-${card.blockId || index}`}
-            className="kanban-plugin__linked-card-item"
-            onClick={(e) => {
-              console.log('[LinkedCardsDisplay] Card div clicked:', {
-                target: e.target,
-                currentTarget: e.currentTarget,
-                cardTitle: card.title,
-              });
-              handleCardClick(card);
-            }}
-          >
-            <div className="kanban-plugin__linked-card-header">
-              <div className="kanban-plugin__linked-card-board-info" style={{ marginTop: '4px' }}>
-                <span className="kanban-plugin__linked-card-board-name">{card.boardName}</span>
-                <span className="kanban-plugin__linked-card-separator">→</span>
-                <span className="kanban-plugin__linked-card-lane-name">{card.laneName}</span>
+        {filteredCards.map((card, index) => {
+          // Check if lane colors should be used
+          const useLaneColors = plugin.settings['use-kanban-board-background-colors'];
+          const cardStyle =
+            useLaneColors && card.laneColor ? { backgroundColor: card.laneColor } : {};
+
+          return (
+            <div
+              key={`${card.boardPath}-${card.blockId || index}`}
+              className="kanban-plugin__linked-card-item"
+              style={cardStyle}
+              onClick={(e) => {
+                console.log('[LinkedCardsDisplay] Card div clicked:', {
+                  target: e.target,
+                  currentTarget: e.currentTarget,
+                  cardTitle: card.title,
+                });
+                // Prevent the click from bubbling up and causing cursor movement
+                e.stopPropagation();
+                e.preventDefault();
+                handleCardClick(card);
+              }}
+              onMouseDown={(e) => {
+                // Prevent mousedown from causing cursor movement
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+              onPointerDown={(e) => {
+                // Prevent pointerdown from causing cursor movement
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+            >
+              <div className="kanban-plugin__linked-card-header">
+                <div className="kanban-plugin__linked-card-board-info" style={{ marginTop: '4px' }}>
+                  <span className="kanban-plugin__linked-card-board-name">{card.boardName}</span>
+                  <span className="kanban-plugin__linked-card-separator">→</span>
+                  <span className="kanban-plugin__linked-card-lane-name">{card.laneName}</span>
+                </div>
+                <div
+                  className="kanban-plugin__linked-card-status"
+                  style={{ marginRight: '-4px' }}
+                  onClick={(e) => e.stopPropagation()} // Prevent card click when clicking checkbox
+                >
+                  <input
+                    type="checkbox"
+                    checked={card.checked}
+                    onChange={async (e) => {
+                      e.stopPropagation();
+                      await handleToggleCardDoneStatus(
+                        card,
+                        (e.target as HTMLInputElement).checked
+                      );
+                    }}
+                    className="kanban-plugin__linked-card-checkbox"
+                    style={{ cursor: 'pointer' }}
+                  />
+                </div>
               </div>
-              <div
-                className="kanban-plugin__linked-card-status"
-                style={{ marginRight: '-4px' }}
-                onClick={(e) => e.stopPropagation()} // Prevent card click when clicking checkbox
-              >
-                <input
-                  type="checkbox"
-                  checked={card.checked}
-                  onChange={async (e) => {
-                    e.stopPropagation();
-                    await handleToggleCardDoneStatus(card, (e.target as HTMLInputElement).checked);
-                  }}
-                  className="kanban-plugin__linked-card-checkbox"
-                  style={{ cursor: 'pointer' }}
-                />
+
+              <div className="kanban-plugin__linked-card-content">
+                <div className="kanban-plugin__linked-card-title">
+                  {renderMarkdownLists(
+                    cleanCardTitle(card.titleRaw || card.title),
+                    plugin,
+                    currentFilePath
+                  )}
+                </div>
               </div>
-            </div>
 
-            <div className="kanban-plugin__linked-card-content">
-              <div className="kanban-plugin__linked-card-title">
-                {renderMarkdownLists(
-                  cleanCardTitle(card.titleRaw || card.title),
-                  plugin,
-                  currentFilePath
-                )}
-              </div>
-            </div>
+              {card.tags &&
+                card.tags.length > 0 &&
+                (() => {
+                  // Get the hide tag settings
+                  const hideLaneTagDisplay = plugin.settings['hide-lane-tag-display'];
+                  const hideBoardTagDisplay = plugin.settings['hide-board-tag-display'];
 
-            {card.tags &&
-              card.tags.length > 0 &&
-              (() => {
-                // Get the hide tag settings
-                const hideLaneTagDisplay = plugin.settings['hide-lane-tag-display'];
-                const hideBoardTagDisplay = plugin.settings['hide-board-tag-display'];
+                  // Filter out lane and board tags if the settings are enabled
+                  let filteredTags = card.tags;
+                  if (hideLaneTagDisplay || hideBoardTagDisplay) {
+                    const boardName = card.boardName;
 
-                // Filter out lane and board tags if the settings are enabled
-                let filteredTags = card.tags;
-                if (hideLaneTagDisplay || hideBoardTagDisplay) {
-                  const boardName = card.boardName;
+                    filteredTags = card.tags.filter((tag) => {
+                      const tagWithoutHash = tag.replace(/^#/, '').toLowerCase();
 
-                  filteredTags = card.tags.filter((tag) => {
-                    const tagWithoutHash = tag.replace(/^#/, '').toLowerCase();
-
-                    // Check if this is a board tag (matches board name)
-                    if (hideBoardTagDisplay && boardName) {
-                      const boardTagPattern = boardName.toLowerCase().replace(/\s+/g, '-');
-                      if (tagWithoutHash === boardTagPattern) {
-                        return false; // Hide this tag
-                      }
-                    }
-
-                    // Check if this is a lane tag (matches lane name)
-                    if (hideLaneTagDisplay) {
-                      const laneTagPattern = card.laneName.toLowerCase().replace(/\s+/g, '-');
-                      if (tagWithoutHash === laneTagPattern) {
-                        return false; // Hide this tag
-                      }
-                    }
-
-                    return true; // Show this tag
-                  });
-                }
-
-                // Only render the tags section if there are tags to show after filtering
-                return filteredTags.length > 0 ? (
-                  <div className="kanban-plugin__linked-card-tags">
-                    {filteredTags.map((tag, tagIndex) => {
-                      // Ensure tag has # prefix for lookups
-                      const tagWithHash = tag.startsWith('#') ? tag : `#${tag}`;
-                      const tagColor = getTagColor(tagWithHash);
-                      const symbolInfo = getTagSymbol(tagWithHash);
-
-                      let tagContent;
-                      if (symbolInfo) {
-                        tagContent = (
-                          <>
-                            <span>{symbolInfo.symbol}</span>
-                            {!symbolInfo.hideTag && tagWithHash.length > 1 && (
-                              <span style={{ marginLeft: '0.2em' }}>{tagWithHash.slice(1)}</span>
-                            )}
-                          </>
-                        );
-                      } else {
-                        if (hideHashForTagsWithoutSymbols) {
-                          tagContent = tagWithHash.length > 1 ? tagWithHash.slice(1) : tagWithHash;
-                        } else {
-                          tagContent = tagWithHash;
+                      // Check if this is a board tag (matches board name)
+                      if (hideBoardTagDisplay && boardName) {
+                        const boardTagPattern = boardName.toLowerCase().replace(/\s+/g, '-');
+                        if (tagWithoutHash === boardTagPattern) {
+                          return false; // Hide this tag
                         }
                       }
 
-                      return (
-                        <span
-                          key={tagIndex}
-                          className="kanban-plugin__linked-card-tag"
-                          style={{
-                            ...(tagColor && {
-                              '--tag-color': tagColor.color,
-                              '--tag-background': tagColor.backgroundColor,
-                            }),
-                          }}
-                        >
-                          {tagContent}
-                        </span>
-                      );
-                    })}
-                  </div>
-                ) : null;
-              })()}
+                      // Check if this is a lane tag (matches lane name)
+                      if (hideLaneTagDisplay) {
+                        const laneTagPattern = card.laneName.toLowerCase().replace(/\s+/g, '-');
+                        if (tagWithoutHash === laneTagPattern) {
+                          return false; // Hide this tag
+                        }
+                      }
 
-            {(card.date ||
-              (card.assignedMembers && card.assignedMembers.length > 0) ||
-              card.priority) && (
-              <div className="kanban-plugin__linked-card-metadata">
-                <div className="kanban-plugin__linked-card-metadata-left">
-                  {card.date && (
-                    <span className="kanban-plugin__linked-card-date">
-                      📅{' '}
-                      <span
-                        style={(() => {
-                          // Try to parse the date using the configured date format first, then fallback to common formats
-                          const configuredDateFormat =
-                            plugin.settings['date-format'] || 'YYYY-MM-DD';
-                          let dateMoment = moment(card.date, configuredDateFormat, true); // Try configured format first
+                      return true; // Show this tag
+                    });
+                  }
 
-                          // If the configured format fails, try default parsing
-                          if (!dateMoment.isValid()) {
-                            dateMoment = moment(card.date);
+                  // Only render the tags section if there are tags to show after filtering
+                  return filteredTags.length > 0 ? (
+                    <div className="kanban-plugin__linked-card-tags">
+                      {filteredTags.map((tag, tagIndex) => {
+                        // Ensure tag has # prefix for lookups
+                        const tagWithHash = tag.startsWith('#') ? tag : `#${tag}`;
+                        const tagColor = getTagColor(tagWithHash);
+                        const symbolInfo = getTagSymbol(tagWithHash);
+
+                        let tagContent;
+                        if (symbolInfo) {
+                          tagContent = (
+                            <>
+                              <span>{symbolInfo.symbol}</span>
+                              {!symbolInfo.hideTag && tagWithHash.length > 1 && (
+                                <span style={{ marginLeft: '0.2em' }}>{tagWithHash.slice(1)}</span>
+                              )}
+                            </>
+                          );
+                        } else {
+                          if (hideHashForTagsWithoutSymbols) {
+                            tagContent =
+                              tagWithHash.length > 1 ? tagWithHash.slice(1) : tagWithHash;
+                          } else {
+                            tagContent = tagWithHash;
                           }
-
-                          // If default parsing also fails, try common formats
-                          if (!dateMoment.isValid()) {
-                            const formats = [
-                              'DD-MM-YYYY',
-                              'MM-DD-YYYY',
-                              'YYYY-MM-DD',
-                              'DD/MM/YYYY',
-                              'MM/DD/YYYY',
-                              'YYYY/MM/DD',
-                              'DD.MM.YYYY',
-                              'MM.DD.YYYY',
-                              'YYYY.MM.DD',
-                            ];
-
-                            for (const format of formats) {
-                              dateMoment = moment(card.date, format, true); // strict parsing
-                              if (dateMoment.isValid()) {
-                                break;
-                              }
-                            }
-                          }
-
-                          const dateColor = dateMoment.isValid() ? getDateColor(dateMoment) : null;
-
-                          // Fallback coloring if no date colors are configured
-                          let fallbackColor = 'var(--text-muted)';
-                          const fallbackBackground = 'transparent';
-
-                          if (!dateColor && dateMoment.isValid()) {
-                            const now = moment();
-                            if (dateMoment.isSame(now, 'day')) {
-                              // Today - blue
-                              fallbackColor = 'var(--color-blue)';
-                            } else if (dateMoment.isBefore(now, 'day')) {
-                              // Past - red
-                              fallbackColor = 'var(--color-red)';
-                            } else {
-                              // Future - green
-                              fallbackColor = 'var(--color-green)';
-                            }
-                          }
-
-                          return {
-                            color: dateColor?.color || fallbackColor,
-                            backgroundColor: dateColor?.backgroundColor || fallbackBackground,
-                            padding: dateColor?.backgroundColor ? '2px 4px' : '0',
-                            borderRadius: dateColor?.backgroundColor ? '3px' : '0',
-                          };
-                        })()}
-                      >
-                        {card.date}
-                      </span>
-                    </span>
-                  )}
-                </div>
-                <div className="kanban-plugin__linked-card-metadata-right">
-                  {card.assignedMembers && card.assignedMembers.length > 0 && (
-                    <div className="kanban-plugin__linked-card-members">
-                      {card.assignedMembers.map((member, memberIndex) => {
-                        const memberConfig = plugin.settings.teamMemberColors?.[member];
-                        const backgroundColor =
-                          memberConfig?.background || 'var(--background-modifier-hover)';
-                        const textColor =
-                          memberConfig?.text ||
-                          (memberConfig?.background
-                            ? 'var(--text-on-accent)'
-                            : 'var(--text-normal)');
-                        const initials = getInitials(member);
+                        }
 
                         return (
-                          <div
-                            key={memberIndex}
-                            className="kanban-plugin__linked-card-member"
-                            title={member}
+                          <span
+                            key={tagIndex}
+                            className="kanban-plugin__linked-card-tag"
                             style={{
-                              backgroundColor,
-                              color: textColor,
-                              borderRadius: '50%',
-                              width: '20px',
-                              height: '20px',
-                              marginTop: '-8px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              marginLeft: '4px',
-                              // marginRight: '-4px',
-                              fontSize: '12px',
-                              cursor: 'pointer',
-                              userSelect: 'none',
+                              ...(tagColor && {
+                                '--tag-color': tagColor.color,
+                                '--tag-background': tagColor.backgroundColor,
+                              }),
                             }}
                           >
-                            {initials}
-                          </div>
+                            {tagContent}
+                          </span>
                         );
                       })}
                     </div>
-                  )}
-                  {card.priority && (
-                    <div
-                      className="kanban-plugin__linked-card-priority"
-                      style={{
-                        ...getPriorityStyle(card.priority),
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        fontSize: '1em',
-                        fontWeight: '500',
-                        marginLeft:
-                          card.assignedMembers && card.assignedMembers.length > 0 ? '4px' : '0',
-                        marginRight: '-2px',
-                        textTransform: 'capitalize',
-                        minHeight: '20px',
-                        height: 'fit-content',
-                        lineHeight: 'normal',
-                        marginTop: '-8px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        whiteSpace: 'nowrap',
-                      }}
-                      title={`Priority: ${card.priority.charAt(0).toUpperCase() + card.priority.slice(1)}`}
-                    >
-                      {card.priority === 'medium' &&
-                      card.assignedMembers &&
-                      card.assignedMembers.length >= 2
-                        ? 'Med'
-                        : card.priority.charAt(0).toUpperCase() + card.priority.slice(1)}
-                    </div>
-                  )}
+                  ) : null;
+                })()}
+
+              {(card.date ||
+                (card.assignedMembers && card.assignedMembers.length > 0) ||
+                card.priority) && (
+                <div className="kanban-plugin__linked-card-metadata">
+                  <div className="kanban-plugin__linked-card-metadata-left">
+                    {card.date && (
+                      <span className="kanban-plugin__linked-card-date">
+                        📅{' '}
+                        <span
+                          style={(() => {
+                            // Try to parse the date using the configured date format first, then fallback to common formats
+                            const configuredDateFormat =
+                              plugin.settings['date-format'] || 'YYYY-MM-DD';
+                            let dateMoment = moment(card.date, configuredDateFormat, true); // Try configured format first
+
+                            // If the configured format fails, try default parsing
+                            if (!dateMoment.isValid()) {
+                              dateMoment = moment(card.date);
+                            }
+
+                            // If default parsing also fails, try common formats
+                            if (!dateMoment.isValid()) {
+                              const formats = [
+                                'DD-MM-YYYY',
+                                'MM-DD-YYYY',
+                                'YYYY-MM-DD',
+                                'DD/MM/YYYY',
+                                'MM/DD/YYYY',
+                                'YYYY/MM/DD',
+                                'DD.MM.YYYY',
+                                'MM.DD.YYYY',
+                                'YYYY.MM.DD',
+                              ];
+
+                              for (const format of formats) {
+                                dateMoment = moment(card.date, format, true); // strict parsing
+                                if (dateMoment.isValid()) {
+                                  break;
+                                }
+                              }
+                            }
+
+                            const dateColor = dateMoment.isValid()
+                              ? getDateColor(dateMoment)
+                              : null;
+
+                            // Fallback coloring if no date colors are configured
+                            let fallbackColor = 'var(--text-muted)';
+                            const fallbackBackground = 'transparent';
+
+                            if (!dateColor && dateMoment.isValid()) {
+                              const now = moment();
+                              if (dateMoment.isSame(now, 'day')) {
+                                // Today - blue
+                                fallbackColor = 'var(--color-blue)';
+                              } else if (dateMoment.isBefore(now, 'day')) {
+                                // Past - red
+                                fallbackColor = 'var(--color-red)';
+                              } else {
+                                // Future - green
+                                fallbackColor = 'var(--color-green)';
+                              }
+                            }
+
+                            return {
+                              color: dateColor?.color || fallbackColor,
+                              backgroundColor: dateColor?.backgroundColor || fallbackBackground,
+                              padding: dateColor?.backgroundColor ? '2px 4px' : '0',
+                              borderRadius: dateColor?.backgroundColor ? '3px' : '0',
+                            };
+                          })()}
+                        >
+                          {card.date}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="kanban-plugin__linked-card-metadata-right">
+                    {card.assignedMembers && card.assignedMembers.length > 0 && (
+                      <div className="kanban-plugin__linked-card-members">
+                        {card.assignedMembers.map((member, memberIndex) => {
+                          const memberConfig = plugin.settings.teamMemberColors?.[member];
+                          const backgroundColor =
+                            memberConfig?.background || 'var(--background-modifier-hover)';
+                          const textColor =
+                            memberConfig?.text ||
+                            (memberConfig?.background
+                              ? 'var(--text-on-accent)'
+                              : 'var(--text-normal)');
+                          const initials = getInitials(member);
+
+                          return (
+                            <div
+                              key={memberIndex}
+                              className="kanban-plugin__linked-card-member"
+                              title={member}
+                              style={{
+                                backgroundColor,
+                                color: textColor,
+                                borderRadius: '50%',
+                                width: '20px',
+                                height: '20px',
+                                marginTop: '-8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                marginLeft: '4px',
+                                // marginRight: '-4px',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                userSelect: 'none',
+                              }}
+                            >
+                              {initials}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {card.priority && (
+                      <div
+                        className="kanban-plugin__linked-card-priority"
+                        style={{
+                          ...getPriorityStyle(card.priority),
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          fontSize: '1em',
+                          fontWeight: '500',
+                          marginLeft:
+                            card.assignedMembers && card.assignedMembers.length > 0 ? '4px' : '0',
+                          marginRight: '-2px',
+                          textTransform: 'capitalize',
+                          minHeight: '20px',
+                          height: 'fit-content',
+                          lineHeight: 'normal',
+                          marginTop: '-8px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={`Priority: ${card.priority.charAt(0).toUpperCase() + card.priority.slice(1)}`}
+                      >
+                        {card.priority === 'medium' &&
+                        card.assignedMembers &&
+                        card.assignedMembers.length >= 2
+                          ? 'Med'
+                          : card.priority.charAt(0).toUpperCase() + card.priority.slice(1)}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        ))}
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

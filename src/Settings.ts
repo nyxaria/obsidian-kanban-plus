@@ -158,6 +158,7 @@ export interface KanbanSettings {
   'enable-kanban-code-blocks'?: boolean; // Added for ```kanban``` code block feature
   'hide-linked-cards-when-none-exist'?: boolean; // Hide linked cards display when no cards exist
   'hide-linked-cards-when-only-done'?: boolean; // Hide linked cards display when only done cards exist
+  'use-kanban-board-background-colors'?: boolean; // Use kanban board background colors in embeds
 }
 
 export interface KanbanViewSettings {
@@ -183,10 +184,11 @@ export interface KanbanViewSettings {
   automaticEmailAppPassword: '';
   automaticEmailSendingFrequencyDays: 1;
   hideDoneLane: false;
-  'timeline-day-width': 50;
-  'timeline-card-height': 40; // Added for consistency, though primarily global
+  timelineDayWidth: 50;
+  timelineCardHeight: 40; // Added for consistency, though primarily global
   'enable-kanban-card-embeds': boolean;
   'enable-kanban-code-blocks': boolean;
+  'use-kanban-board-background-colors': boolean;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -258,6 +260,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'enable-kanban-code-blocks',
   'hide-linked-cards-when-none-exist',
   'hide-linked-cards-when-only-done',
+  'use-kanban-board-background-colors',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -912,6 +915,61 @@ export class SettingsManager {
 
                 this.applySettingsUpdate({
                   $unset: ['hide-linked-cards-when-only-done'],
+                });
+              });
+          });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Use kanban board background colours'))
+      .setDesc(
+        t(
+          'When enabled, kanban card embeds and linked cards will use the background colors from their original kanban boards.'
+        )
+      )
+      .then((setting) => {
+        let toggleComponent: ToggleComponent;
+
+        setting
+          .addToggle((toggle) => {
+            toggleComponent = toggle;
+
+            const [value, globalValue] = this.getSetting(
+              'use-kanban-board-background-colors',
+              local
+            );
+            const currentActualValue =
+              value !== undefined
+                ? value
+                : globalValue !== undefined
+                  ? globalValue
+                  : DEFAULT_SETTINGS['use-kanban-board-background-colors'];
+            toggle.setValue(currentActualValue as boolean);
+
+            toggle.onChange((newValue) => {
+              this.applySettingsUpdate({
+                'use-kanban-board-background-colors': {
+                  $set: newValue,
+                },
+              });
+            });
+          })
+          .addExtraButton((b) => {
+            b.setIcon('lucide-rotate-ccw')
+              .setTooltip(t('Reset to default'))
+              .onClick(() => {
+                const [, globalValue] = this.getSetting(
+                  'use-kanban-board-background-colors',
+                  local
+                );
+                const defaultValue =
+                  globalValue !== undefined
+                    ? globalValue
+                    : DEFAULT_SETTINGS['use-kanban-board-background-colors'];
+                toggleComponent.setValue(defaultValue as boolean);
+
+                this.applySettingsUpdate({
+                  $unset: ['use-kanban-board-background-colors'],
                 });
               });
           });
@@ -2840,6 +2898,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'enable-kanban-code-blocks': true,
   'hide-linked-cards-when-none-exist': true,
   'hide-linked-cards-when-only-done': false,
+  'use-kanban-board-background-colors': true,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {

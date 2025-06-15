@@ -316,6 +316,9 @@ const en = {
   'Enable Kanban code blocks': 'Enable Kanban code blocks',
   'When enabled, ```kanban``` code blocks will be replaced with a display of all Kanban cards that link to the current note.':
     'When enabled, ```kanban``` code blocks will be replaced with a display of all Kanban cards that link to the current note.',
+  'Use kanban board background colours': 'Use kanban board background colours',
+  'When enabled, kanban card embeds and linked cards will use the background colors from their original kanban boards.':
+    'When enabled, kanban card embeds and linked cards will use the background colors from their original kanban boards.',
 
   // Workspace View Specific
   'Kanban Workspace': 'Kanban Workspace',

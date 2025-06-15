@@ -20,6 +20,7 @@ interface CardData {
   tags: string[];
   metadata: any;
   laneName: string;
+  laneColor?: string;
   boardName: string;
 }
 
@@ -33,10 +34,24 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
   const [cardData, setCardData] = useState<CardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [forceRenderKey, setForceRenderKey] = useState(0);
 
   useEffect(() => {
     loadCardData();
   }, [filePath, blockId]);
+
+  // Listen for settings changes to trigger re-render
+  useEffect(() => {
+    const handleSettingsChange = (value: any) => {
+      setForceRenderKey((prev) => prev + 1);
+    };
+
+    plugin.onSettingChange('use-kanban-board-background-colors', handleSettingsChange);
+
+    return () => {
+      plugin.offSettingChange('use-kanban-board-background-colors', handleSettingsChange);
+    };
+  }, [plugin]);
 
   const loadCardData = async () => {
     try {
@@ -81,6 +96,7 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
     // Simple parsing to find the card with the target block ID
     const lines = content.split('\n');
     let currentLane = '';
+    let currentLaneColor: string | undefined = undefined;
     let inCard = false;
     let cardLines: string[] = [];
     let cardTitle = '';
@@ -91,6 +107,24 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
       // Check for lane headers (## Lane Name)
       if (line.startsWith('## ') && !line.startsWith('### ')) {
         currentLane = line.substring(3).trim();
+        currentLaneColor = undefined; // Reset color for new lane
+
+        // Look ahead for lane color comment
+        for (let j = i + 1; j < lines.length && j < i + 5; j++) {
+          const nextLine = lines[j];
+          if (nextLine.trim().startsWith('<!-- kanban-lane-background-color:')) {
+            const colorMatch = nextLine.match(
+              /<!-- kanban-lane-background-color:\s*(#[0-9a-fA-F]{6}|[a-zA-Z]+)\s*-->/
+            );
+            if (colorMatch && colorMatch[1]) {
+              currentLaneColor = colorMatch[1].trim();
+              break;
+            }
+          } else if (nextLine.startsWith('## ') || nextLine.startsWith('- [')) {
+            // Stop looking if we hit another lane or a card
+            break;
+          }
+        }
         continue;
       }
 
@@ -98,7 +132,13 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
       if (line.match(/^- \[[x ]\]/)) {
         // If we were already in a card, process the previous one
         if (inCard && cardLines.length > 0) {
-          const result = processCard(cardLines, currentLane, boardName, targetBlockId);
+          const result = processCard(
+            cardLines,
+            currentLane,
+            currentLaneColor,
+            boardName,
+            targetBlockId
+          );
           if (result) return result;
         }
 
@@ -112,7 +152,13 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
           cardLines.push(line);
         } else if (line.startsWith('- ')) {
           // New card starting, process the previous one
-          const result = processCard(cardLines, currentLane, boardName, targetBlockId);
+          const result = processCard(
+            cardLines,
+            currentLane,
+            currentLaneColor,
+            boardName,
+            targetBlockId
+          );
           if (result) return result;
 
           // Start new card
@@ -120,7 +166,13 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
           cardTitle = line.replace(/^- \[[x ]\]\s*/, '').trim();
         } else {
           // End of card section
-          const result = processCard(cardLines, currentLane, boardName, targetBlockId);
+          const result = processCard(
+            cardLines,
+            currentLane,
+            currentLaneColor,
+            boardName,
+            targetBlockId
+          );
           if (result) return result;
           inCard = false;
           cardLines = [];
@@ -130,7 +182,7 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
 
     // Process the last card if we ended while in one
     if (inCard && cardLines.length > 0) {
-      return processCard(cardLines, currentLane, boardName, targetBlockId);
+      return processCard(cardLines, currentLane, currentLaneColor, boardName, targetBlockId);
     }
 
     return null;
@@ -139,6 +191,7 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
   const processCard = (
     cardLines: string[],
     laneName: string,
+    laneColor: string | undefined,
     boardName: string,
     targetBlockId: string
   ): CardData | null => {
@@ -189,6 +242,7 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
       tags,
       metadata,
       laneName,
+      laneColor,
       boardName,
     };
   };
@@ -268,11 +322,19 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
     );
   }
 
+  // Check if lane colors should be used
+  const useLaneColors = plugin.settings['use-kanban-board-background-colors'];
+  const cardStyle = {
+    cursor: 'pointer',
+    margin: 'var(--size-4-2) 0',
+    ...(useLaneColors && cardData.laneColor ? { backgroundColor: cardData.laneColor } : {}),
+  };
+
   return (
     <div
       className="kanban-plugin__item kanban-plugin__card-embed-item"
       onClick={handleCardClick}
-      style={{ cursor: 'pointer', margin: 'var(--size-4-2) 0' }}
+      style={cardStyle}
     >
       <div className="kanban-plugin__item-content-wrapper">
         <div className="kanban-plugin__item-title-wrapper">
