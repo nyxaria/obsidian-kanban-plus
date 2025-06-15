@@ -84,6 +84,9 @@ export default class KanbanPlugin extends Plugin {
   // Global tag symbols CSS injection
   private globalTagSymbolsStyleEl: HTMLStyleElement | null = null;
 
+  // Event emitter for settings changes
+  private settingsChangeListeners: Map<string, Array<(value: any) => void>> = new Map();
+
   // Added properties
   public archive: any = {
     getArchive: (file: TFile): Item[] => {
@@ -508,6 +511,12 @@ export default class KanbanPlugin extends Plugin {
         this.stateManagers.forEach((stateManager) => {
           stateManager.forceRefresh();
         });
+
+        // Trigger re-render of embedded components when lane color setting changes
+        this.triggerSettingChange(
+          'use-kanban-board-background-colors',
+          newSettings['use-kanban-board-background-colors']
+        );
       },
     });
 
@@ -2723,12 +2732,29 @@ export default class KanbanPlugin extends Plugin {
                         event.type === 'dblclick',
                     });
 
+                    // Handle events without a target or with non-element targets
+                    if (!target || typeof target.closest !== 'function') {
+                      // For events without a proper HTML element target, ignore selection-related events that could cause cursor movement
+                      if (event.type === 'selectionchange') {
+                        console.log(
+                          '[Kanban Widget 1] Ignoring selectionchange event without proper target'
+                        );
+                        return true;
+                      }
+                      console.log(
+                        '[Kanban Widget 1] Allowing event without proper target:',
+                        event.type
+                      );
+                      return false;
+                    }
+
                     // Always allow interactive elements to work, but exclude CodeMirror elements
-                    const interactiveElement =
-                      target &&
-                      target.closest('input, button, a, label, [role="button"], [tabindex]');
-                    const isCodeMirrorElement =
-                      target && target.closest('.cm-editor, .cm-scroller, .cm-content');
+                    const interactiveElement = target.closest(
+                      'input, button, a, label, [role="button"], [tabindex]'
+                    );
+                    const isCodeMirrorElement = target.closest(
+                      '.cm-editor, .cm-scroller, .cm-content'
+                    );
                     const isInteractive = interactiveElement && !isCodeMirrorElement;
 
                     if (interactiveElement && isCodeMirrorElement) {
@@ -2748,12 +2774,27 @@ export default class KanbanPlugin extends Plugin {
                       return false; // Let CodeMirror process these events normally
                     }
 
-                    // Always allow card clicks to work
-                    const isCardClick =
-                      target && target.closest('.kanban-plugin__linked-card-item');
+                    // Check if this is a card click - but we need to prevent cursor movement
+                    const isCardClick = target.closest('.kanban-plugin__linked-card-item');
                     if (isCardClick) {
-                      console.log('[Kanban Widget 1] Allowing card click:', isCardClick.className);
-                      return false; // Let CodeMirror process card clicks
+                      console.log('[Kanban Widget 1] Card click detected:', isCardClick.className);
+                      // For card clicks, we want to handle the click but prevent cursor movement
+                      // So we allow the click event but block mouse/pointer events that cause cursor movement
+                      if (event.type === 'click') {
+                        console.log('[Kanban Widget 1] Allowing card click event');
+                        return false; // Allow click to be processed
+                      } else if (
+                        event.type === 'mousedown' ||
+                        event.type === 'pointerdown' ||
+                        event.type === 'mouseup' ||
+                        event.type === 'pointerup'
+                      ) {
+                        console.log(
+                          '[Kanban Widget 1] Blocking card mouse/pointer event to prevent cursor movement:',
+                          event.type
+                        );
+                        return true; // Block these to prevent cursor movement
+                      }
                     }
 
                     // Ignore mouse events that would cause cursor movement
@@ -2817,6 +2858,31 @@ export default class KanbanPlugin extends Plugin {
     return Decoration.set(decorations);
   }
   // --- END Global Kanban Code Block Extension ---
+
+  // Methods for managing settings change listeners
+  onSettingChange(settingKey: string, callback: (value: any) => void) {
+    if (!this.settingsChangeListeners.has(settingKey)) {
+      this.settingsChangeListeners.set(settingKey, []);
+    }
+    this.settingsChangeListeners.get(settingKey)!.push(callback);
+  }
+
+  offSettingChange(settingKey: string, callback: (value: any) => void) {
+    const listeners = this.settingsChangeListeners.get(settingKey);
+    if (listeners) {
+      const index = listeners.indexOf(callback);
+      if (index > -1) {
+        listeners.splice(index, 1);
+      }
+    }
+  }
+
+  private triggerSettingChange(settingKey: string, value: any) {
+    const listeners = this.settingsChangeListeners.get(settingKey);
+    if (listeners) {
+      listeners.forEach((callback) => callback(value));
+    }
+  }
 }
 
 // --- SMTP Email Sending Function ---
