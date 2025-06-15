@@ -2410,50 +2410,137 @@ export default class KanbanPlugin extends Plugin {
       (view: any) => {
         const pluginInstance = {
           decorations: this.buildGlobalKanbanDecorations(view),
+          lastCursorInBlockState: new Map(), // Track which blocks had cursor last time
           update: (update: any) => {
-            // Only rebuild decorations when document changes and it might affect kanban blocks
+            // Rebuild decorations when:
+            // 1. Document changes and might affect kanban blocks
+            // 2. Cursor moves between inside/outside kanban blocks
+            // 3. Viewport changes
+            let shouldRebuild = false;
+
             if (update.docChanged) {
-              // Check if the changes might involve kanban code blocks
-              let shouldRebuild = false;
+              // Only rebuild for very specific kanban-related changes
+              let changesAffectKanbanBlocks = false;
 
               update.changes.iterChanges(
                 (fromA: number, toA: number, fromB: number, toB: number, inserted: any) => {
                   const insertedText = inserted.toString();
                   const deletedLength = toA - fromA;
 
-                  // Rebuild if:
+                  // Only rebuild for these specific cases:
                   // 1. Text contains "```kanban" (complete kanban code block start)
-                  // 2. Text contains "kanban" and we're potentially completing a kanban block
-                  // 3. Significant deletion that might remove code blocks
+                  // 2. Large deletions that might remove entire blocks
                   if (
                     insertedText.includes('```kanban') ||
-                    (insertedText.includes('kanban') && insertedText.includes('```')) ||
-                    deletedLength > 10
+                    deletedLength > 20 // Increased threshold for large deletions
                   ) {
-                    shouldRebuild = true;
+                    console.log(
+                      '[Kanban] Rebuild triggered by:',
+                      insertedText.includes('```kanban')
+                        ? '```kanban detected'
+                        : `large deletion (${deletedLength} chars)`
+                    );
+                    changesAffectKanbanBlocks = true;
+                    return;
                   }
 
-                  // Also check if the insertion might complete a ```kanban pattern
-                  // by looking at the context around the insertion point
-                  if (insertedText.includes('kanban') || insertedText === 'n') {
-                    // Get some context around the insertion to see if we're completing ```kanban
+                  // Only check for completing ```kanban if we're typing specific characters
+                  if (insertedText === 'n' && deletedLength === 0) {
+                    // Get context to see if we're completing ```kanban
                     const doc = update.view.state.doc;
                     const contextStart = Math.max(0, fromB - 10);
-                    const contextEnd = Math.min(doc.length, toB + 10);
+                    const contextEnd = Math.min(doc.length, toB);
                     const contextText = doc.sliceString(contextStart, contextEnd);
 
-                    if (contextText.includes('```kanban')) {
-                      shouldRebuild = true;
+                    if (contextText.endsWith('```kanba') && insertedText === 'n') {
+                      console.log('[Kanban] Rebuild triggered by: completing ```kanban');
+                      changesAffectKanbanBlocks = true;
+                      return;
                     }
                   }
                 }
               );
 
-              if (shouldRebuild) {
-                pluginInstance.decorations = this.buildGlobalKanbanDecorations(update.view);
+              if (changesAffectKanbanBlocks) {
+                shouldRebuild = true;
               }
-            } else if (update.viewportChanged) {
-              // Still rebuild on viewport changes for scrolling
+            }
+
+            // Smart selection change detection - only rebuild if cursor moves between inside/outside kanban blocks
+            if (update.selectionSet && !update.docChanged) {
+              const oldSelection = update.startState.selection.main;
+              const newSelection = update.state.selection.main;
+
+              // Only check if cursor head position actually changed
+              if (oldSelection.head !== newSelection.head) {
+                console.log(
+                  '[Kanban] Cursor moved from',
+                  oldSelection.head,
+                  'to',
+                  newSelection.head
+                );
+
+                // Check if the cursor state changed for any kanban blocks
+                const doc = update.view.state.doc;
+                const cursorPos = newSelection.head;
+                const editorHasFocus = update.view.hasFocus;
+
+                // Find all kanban blocks and check if cursor state changed for any of them
+                for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
+                  const line = doc.line(lineNum);
+                  if (line.text.trim() === '```kanban') {
+                    // Find the end of this code block
+                    let endLineNum = lineNum + 1;
+                    while (endLineNum <= doc.lines) {
+                      const endLine = doc.line(endLineNum);
+                      if (endLine.text.trim() === '```') {
+                        break;
+                      }
+                      endLineNum++;
+                    }
+
+                    if (endLineNum <= doc.lines) {
+                      const startLine = doc.line(lineNum);
+                      const endLine = doc.line(endLineNum);
+                      const blockStart = startLine.from;
+                      const blockEnd = endLine.to;
+                      const blockId = `${blockStart}-${blockEnd}`;
+
+                      const cursorInBlock =
+                        editorHasFocus && cursorPos >= blockStart && cursorPos <= blockEnd;
+                      const lastState = pluginInstance.lastCursorInBlockState.get(blockId);
+
+                      console.log(
+                        '[Kanban] Block',
+                        blockId,
+                        '- cursor in block:',
+                        cursorInBlock,
+                        'last state:',
+                        lastState
+                      );
+
+                      if (lastState !== cursorInBlock) {
+                        console.log(
+                          '[Kanban] Rebuild triggered by: cursor state change for block',
+                          blockId
+                        );
+                        pluginInstance.lastCursorInBlockState.set(blockId, cursorInBlock);
+                        shouldRebuild = true;
+                        break;
+                      }
+                    }
+
+                    lineNum = endLineNum; // Skip past this block
+                  }
+                }
+              }
+            }
+
+            // Note: Removed viewport change detection as it was triggering on every keystroke
+            // Viewport changes will be handled by document changes and cursor movement instead
+
+            if (shouldRebuild) {
+              console.log('[Kanban] Rebuilding decorations');
               pluginInstance.decorations = this.buildGlobalKanbanDecorations(update.view);
             }
           },
@@ -2473,6 +2560,11 @@ export default class KanbanPlugin extends Plugin {
 
     const decorations = [];
     const doc = view.state.doc;
+    const selection = view.state.selection.main;
+    const cursorPos = selection.head;
+
+    // Check if the editor has focus - if not, cursor is elsewhere (title, metadata, etc.)
+    const editorHasFocus = view.hasFocus;
 
     // Get current file path
     let currentFilePath = '';
@@ -2507,91 +2599,107 @@ export default class KanbanPlugin extends Plugin {
         }
 
         if (foundEnd) {
-          // Add a widget decoration after the opening ``` line
-          const insertPos = line.to;
-          const pluginInstance = this; // Capture the KanbanPlugin instance
-          decorations.push(
-            Decoration.widget({
-              widget: new (class extends require('@codemirror/view').WidgetType {
-                constructor() {
-                  super();
-                  this.plugin = pluginInstance; // Use the actual KanbanPlugin instance
-                  this.currentFilePath = currentFilePath;
-                  this.container = null;
-                }
+          const startLine = doc.line(lineNum);
+          const endLine = doc.line(endLineNum);
+          const blockStart = startLine.from;
+          const blockEnd = endLine.to;
 
-                eq(widget: any) {
-                  return this.currentFilePath === widget.currentFilePath;
-                }
+          // Check if cursor is inside this kanban code block
+          // Show rendered view if:
+          // 1. Editor doesn't have focus (cursor is in title/metadata), OR
+          // 2. Editor has focus but cursor is outside this code block
+          const cursorInBlock = editorHasFocus && cursorPos >= blockStart && cursorPos <= blockEnd;
 
-                toDOM() {
-                  this.container = document.createElement('div');
-                  this.container.className =
-                    'kanban-plugin__linked-cards-global-edit-mode-container';
+          if (!cursorInBlock) {
+            // Cursor is not in this block, show the widget and hide content
 
-                  // Check if the feature is enabled
-                  if (
-                    this.plugin.settings &&
-                    this.plugin.settings['enable-kanban-code-blocks'] === false
-                  ) {
-                    this.container.innerHTML =
-                      '<div class="kanban-plugin__linked-cards-disabled">Kanban code blocks are disabled in settings</div>';
+            // Add a widget decoration after the opening ``` line
+            const insertPos = line.to;
+            const pluginInstance = this; // Capture the KanbanPlugin instance
+            decorations.push(
+              Decoration.widget({
+                widget: new (class extends require('@codemirror/view').WidgetType {
+                  constructor() {
+                    super();
+                    this.plugin = pluginInstance; // Use the actual KanbanPlugin instance
+                    this.currentFilePath = currentFilePath;
+                    this.container = null;
+                  }
+
+                  eq(widget: any) {
+                    return this.currentFilePath === widget.currentFilePath;
+                  }
+
+                  toDOM() {
+                    this.container = document.createElement('div');
+                    this.container.className =
+                      'kanban-plugin__linked-cards-global-edit-mode-container';
+
+                    // Check if the feature is enabled
+                    if (
+                      this.plugin.settings &&
+                      this.plugin.settings['enable-kanban-code-blocks'] === false
+                    ) {
+                      this.container.innerHTML =
+                        '<div class="kanban-plugin__linked-cards-disabled">Kanban code blocks are disabled in settings</div>';
+                      return this.container;
+                    }
+
+                    // Dynamically import and render the LinkedCardsDisplay component
+                    import('./components/LinkedCardsDisplay')
+                      .then(({ LinkedCardsDisplay }) => {
+                        if (this.container) {
+                          const { createElement } = require('preact');
+                          const { render } = require('preact/compat');
+
+                          render(
+                            createElement(LinkedCardsDisplay, {
+                              plugin: this.plugin,
+                              currentFilePath: this.currentFilePath,
+                            }),
+                            this.container
+                          );
+                        }
+                      })
+                      .catch((error) => {
+                        console.error(
+                          '[KanbanPlugin] Failed to load LinkedCardsDisplay in global edit mode:',
+                          error
+                        );
+                        if (this.container) {
+                          this.container.innerHTML =
+                            '<div class="kanban-plugin__linked-cards-error">⚠️ Error loading linked cards</div>';
+                        }
+                      });
+
                     return this.container;
                   }
 
-                  // Dynamically import and render the LinkedCardsDisplay component
-                  import('./components/LinkedCardsDisplay')
-                    .then(({ LinkedCardsDisplay }) => {
-                      if (this.container) {
-                        const { createElement } = require('preact');
-                        const { render } = require('preact/compat');
-
-                        render(
-                          createElement(LinkedCardsDisplay, {
-                            plugin: this.plugin,
-                            currentFilePath: this.currentFilePath,
-                          }),
-                          this.container
-                        );
-                      }
-                    })
-                    .catch((error) => {
-                      console.error(
-                        '[KanbanPlugin] Failed to load LinkedCardsDisplay in global edit mode:',
-                        error
-                      );
-                      if (this.container) {
-                        this.container.innerHTML =
-                          '<div class="kanban-plugin__linked-cards-error">⚠️ Error loading linked cards</div>';
-                      }
-                    });
-
-                  return this.container;
-                }
-
-                destroy() {
-                  if (this.container) {
-                    const { unmountComponentAtNode } = require('preact/compat');
-                    unmountComponentAtNode(this.container);
-                    this.container = null;
+                  destroy() {
+                    if (this.container) {
+                      const { unmountComponentAtNode } = require('preact/compat');
+                      unmountComponentAtNode(this.container);
+                      this.container = null;
+                    }
                   }
-                }
 
-                ignoreEvent() {
-                  return false;
-                }
-              })(),
-              side: 1,
-            }).range(insertPos)
-          );
+                  ignoreEvent() {
+                    return false;
+                  }
+                })(),
+                side: 1,
+              }).range(insertPos)
+            );
 
-          // Also hide the content between the ``` markers
-          for (let hideLineNum = lineNum + 1; hideLineNum < endLineNum; hideLineNum++) {
-            const hideLine = doc.line(hideLineNum);
-            if (hideLine.text.trim() !== '') {
-              decorations.push(Decoration.replace({}).range(hideLine.from, hideLine.to));
+            // Also hide the content between the ``` markers
+            for (let hideLineNum = lineNum + 1; hideLineNum < endLineNum; hideLineNum++) {
+              const hideLine = doc.line(hideLineNum);
+              if (hideLine.text.trim() !== '') {
+                decorations.push(Decoration.replace({}).range(hideLine.from, hideLine.to));
+              }
             }
           }
+          // If cursor is in the block, don't add any decorations - show raw code
 
           // Skip past this code block
           lineNum = endLineNum;
