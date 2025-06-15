@@ -28,11 +28,28 @@ export function ItemForm({
   const editorRef = useRef<EditorView>();
 
   const clear = () => setEditState(EditingProcessState.cancel);
-  const clickOutsideRef = useOnclickOutside(clear, {
+
+  const handleClickOutside = () => {
+    const cm = editorRef.current;
+    if (cm) {
+      const content = cm.state.doc.toString().trim();
+      if (content) {
+        // If there's content, save the card
+        createItem(content);
+      } else {
+        // If no content, cancel
+        clear();
+      }
+    } else {
+      clear();
+    }
+  };
+
+  const clickOutsideRef = useOnclickOutside(handleClickOutside, {
     ignoreClass: [c('ignore-click-outside'), 'mobile-toolbar', 'suggestion-container'],
   });
 
-  const createItem = (title: string) => {
+  const createItem = (title: string, shouldCloseForm: boolean = true) => {
     addItems([stateManager.getNewItem(title, ' ', false, laneName)]);
     const cm = editorRef.current;
     if (cm) {
@@ -43,6 +60,10 @@ export function ItemForm({
           insert: '',
         },
       });
+    }
+    // Only reset the edit state if we should close the form
+    if (shouldCloseForm) {
+      setEditState(EditingProcessState.cancel);
     }
   };
 
@@ -57,12 +78,14 @@ export function ItemForm({
             placeholder={t('Card title...')}
             onEnter={(cm, mod, shift) => {
               if (!allowNewLine(stateManager, mod, shift)) {
-                createItem(cm.state.doc.toString());
+                // Keep the form open when pressing Enter (shouldCloseForm = false)
+                createItem(cm.state.doc.toString(), false);
                 return true;
               }
             }}
             onSubmit={(cm) => {
-              createItem(cm.state.doc.toString());
+              // Keep the form open for onSubmit as well
+              createItem(cm.state.doc.toString(), false);
             }}
             onEscape={clear}
           />

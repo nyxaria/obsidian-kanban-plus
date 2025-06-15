@@ -63,7 +63,7 @@ function InteractiveMarkdownRenderer(props: {
     } else if (internalFile) {
       // Internal link
       const displayText = internalAlias || internalFile;
-      const linkText = internalFile + (internalAlias ? `|${internalAlias}` : ''); // Original [[content]]
+      const linkPath = internalFile; // Use only the file path part for navigation
 
       // Resolve the file path for proper hover preview
       const resolvedFile = plugin.app.metadataCache.getFirstLinkpathDest(internalFile, sourcePath);
@@ -76,7 +76,7 @@ function InteractiveMarkdownRenderer(props: {
             href: resolvedPath, // Use resolved path for hover preview
             'data-href': resolvedPath, // Obsidian also uses data-href
             class: 'internal-link',
-            'data-link-text': linkText, // Store original link for click handling
+            'data-link-path': linkPath, // Store only the path part for navigation
             'aria-label': displayText, // For accessibility
             style: { color: 'var(--link-color)', textDecoration: 'underline', cursor: 'pointer' },
           },
@@ -104,10 +104,10 @@ function InteractiveMarkdownRenderer(props: {
         if (target.tagName === 'A' && target.classList.contains('internal-link')) {
           event.preventDefault();
           event.stopPropagation();
-          const link = target.getAttribute('data-link-text');
-          if (link) {
+          const linkPath = target.getAttribute('data-link-path');
+          if (linkPath) {
             plugin.app.workspace.openLinkText(
-              link,
+              linkPath,
               sourcePath,
               event.ctrlKey || event.metaKey || event.button === 1 // Open in new tab/split on Ctrl/Cmd click or middle mouse click
             );
@@ -516,15 +516,36 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
   const checkForFileLink = (content: string, fileName: string, filePath: string): boolean => {
     if (!content) return false;
 
-    // Check for wikilinks with the file name
-    const wikilinkPatterns = [
-      `[[${fileName}]]`,
-      `[[${fileName}|`,
-      `[[${filePath}]]`,
-      `[[${filePath}|`,
-    ];
+    // Extract all wikilinks from the content
+    const wikilinkRegex = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+    let match;
 
-    return wikilinkPatterns.some((pattern) => content.includes(pattern));
+    while ((match = wikilinkRegex.exec(content)) !== null) {
+      const linkPath = match[1]; // The path part of the wikilink
+
+      // Try to resolve the link using Obsidian's link resolution
+      try {
+        const resolvedFile = plugin.app.metadataCache.getFirstLinkpathDest(linkPath, '');
+        if (resolvedFile && resolvedFile.path === filePath) {
+          return true;
+        }
+      } catch (e) {
+        // If resolution fails, fall back to simple string matching
+        console.warn('Failed to resolve link:', linkPath, e);
+      }
+
+      // Fallback: Check for simple matches
+      if (
+        linkPath === fileName ||
+        linkPath === filePath ||
+        linkPath.endsWith(`/${fileName}`) ||
+        linkPath === filePath.replace(/\.md$/, '')
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   };
 
   const cleanCardTitle = (titleRaw: string): string => {
