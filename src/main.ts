@@ -2359,51 +2359,6 @@ export default class KanbanPlugin extends Plugin {
         this.container = document.createElement('div');
         this.container.className = 'kanban-plugin__linked-cards-global-edit-mode-container';
 
-        // Prevent clicks on the container background from propagating to the editor
-        // Prevent clicks on background elements but allow interactive elements to work
-        this.container.addEventListener('mousedown', (e: MouseEvent) => {
-          const target = e.target as HTMLElement;
-          // Prevent if clicking on container or background elements, but not interactive elements
-          if (
-            target === this.container ||
-            ((target.classList.contains('kanban-plugin__linked-cards-container') ||
-              target.classList.contains('kanban-plugin__linked-cards-grid') ||
-              target.classList.contains('kanban-plugin__linked-cards-header')) &&
-              !target.closest('input, button, a, label, [role="button"], [tabindex]'))
-          ) {
-            e.stopPropagation();
-            e.preventDefault();
-          }
-        });
-        this.container.addEventListener('click', (e: MouseEvent) => {
-          const target = e.target as HTMLElement;
-          // Prevent if clicking on container or background elements, but not interactive elements
-          if (
-            target === this.container ||
-            ((target.classList.contains('kanban-plugin__linked-cards-container') ||
-              target.classList.contains('kanban-plugin__linked-cards-grid') ||
-              target.classList.contains('kanban-plugin__linked-cards-header')) &&
-              !target.closest('input, button, a, label, [role="button"], [tabindex]'))
-          ) {
-            e.stopPropagation();
-            e.preventDefault();
-          }
-        });
-        this.container.addEventListener('mouseup', (e: MouseEvent) => {
-          const target = e.target as HTMLElement;
-          // Prevent if clicking on container or background elements, but not interactive elements
-          if (
-            target === this.container ||
-            ((target.classList.contains('kanban-plugin__linked-cards-container') ||
-              target.classList.contains('kanban-plugin__linked-cards-grid') ||
-              target.classList.contains('kanban-plugin__linked-cards-header')) &&
-              !target.closest('input, button, a, label, [role="button"], [tabindex]'))
-          ) {
-            e.stopPropagation();
-            e.preventDefault();
-          }
-        });
-
         // Check if the feature is enabled
         if (this.plugin.settings['enable-kanban-code-blocks'] === false) {
           this.container.innerHTML =
@@ -2574,13 +2529,25 @@ export default class KanbanPlugin extends Plugin {
                         '- cursor in block:',
                         cursorInBlock,
                         'last state:',
-                        lastState
+                        lastState,
+                        'editorHasFocus:',
+                        editorHasFocus,
+                        'cursorPos:',
+                        cursorPos,
+                        'blockStart:',
+                        blockStart,
+                        'blockEnd:',
+                        blockEnd
                       );
 
                       if (lastState !== cursorInBlock) {
                         console.log(
                           '[Kanban] Rebuild triggered by: cursor state change for block',
-                          blockId
+                          blockId,
+                          'from',
+                          lastState,
+                          'to',
+                          cursorInBlock
                         );
                         pluginInstance.lastCursorInBlockState.set(blockId, cursorInBlock);
                         shouldRebuild = true;
@@ -2693,51 +2660,6 @@ export default class KanbanPlugin extends Plugin {
                     this.container.className =
                       'kanban-plugin__linked-cards-global-edit-mode-container';
 
-                    // Prevent clicks on the container background from propagating to the editor
-                    // Prevent clicks on background elements but allow interactive elements to work
-                    this.container.addEventListener('mousedown', (e: MouseEvent) => {
-                      const target = e.target as HTMLElement;
-                      // Prevent if clicking on container or background elements, but not interactive elements
-                      if (
-                        target === this.container ||
-                        ((target.classList.contains('kanban-plugin__linked-cards-container') ||
-                          target.classList.contains('kanban-plugin__linked-cards-grid') ||
-                          target.classList.contains('kanban-plugin__linked-cards-header')) &&
-                          !target.closest('input, button, a, label, [role="button"], [tabindex]'))
-                      ) {
-                        e.stopPropagation();
-                        e.preventDefault();
-                      }
-                    });
-                    this.container.addEventListener('click', (e: MouseEvent) => {
-                      const target = e.target as HTMLElement;
-                      // Prevent if clicking on container or background elements, but not interactive elements
-                      if (
-                        target === this.container ||
-                        ((target.classList.contains('kanban-plugin__linked-cards-container') ||
-                          target.classList.contains('kanban-plugin__linked-cards-grid') ||
-                          target.classList.contains('kanban-plugin__linked-cards-header')) &&
-                          !target.closest('input, button, a, label, [role="button"], [tabindex]'))
-                      ) {
-                        e.stopPropagation();
-                        e.preventDefault();
-                      }
-                    });
-                    this.container.addEventListener('mouseup', (e: MouseEvent) => {
-                      const target = e.target as HTMLElement;
-                      // Prevent if clicking on container or background elements, but not interactive elements
-                      if (
-                        target === this.container ||
-                        ((target.classList.contains('kanban-plugin__linked-cards-container') ||
-                          target.classList.contains('kanban-plugin__linked-cards-grid') ||
-                          target.classList.contains('kanban-plugin__linked-cards-header')) &&
-                          !target.closest('input, button, a, label, [role="button"], [tabindex]'))
-                      ) {
-                        e.stopPropagation();
-                        e.preventDefault();
-                      }
-                    });
-
                     // Check if the feature is enabled
                     if (
                       this.plugin.settings &&
@@ -2787,18 +2709,86 @@ export default class KanbanPlugin extends Plugin {
                   }
 
                   ignoreEvent(event: Event) {
-                    // Ignore mouse events within the widget to prevent cursor position changes
-                    // that would switch back to raw markdown mode
+                    const target = event.target as HTMLElement;
+
+                    console.log('[Kanban Widget 1] ignoreEvent called:', {
+                      eventType: event.type,
+                      targetTag: target?.tagName,
+                      targetClass: target?.className,
+                      targetId: target?.id,
+                      targetText: target?.textContent?.substring(0, 50),
+                      isMouseEvent:
+                        event.type.startsWith('mouse') ||
+                        event.type === 'click' ||
+                        event.type === 'dblclick',
+                    });
+
+                    // Always allow interactive elements to work, but exclude CodeMirror elements
+                    const interactiveElement =
+                      target &&
+                      target.closest('input, button, a, label, [role="button"], [tabindex]');
+                    const isCodeMirrorElement =
+                      target && target.closest('.cm-editor, .cm-scroller, .cm-content');
+                    const isInteractive = interactiveElement && !isCodeMirrorElement;
+
+                    if (interactiveElement && isCodeMirrorElement) {
+                      console.log(
+                        '[Kanban Widget 1] Blocking CodeMirror element that would be interactive:',
+                        interactiveElement.tagName,
+                        interactiveElement.className
+                      );
+                    }
+
+                    if (isInteractive) {
+                      console.log(
+                        '[Kanban Widget 1] Allowing interactive element:',
+                        interactiveElement.tagName,
+                        interactiveElement.className
+                      );
+                      return false; // Let CodeMirror process these events normally
+                    }
+
+                    // Always allow card clicks to work
+                    const isCardClick =
+                      target && target.closest('.kanban-plugin__linked-card-item');
+                    if (isCardClick) {
+                      console.log('[Kanban Widget 1] Allowing card click:', isCardClick.className);
+                      return false; // Let CodeMirror process card clicks
+                    }
+
+                    // Ignore mouse events that would cause cursor movement
                     if (
                       event.type === 'mousedown' ||
                       event.type === 'click' ||
                       event.type === 'mouseup' ||
+                      event.type === 'dblclick' ||
+                      event.type === 'pointerdown' ||
+                      event.type === 'pointerup' ||
                       event.type === 'mouseover' ||
                       event.type === 'mouseout' ||
                       event.type === 'mousemove'
                     ) {
-                      return true;
+                      console.log(
+                        '[Kanban Widget 1] Ignoring mouse event to prevent cursor movement:',
+                        event.type
+                      );
+                      return true; // Ignore these to prevent cursor movement
                     }
+
+                    // Catch any other mouse/pointer events that might slip through
+                    if (
+                      event.type.startsWith('mouse') ||
+                      event.type.startsWith('pointer') ||
+                      event.type.includes('click')
+                    ) {
+                      console.log(
+                        '[Kanban Widget 1] Ignoring unhandled mouse/pointer event:',
+                        event.type
+                      );
+                      return true; // Ignore any mouse/pointer events we might have missed
+                    }
+
+                    console.log('[Kanban Widget 1] Allowing other event:', event.type);
                     // Allow other events (like keyboard events) to pass through
                     return false;
                   }
