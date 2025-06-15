@@ -910,8 +910,6 @@ export default class KanbanPlugin extends Plugin {
 
                 // Position cursor between the code blocks for potential content
                 editor.setCursor(cursor.line + 1, 0);
-
-                new Notice('Linked kanban code block inserted');
               });
           });
         }
