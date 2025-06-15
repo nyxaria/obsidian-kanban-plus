@@ -113,10 +113,11 @@ export class KanbanView extends TextFileView implements HoverParent {
       automaticEmailAppPassword: '',
       automaticEmailSendingFrequencyDays: 1,
       hideDoneLane: false,
-      'timeline-day-width': 50,
-      'timeline-card-height': 40,
+      timelineDayWidth: 50,
+      timelineCardHeight: 40,
       'enable-kanban-card-embeds': true,
       'enable-kanban-code-blocks': true,
+      'use-kanban-board-background-colors': true,
     };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));
@@ -1543,14 +1544,17 @@ export class KanbanView extends TextFileView implements HoverParent {
       // console.log('[KanbanView] handleBoardClickToClearHighlight: No currentSearchMatch to clear for global search highlight.');
     }
 
-    // Handle card edit cancellation if the setting is enabled
+    // Handle card edit saving/cancellation if the setting is enabled
     if (this.plugin.settings.clickOutsideCardToSaveEdit) {
       console.log(
-        '[KanbanView] handleBoardClickToClearHighlight: Emitting "cancelAllCardEdits" (setting enabled)'
+        '[KanbanView] handleBoardClickToClearHighlight: Emitting "saveAllCardEdits" (setting enabled)'
+      );
+      this.emitter.emit('saveAllCardEdits');
+    } else {
+      console.log(
+        '[KanbanView] handleBoardClickToClearHighlight: Emitting "cancelAllCardEdits" (setting disabled)'
       );
       this.emitter.emit('cancelAllCardEdits');
-    } else {
-      // console.log('[KanbanView] handleBoardClickToClearHighlight: "clickOutsideCardToSaveEdit" setting disabled. Not emitting event.');
     }
   };
 
