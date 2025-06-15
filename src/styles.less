@@ -847,6 +847,578 @@ button.kanban-plugin__new-item-button {
   line-height: var(--line-height-tight);
 }
 
+// Linked Cards Display Styles
+.kanban-plugin__linked-cards-container {
+  margin: var(--size-4-4) 0;
+  padding: var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background-color: var(--background-secondary);
+}
+
+.kanban-plugin__linked-cards-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: var(--size-4-2);
+
+  h4 {
+    margin: 0;
+    color: var(--text-normal);
+    font-size: var(--font-ui-medium);
+    font-weight: 600;
+    flex: 1;
+  }
+}
+
+.kanban-plugin__linked-cards-controls {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transform: translateY(0px);
+}
+
+.kanban-plugin__linked-cards-show-done {
+  display: flex;
+  align-items: center;
+  column-gap: 6px;
+  cursor: pointer;
+  font-size: 0.9em;
+  margin-top: -4px;
+  color: var(--text-muted);
+  user-select: none;
+  white-space: nowrap;
+
+  input[type='checkbox'] {
+    margin: 0;
+    margin-top: -2px;
+    cursor: pointer;
+  }
+
+  &:hover {
+    color: var(--text-normal);
+  }
+}
+
+.kanban-plugin__linked-cards-loading,
+.kanban-plugin__linked-cards-error,
+.kanban-plugin__linked-cards-empty {
+  text-align: center;
+  padding: var(--size-4-4);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.kanban-plugin__linked-cards-error {
+  color: var(--text-error);
+}
+
+.kanban-plugin__linked-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--size-4-3);
+}
+
+.kanban-plugin__linked-card-item {
+  position: relative;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-3);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+
+  &:hover {
+    border-color: var(--interactive-accent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+  }
+}
+
+.kanban-plugin__linked-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--size-4-2);
+}
+
+.kanban-plugin__linked-card-board-info {
+  flex: 1;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.kanban-plugin__linked-card-board-name {
+  color: var(--text-accent);
+}
+
+.kanban-plugin__linked-card-separator {
+  margin: 0 var(--size-4-1);
+}
+
+.kanban-plugin__linked-card-lane-name {
+  font-weight: 400;
+}
+
+.kanban-plugin__linked-card-status {
+  flex-shrink: 0;
+}
+
+.kanban-plugin__linked-card-checkbox {
+  margin: 0;
+}
+
+.kanban-plugin__linked-card-content {
+  margin-bottom: var(--size-4-2);
+  flex: 1;
+}
+
+.kanban-plugin__linked-card-title {
+  font-weight: 600;
+  color: var(--text-normal);
+  line-height: var(--line-height-tight);
+  margin-bottom: var(--size-4-1);
+  white-space: pre-wrap;
+
+  // Ensure br tags have proper height
+  br {
+    line-height: var(--line-height-normal);
+    display: block;
+    margin: 0.5em 0;
+    content: '';
+  }
+
+  // Style HTML lists within card titles
+  ul,
+  ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+
+    li {
+      margin: 0.2em 0;
+      line-height: var(--line-height-normal);
+    }
+  }
+
+  // Style mixed lists (can contain both bullets and checkboxes)
+  ul.kanban-mixed-list {
+    list-style: none !important;
+    padding-left: 1.5em;
+
+    li {
+      margin: 0.2em 0;
+      list-style: none !important;
+
+      &::before {
+        display: none !important;
+      }
+
+      // Task items with checkboxes
+      &.task-item {
+        display: flex;
+        align-items: flex-start;
+
+        input[type='checkbox'] {
+          margin-top: 0.1em;
+          margin-right: 6px;
+          flex-shrink: 0;
+        }
+      }
+
+      // Bullet items
+      &.bullet-item {
+        position: relative;
+        padding-left: 1em;
+
+        &::before {
+          content: '•';
+          position: absolute;
+          left: 0;
+          color: var(--text-muted);
+          display: block !important;
+        }
+      }
+    }
+  }
+
+  // Style task lists (legacy - for backwards compatibility)
+  ul.kanban-task-list {
+    list-style: none !important;
+    padding-left: 1em;
+
+    li {
+      display: flex;
+      align-items: flex-start;
+      margin: 0.2em 0;
+      list-style: none !important;
+
+      &::before {
+        display: none !important;
+      }
+
+      input[type='checkbox'] {
+        margin-top: 0.1em;
+        flex-shrink: 0;
+      }
+    }
+  }
+
+  // Style regular unordered lists
+  ul:not(.kanban-task-list):not(.kanban-mixed-list) {
+    list-style-type: disc;
+  }
+
+  // Style ordered lists
+  ol {
+    list-style-type: decimal;
+  }
+}
+
+.kanban-plugin__linked-card-description {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  line-height: var(--line-height-normal);
+  white-space: pre-wrap;
+  max-height: 4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kanban-plugin__linked-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-1);
+  margin-bottom: -2px;
+  margin-top: auto;
+  min-height: 20px;
+  height: fit-content;
+  line-height: normal;
+}
+
+.kanban-plugin__linked-card-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-ui-smaller);
+  background-color: var(--tag-background, hsla(var(--interactive-accent-hsl), 0.1));
+  color: var(--tag-color, var(--text-accent));
+  padding: 2px 6px;
+  border-radius: var(--radius-s);
+  white-space: nowrap;
+}
+
+.kanban-plugin__linked-card-metadata {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: auto;
+  margin-bottom: -6px;
+  padding-top: calc(var(--size-4-1) + 2px);
+  min-height: 24px;
+  height: fit-content;
+}
+
+.kanban-plugin__linked-card-metadata-left {
+  display: flex;
+  align-items: center;
+}
+
+.kanban-plugin__linked-card-metadata-right {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+}
+
+.kanban-plugin__linked-card-date {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4-1);
+}
+
+.kanban-plugin__linked-card-members {
+  display: flex;
+  align-items: center;
+}
+
+.kanban-plugin__linked-card-member {
+  // Styles are applied inline for dynamic colors
+}
+
+.kanban-plugin__linked-card-priority {
+  // Styles are applied inline for dynamic colors
+}
+
+.kanban-plugin__linked-card-link-icon {
+  position: absolute;
+  top: var(--size-4-2);
+  right: var(--size-4-2);
+  font-size: 12px;
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+
+.kanban-plugin__linked-card-item:hover .kanban-plugin__linked-card-link-icon {
+  opacity: 1;
+}
+
+// Edit mode specific styles
+.kanban-plugin__linked-cards-edit-mode-container,
+.kanban-plugin__linked-cards-global-edit-mode-container {
+  margin: var(--size-4-2) 0;
+
+  .kanban-plugin__linked-cards-container {
+    margin: 0; // Remove margin in edit mode to avoid double spacing
+  }
+}
+
+.kanban-plugin__linked-cards-disabled,
+.kanban-plugin__linked-cards-error {
+  padding: var(--size-4-3);
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+}
+
+.kanban-plugin__linked-cards-error {
+  color: var(--text-error);
+}
+
+// Edit mode improvements
+// Hide the "kanban" code block flair when our widget is present
+.HyperMD-codeblock:has(.kanban-plugin__linked-cards-global-edit-mode-container) .code-block-flair {
+  display: none !important;
+}
+
+// Alternative selector for browsers that don't support :has()
+.HyperMD-codeblock .code-block-flair[aria-label='Copy']:contains('kanban') {
+  display: none !important;
+}
+
+// Adjust heights to match the content
+.HyperMD-codeblock:has(.kanban-plugin__linked-cards-global-edit-mode-container) {
+  height: auto !important;
+  min-height: auto !important;
+  max-height: none !important;
+  line-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  position: relative !important;
+  overflow: visible !important;
+
+  // Hide/minimize CodeMirror elements that add extra height
+  .cm-widgetBuffer {
+    display: none !important;
+  }
+
+  .code-block-flair {
+    display: none !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  // Hide any empty spans or br elements
+  span:empty {
+    display: none !important;
+    height: 0 !important;
+    line-height: 0 !important;
+  }
+
+  br {
+    display: none !important;
+    height: 0 !important;
+    line-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  // Override br hiding specifically for linked card content
+  .kanban-plugin__linked-card-title br {
+    display: block !important;
+    height: auto !important;
+    line-height: var(--line-height-normal) !important;
+    margin: 0.5em 0 !important;
+    padding: 0 !important;
+  }
+
+  // Force the container to be exactly the height of its content
+  &::before,
+  &::after {
+    display: none !important;
+    height: 0 !important;
+    line-height: 0 !important;
+  }
+
+  // Remove any fixed dimensions that might be interfering
+  & > * {
+    height: auto !important;
+    min-height: auto !important;
+  }
+
+  // Make sure only our container takes up space
+  & > .kanban-plugin__linked-cards-global-edit-mode-container {
+    display: block !important;
+  }
+
+  // Force the outer container to exactly match the inner content height
+  &:has(.kanban-plugin__linked-cards-global-edit-mode-container) {
+    height: fit-content !important;
+    min-height: fit-content !important;
+    max-height: fit-content !important;
+  }
+
+  // Completely hide the code block when it contains a hidden marker
+  &:has(.kanban-plugin__linked-cards-hidden-marker) {
+    display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    line-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+}
+
+// Hide the middle and closing lines of kanban code blocks using direct adjacency
+// Hide the middle content line (directly after the kanban begin line)
+.HyperMD-codeblock-begin:has(.kanban-plugin__linked-cards-global-edit-mode-container)
+  + .HyperMD-codeblock-bg:not(.HyperMD-codeblock-begin):not(.HyperMD-codeblock-end) {
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  line-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+
+  .cm-widgetBuffer {
+    display: none !important;
+  }
+
+  span {
+    display: none !important;
+  }
+}
+
+// Hide the closing line when it comes directly after the kanban begin line (no middle line)
+.HyperMD-codeblock-begin:has(.kanban-plugin__linked-cards-global-edit-mode-container)
+  + .HyperMD-codeblock-end.HyperMD-codeblock-bg {
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  line-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+
+  .cm-widgetBuffer {
+    display: none !important;
+  }
+
+  span {
+    display: none !important;
+  }
+}
+
+// Hide the closing line when it comes after the middle line (begin + middle + end)
+.HyperMD-codeblock-begin:has(.kanban-plugin__linked-cards-global-edit-mode-container)
+  + .HyperMD-codeblock-bg:not(.HyperMD-codeblock-begin):not(.HyperMD-codeblock-end)
+  + .HyperMD-codeblock-end.HyperMD-codeblock-bg {
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  line-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+
+  .cm-widgetBuffer {
+    display: none !important;
+  }
+
+  span {
+    display: none !important;
+  }
+}
+
+// Hide all kanban code block lines when hidden marker is present
+.HyperMD-codeblock-bg:has(.kanban-plugin__linked-cards-hidden-marker),
+.HyperMD-codeblock-end:has(.kanban-plugin__linked-cards-hidden-marker) {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  line-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+// Also hide the closing code block line when the previous sibling contains hidden marker
+.HyperMD-codeblock-end:has(~ * .kanban-plugin__linked-cards-hidden-marker) {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  line-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.kanban-plugin__linked-cards-global-edit-mode-container {
+  height: auto !important;
+  min-height: auto !important;
+  max-height: none !important;
+  margin: 0 !important; // Remove the margin that's adding extra height
+  padding: 0 !important;
+  display: block !important;
+  position: relative !important;
+  top: 0 !important;
+  left: 0 !important;
+
+  // Pull up to eliminate any top spacing
+  margin-top: -9px !important;
+
+  // Hide the container completely when it's empty (React component returns null)
+  &:empty {
+    display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  // Also hide the br element that follows an empty container
+  &:empty + br {
+    display: none !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .kanban-plugin__linked-cards-container {
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 12px !important;
+  }
+}
+
 .kanban-plugin__item-metadata-date-relative::first-letter {
   text-transform: uppercase;
 }

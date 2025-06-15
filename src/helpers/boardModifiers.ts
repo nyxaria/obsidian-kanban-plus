@@ -253,11 +253,23 @@ export function getBoardModifiers(view: KanbanView, stateManager: StateManager):
     duplicateEntity: (path: Path) => {
       stateManager.setState((boardData) => {
         const entity = getEntityFromPath(boardData, path);
-        const entityWithNewID = update(entity, {
+        let entityWithNewID = update(entity, {
           id: {
             $set: generateInstanceId(),
           },
         });
+
+        // If duplicating an item (card), also generate a new blockId
+        if (entity.type === DataTypes.Item) {
+          const newBlockId = generateInstanceId(6);
+          entityWithNewID = update(entityWithNewID, {
+            data: {
+              blockId: {
+                $set: newBlockId,
+              },
+            },
+          });
+        }
 
         if (entity.type === DataTypes.Lane) {
           const collapseState = view.getViewState('list-collapse');

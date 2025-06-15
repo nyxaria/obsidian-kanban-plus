@@ -12,6 +12,7 @@ import { KanbanContext } from '../context';
 import { c, noop } from '../helpers';
 import { EditState, isEditCoordinates } from '../types';
 import { datePlugins, stateManagerField } from './dateWidget';
+import { kanbanCodeBlockPlugin, kanbanCodeBlockWidgetState } from './kanbanCodeBlockWidget';
 import { matchDateTrigger, matchTimeTrigger } from './suggest';
 
 interface MarkdownEditorProps {
@@ -136,6 +137,18 @@ export function MarkdownEditor({
 
         extensions.push(stateManagerField.init(() => stateManager));
         extensions.push(datePlugins);
+
+        // Add kanban code block widget support
+        const plugin = (view as any)?.plugin;
+        if (plugin) {
+          extensions.push(
+            kanbanCodeBlockWidgetState.init(() => ({
+              plugin: plugin,
+              currentFilePath: view.file?.path || '',
+            }))
+          );
+          extensions.push(kanbanCodeBlockPlugin);
+        }
         extensions.push(
           Prec.highest(
             EditorView.domEventHandlers({

@@ -231,8 +231,9 @@ async function moveCardToDoneLaneInMarkdown(
   try {
     const board = parser.mdToBoard(markdownContent);
     console.log(
-      '[WorkspaceView] moveCardToDoneLaneInMarkdown: Parsed markdown to board object:',
-      JSON.stringify(board).substring(0, 500) + '...'
+      '[WorkspaceView] moveCardToDoneLaneInMarkdown: Parsed markdown to board object with',
+      board.children?.length || 0,
+      'lanes'
     );
 
     // Find the card to move
@@ -290,8 +291,7 @@ async function moveCardToDoneLaneInMarkdown(
       boardForUpdate = update(board, { children: { $push: [newLane] } });
       doneLaneIndex = boardForUpdate.children.length - 1;
       console.log(
-        `[WorkspaceView] moveCardToDoneLaneInMarkdown: "Done" lane created at index ${doneLaneIndex}. New board structure (first 500 chars):`,
-        JSON.stringify(boardForUpdate).substring(0, 500) + '...'
+        `[WorkspaceView] moveCardToDoneLaneInMarkdown: "Done" lane created at index ${doneLaneIndex}. Board now has ${boardForUpdate.children?.length || 0} lanes`
       );
     }
 
