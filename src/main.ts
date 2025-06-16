@@ -2493,26 +2493,39 @@ export default class KanbanPlugin extends Plugin {
               }
             }
 
-            // Smart selection change detection - only rebuild if cursor moves between inside/outside kanban blocks
+            // Smart selection change detection - rebuild if cursor moves between inside/outside kanban blocks OR selection state changes
             if (update.selectionSet && !update.docChanged) {
               const oldSelection = update.startState.selection.main;
               const newSelection = update.state.selection.main;
 
-              // Only check if cursor head position actually changed
-              if (oldSelection.head !== newSelection.head) {
+              // Check if cursor head position changed OR selection range changed
+              const cursorChanged = oldSelection.head !== newSelection.head;
+              const selectionChanged =
+                oldSelection.from !== newSelection.from || oldSelection.to !== newSelection.to;
+
+              if (cursorChanged || selectionChanged) {
                 console.log(
-                  '[Kanban] Cursor moved from',
-                  oldSelection.head,
-                  'to',
-                  newSelection.head
+                  '[Kanban] Selection changed - cursor:',
+                  cursorChanged,
+                  'selection:',
+                  selectionChanged
                 );
 
-                // Check if the cursor state changed for any kanban blocks
+                // Check if the cursor or selection state changed for any kanban blocks
                 const doc = update.view.state.doc;
                 const cursorPos = newSelection.head;
                 const editorHasFocus = update.view.hasFocus;
 
-                // Find all kanban blocks and check if cursor state changed for any of them
+                // Calculate old and new selection ranges
+                const oldSelectionFrom = Math.min(oldSelection.from, oldSelection.to);
+                const oldSelectionTo = Math.max(oldSelection.from, oldSelection.to);
+                const oldHasSelection = oldSelectionFrom !== oldSelectionTo;
+
+                const newSelectionFrom = Math.min(newSelection.from, newSelection.to);
+                const newSelectionTo = Math.max(newSelection.from, newSelection.to);
+                const newHasSelection = newSelectionFrom !== newSelectionTo;
+
+                // Find all kanban blocks and check if cursor or selection state changed for any of them
                 for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
                   const line = doc.line(lineNum);
                   if (line.text.trim() === '```kanban') {
@@ -2533,37 +2546,54 @@ export default class KanbanPlugin extends Plugin {
                       const blockEnd = endLine.to;
                       const blockId = `${blockStart}-${blockEnd}`;
 
+                      // Check cursor state
                       const cursorInBlock =
                         editorHasFocus && cursorPos >= blockStart && cursorPos <= blockEnd;
+
+                      // Check selection overlap state
+                      const oldSelectionOverlapsBlock =
+                        oldHasSelection &&
+                        ((oldSelectionFrom <= blockStart && oldSelectionTo >= blockEnd) ||
+                          (oldSelectionFrom >= blockStart && oldSelectionFrom < blockEnd) ||
+                          (oldSelectionTo > blockStart && oldSelectionTo <= blockEnd) ||
+                          (blockStart >= oldSelectionFrom && blockEnd <= oldSelectionTo));
+
+                      const newSelectionOverlapsBlock =
+                        newHasSelection &&
+                        ((newSelectionFrom <= blockStart && newSelectionTo >= blockEnd) ||
+                          (newSelectionFrom >= blockStart && newSelectionFrom < blockEnd) ||
+                          (newSelectionTo > blockStart && newSelectionTo <= blockEnd) ||
+                          (blockStart >= newSelectionFrom && blockEnd <= newSelectionTo));
+
+                      // Determine if the block should be hidden (cursor in block OR selection overlaps)
+                      const oldBlockHidden = cursorInBlock || oldSelectionOverlapsBlock;
+                      const newBlockHidden = cursorInBlock || newSelectionOverlapsBlock;
+
                       const lastState = pluginInstance.lastCursorInBlockState.get(blockId);
 
                       console.log(
                         '[Kanban] Block',
                         blockId,
-                        '- cursor in block:',
-                        cursorInBlock,
+                        '- hidden state:',
+                        newBlockHidden,
                         'last state:',
                         lastState,
-                        'editorHasFocus:',
-                        editorHasFocus,
-                        'cursorPos:',
-                        cursorPos,
-                        'blockStart:',
-                        blockStart,
-                        'blockEnd:',
-                        blockEnd
+                        'cursor in block:',
+                        cursorInBlock,
+                        'selection overlaps:',
+                        newSelectionOverlapsBlock
                       );
 
-                      if (lastState !== cursorInBlock) {
+                      if (lastState !== newBlockHidden) {
                         console.log(
-                          '[Kanban] Rebuild triggered by: cursor state change for block',
+                          '[Kanban] Rebuild triggered by: block visibility state change for block',
                           blockId,
                           'from',
                           lastState,
                           'to',
-                          cursorInBlock
+                          newBlockHidden
                         );
-                        pluginInstance.lastCursorInBlockState.set(blockId, cursorInBlock);
+                        pluginInstance.lastCursorInBlockState.set(blockId, newBlockHidden);
                         shouldRebuild = true;
                         break;
                       }
@@ -2649,7 +2679,22 @@ export default class KanbanPlugin extends Plugin {
           // 2. Editor has focus but cursor is outside this code block
           const cursorInBlock = editorHasFocus && cursorPos >= blockStart && cursorPos <= blockEnd;
 
-          if (!cursorInBlock) {
+          // Check if there's a text selection that overlaps with this code block
+          const selectionFrom = Math.min(selection.from, selection.to);
+          const selectionTo = Math.max(selection.from, selection.to);
+          const hasSelection = selectionFrom !== selectionTo;
+          const selectionOverlapsBlock =
+            hasSelection &&
+            // Selection contains the entire block
+            ((selectionFrom <= blockStart && selectionTo >= blockEnd) ||
+              // Selection starts inside the block
+              (selectionFrom >= blockStart && selectionFrom < blockEnd) ||
+              // Selection ends inside the block
+              (selectionTo > blockStart && selectionTo <= blockEnd) ||
+              // Block is completely inside the selection
+              (blockStart >= selectionFrom && blockEnd <= selectionTo));
+
+          if (!cursorInBlock && !selectionOverlapsBlock) {
             // Cursor is not in this block, show the widget and hide content
 
             // Add a widget decoration after the opening ``` line
@@ -2925,20 +2970,33 @@ export default class KanbanPlugin extends Plugin {
               }
             }
 
-            // Smart selection change detection - only rebuild if cursor moves between inside/outside wikilinks
+            // Smart selection change detection - rebuild if cursor moves between inside/outside wikilinks OR selection state changes
             if (update.selectionSet && !update.docChanged) {
               const oldSelection = update.startState.selection.main;
               const newSelection = update.state.selection.main;
 
-              // Only check if cursor head position actually changed
-              if (oldSelection.head !== newSelection.head) {
+              // Check if cursor head position changed OR selection range changed
+              const cursorChanged = oldSelection.head !== newSelection.head;
+              const selectionChanged =
+                oldSelection.from !== newSelection.from || oldSelection.to !== newSelection.to;
+
+              if (cursorChanged || selectionChanged) {
                 const doc = update.view.state.doc;
                 const text = doc.toString();
                 const newCursorPos = newSelection.head;
                 const oldCursorPos = oldSelection.head;
                 const editorHasFocus = update.view.hasFocus;
 
-                // Find all wikilinks and check if cursor state changed for any of them
+                // Calculate old and new selection ranges
+                const oldSelectionFrom = Math.min(oldSelection.from, oldSelection.to);
+                const oldSelectionTo = Math.max(oldSelection.from, oldSelection.to);
+                const oldHasSelection = oldSelectionFrom !== oldSelectionTo;
+
+                const newSelectionFrom = Math.min(newSelection.from, newSelection.to);
+                const newSelectionTo = Math.max(newSelection.from, newSelection.to);
+                const newHasSelection = newSelectionFrom !== newSelectionTo;
+
+                // Find all wikilinks and check if cursor or selection state changed for any of them
                 const wikilinkRegex = /\[\[([^\]|]+)#\^([a-zA-Z0-9]+)(?:\|([^\]]+))?\]\]/g;
                 let match;
                 let hasStateChanges = false;
@@ -2950,22 +3008,40 @@ export default class KanbanPlugin extends Plugin {
                   const to = match.index + fullMatch.length;
                   const linkId = `${from}-${to}`;
 
+                  // Check cursor state
                   const newCursorInLink =
                     editorHasFocus && newCursorPos >= from && newCursorPos <= to;
                   const oldCursorInLink =
                     editorHasFocus && oldCursorPos >= from && oldCursorPos <= to;
+
+                  // Check selection overlap state
+                  const oldSelectionOverlapsLink =
+                    oldHasSelection &&
+                    ((oldSelectionFrom <= from && oldSelectionTo >= to) ||
+                      (oldSelectionFrom >= from && oldSelectionFrom < to) ||
+                      (oldSelectionTo > from && oldSelectionTo <= to) ||
+                      (from >= oldSelectionFrom && to <= oldSelectionTo));
+
+                  const newSelectionOverlapsLink =
+                    newHasSelection &&
+                    ((newSelectionFrom <= from && newSelectionTo >= to) ||
+                      (newSelectionFrom >= from && newSelectionFrom < to) ||
+                      (newSelectionTo > from && newSelectionTo <= to) ||
+                      (from >= newSelectionFrom && to <= newSelectionTo));
+
+                  // Determine if the link should be hidden (cursor in link OR selection overlaps)
+                  const oldLinkHidden = oldCursorInLink || oldSelectionOverlapsLink;
+                  const newLinkHidden = newCursorInLink || newSelectionOverlapsLink;
+
                   const lastState = pluginInstance.lastCursorInLinkState.get(linkId);
 
-                  // Only rebuild if the cursor actually crossed a link boundary
-                  if (lastState !== undefined && lastState !== newCursorInLink) {
-                    // Double-check: did the cursor actually cross this specific link's boundary?
-                    if (oldCursorInLink !== newCursorInLink) {
-                      pluginInstance.lastCursorInLinkState.set(linkId, newCursorInLink);
-                      hasStateChanges = true;
-                    }
+                  // Only rebuild if the visibility state actually changed
+                  if (lastState !== undefined && lastState !== newLinkHidden) {
+                    pluginInstance.lastCursorInLinkState.set(linkId, newLinkHidden);
+                    hasStateChanges = true;
                   } else if (lastState === undefined) {
                     // Initialize the state without triggering a rebuild
-                    pluginInstance.lastCursorInLinkState.set(linkId, newCursorInLink);
+                    pluginInstance.lastCursorInLinkState.set(linkId, newLinkHidden);
                   }
                 }
 
@@ -3028,8 +3104,23 @@ export default class KanbanPlugin extends Plugin {
       // Check if cursor is within this link (cursor-aware behavior)
       const cursorInLink = editorHasFocus && cursorPos >= from && cursorPos <= to;
 
-      // Only show the card embed if cursor is NOT in this link
-      if (!cursorInLink) {
+      // Check if there's a text selection that overlaps with this link
+      const selectionFrom = Math.min(selection.from, selection.to);
+      const selectionTo = Math.max(selection.from, selection.to);
+      const hasSelection = selectionFrom !== selectionTo;
+      const selectionOverlapsLink =
+        hasSelection &&
+        // Selection contains the entire link
+        ((selectionFrom <= from && selectionTo >= to) ||
+          // Selection starts inside the link
+          (selectionFrom >= from && selectionFrom < to) ||
+          // Selection ends inside the link
+          (selectionTo > from && selectionTo <= to) ||
+          // Link is completely inside the selection
+          (from >= selectionFrom && to <= selectionTo));
+
+      // Only show the card embed if cursor is NOT in this link AND there's no overlapping selection
+      if (!cursorInLink && !selectionOverlapsLink) {
         // Check if the target file is a Kanban board
         const file = this.app.metadataCache.getFirstLinkpathDest(filePath, currentFilePath);
         if (!file || !hasFrontmatterKey(file)) continue;
