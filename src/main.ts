@@ -3133,7 +3133,11 @@ export default class KanbanPlugin extends Plugin {
                 const isCardClick = target.closest('.kanban-plugin__card-embed-item');
                 if (isCardClick) {
                   // Allow the card click but prevent cursor movement
-                  if (event.type === 'click' || event.type === 'mousedown') {
+                  if (
+                    event.type === 'click' ||
+                    event.type === 'mousedown' ||
+                    event.type === 'contextmenu'
+                  ) {
                     event.stopPropagation();
                     event.preventDefault();
                   }
@@ -3147,7 +3151,8 @@ export default class KanbanPlugin extends Plugin {
                   event.type === 'mouseup' ||
                   event.type === 'mouseover' ||
                   event.type === 'mouseout' ||
-                  event.type === 'mousemove'
+                  event.type === 'mousemove' ||
+                  event.type === 'contextmenu'
                 ) {
                   return true;
                 }

@@ -60,21 +60,33 @@ function InteractiveMarkdownRenderer(props: {
           externalText || externalUrl
         )
       );
-    } else if (internalFile) {
-      // Internal link
+    } else if (internalFile && internalFile.trim()) {
+      // Internal link - only process if internalFile is not empty
       const displayText = internalAlias || internalFile;
-      const linkPath = internalFile; // Use only the file path part for navigation
+      const linkPath = internalFile.trim(); // Use only the file path part for navigation
 
       // Resolve the file path for proper hover preview
-      const resolvedFile = plugin.app.metadataCache.getFirstLinkpathDest(internalFile, sourcePath);
-      const resolvedPath = resolvedFile ? resolvedFile.path : internalFile;
+      const resolvedFile = plugin.app.metadataCache.getFirstLinkpathDest(linkPath, sourcePath);
+      const resolvedPath = resolvedFile ? resolvedFile.path : null;
+
+      // Use the resolved path if available, otherwise use the original link path
+      const hrefValue = resolvedPath || linkPath;
+
+      // Debug logging
+      console.log('Link processing:', {
+        linkPath,
+        resolvedFile: resolvedFile?.path,
+        hrefValue,
+        sourcePath,
+      });
 
       parts.push(
         createElement(
           'a',
           {
-            href: resolvedPath, // Use resolved path for hover preview
-            'data-href': resolvedPath, // Obsidian also uses data-href
+            href: hrefValue,
+            'data-href': hrefValue, // Obsidian uses data-href for hover previews
+            'data-link-text': linkPath, // Original link text for Obsidian's link resolution
             class: 'internal-link',
             'data-link-path': linkPath, // Store only the path part for navigation
             'aria-label': displayText, // For accessibility
@@ -105,9 +117,9 @@ function InteractiveMarkdownRenderer(props: {
           event.preventDefault();
           event.stopPropagation();
           const linkPath = target.getAttribute('data-link-path');
-          if (linkPath) {
+          if (linkPath && linkPath.trim()) {
             plugin.app.workspace.openLinkText(
-              linkPath,
+              linkPath.trim(),
               sourcePath,
               event.ctrlKey || event.metaKey || event.button === 1 // Open in new tab/split on Ctrl/Cmd click or middle mouse click
             );
@@ -918,9 +930,9 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
       if (foundAndReplaced) {
         fileContent = lines.join('\n');
         await plugin.app.vault.modify(targetFile, fileContent);
-        new Notice(
-          `"${card.title}" marked as ${newCheckedStatus ? 'Done' : 'Undone'} in ${targetFile.basename}.`
-        );
+        // new Notice(
+        //   `"${card.title}" marked as ${newCheckedStatus ? 'Done' : 'Undone'} in ${targetFile.basename}.`
+        // );
 
         // If card was marked as Done and auto-move setting is enabled, move it to Done lane
         if (newCheckedStatus && plugin.settings['auto-move-done-to-lane']) {
@@ -928,7 +940,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
             const updatedMarkdown = await moveCardToDoneLane(plugin, fileContent, targetFile, card);
             if (updatedMarkdown !== fileContent) {
               await plugin.app.vault.modify(targetFile, updatedMarkdown);
-              new Notice(`Moved "${card.title}" to Done lane in ${targetFile.basename}.`);
+              // new Notice(`Moved "${card.title}" to Done lane in ${targetFile.basename}.`);
             }
           } catch (e) {
             console.error('Error moving card to Done lane:', e);
@@ -1218,8 +1230,14 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
                   <div className="kanban-plugin__linked-card-metadata-left">
                     {card.date && (
                       <span className="kanban-plugin__linked-card-date">
-                        📅{' '}
                         <span
+                          className="kanban-plugin__linked-card-date-emoji"
+                          style={{ marginTop: '-2px', marginLeft: '1px' }}
+                        >
+                          📅
+                        </span>
+                        <span
+                          className="kanban-plugin__linked-card-date-text"
                           style={(() => {
                             // Try to parse the date using the configured date format first, then fallback to common formats
                             const configuredDateFormat =
@@ -1280,6 +1298,8 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
                               backgroundColor: dateColor?.backgroundColor || fallbackBackground,
                               padding: dateColor?.backgroundColor ? '2px 4px' : '0',
                               borderRadius: dateColor?.backgroundColor ? '3px' : '0',
+                              marginLeft: '-2px',
+                              fontSize: '1.1em',
                             };
                           })()}
                         >

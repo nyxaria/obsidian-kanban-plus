@@ -38,7 +38,10 @@ function InteractiveMarkdownRenderer(props: {
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (match, linkPath, displayText) => {
       const text = displayText || linkPath;
-      return `<a href="#" data-link-path="${linkPath}" class="internal-link">${text}</a>`;
+      // Resolve the file path for proper hover preview
+      const resolvedFile = plugin.app.metadataCache.getFirstLinkpathDest(linkPath, sourcePath);
+      const hrefValue = resolvedFile ? resolvedFile.path : linkPath;
+      return `<a href="${hrefValue}" data-href="${hrefValue}" data-link-path="${linkPath}" class="internal-link">${text}</a>`;
     }
   );
 
@@ -493,13 +496,57 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
 
   if (loading) {
     return (
-      <div className="kanban-plugin__item kanban-plugin__card-embed-loading">
-        <div className="kanban-plugin__item-content-wrapper">
-          <div className="kanban-plugin__item-title-wrapper">
-            <div className="kanban-plugin__item-title">
-              <div className="kanban-plugin__markdown-preview-wrapper">
-                <div className="kanban-plugin__markdown-preview-view">Loading card...</div>
-              </div>
+      <div
+        className="kanban-plugin__card-embed-item"
+        style={{ minHeight: '200px', minWidth: '200px' }}
+      >
+        <div className="kanban-plugin__card-embed-header-info">
+          <span style={{ opacity: 0.3 }}>Board Name → Lane Name</span>
+        </div>
+
+        <div className="kanban-plugin__card-embed-title-content">
+          <div style={{ opacity: 0.3, marginBottom: '8px' }}>Loading card title...</div>
+          <div style={{ opacity: 0.2, fontSize: '0.9em' }}>Additional content line</div>
+        </div>
+
+        {/* Placeholder for tags */}
+        <div className="kanban-plugin__linked-card-tags" style={{ marginTop: 'var(--size-4-2)' }}>
+          <span className="kanban-plugin__linked-card-tag" style={{ opacity: 0.2 }}>
+            tag1
+          </span>
+          <span className="kanban-plugin__linked-card-tag" style={{ opacity: 0.2 }}>
+            tag2
+          </span>
+        </div>
+
+        {/* Placeholder for metadata */}
+        <div className="kanban-plugin__linked-card-metadata" style={{ marginTop: '4px' }}>
+          <div className="kanban-plugin__linked-card-metadata-left">
+            <span style={{ opacity: 0.2, fontSize: '1.1em' }}>📅 2024-01-01</span>
+          </div>
+          <div className="kanban-plugin__linked-card-metadata-right">
+            <div
+              style={{
+                opacity: 0.2,
+                width: '20px',
+                height: '20px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--background-modifier-hover)',
+                display: 'inline-block',
+              }}
+            ></div>
+            <div
+              style={{
+                opacity: 0.2,
+                padding: '2px 6px',
+                borderRadius: '4px',
+                backgroundColor: 'var(--background-modifier-hover)',
+                display: 'inline-block',
+                marginLeft: '4px',
+                fontSize: 'var(--font-ui-smaller)',
+              }}
+            >
+              High
             </div>
           </div>
         </div>
@@ -755,6 +802,7 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
                         borderRadius: dateColor?.backgroundColor ? '3px' : '0',
                         marginTop: '-4px',
                         marginLeft: '-4px',
+                        fontSize: '1.1em',
                       };
                     })()}
                   >
@@ -792,7 +840,7 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
                           justifyContent: 'center',
                           marginLeft: '4px',
                           fontSize: '12px',
-                          cursor: 'pointer',
+                          // cursor: 'pointer',
                           userSelect: 'none',
                         }}
                       >
