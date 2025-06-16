@@ -2264,6 +2264,8 @@ export default class KanbanPlugin extends Plugin {
         // Make the container inline-block so multiple cards can appear side by side
         embedContainer.style.display = 'inline-block';
         embedContainer.style.verticalAlign = 'top';
+        // Add small horizontal margin to ensure spacing when adjacent
+        embedContainer.style.marginRight = '4px';
 
         // Render the SimpleKanbanCardEmbed component
         render(
@@ -3101,6 +3103,15 @@ export default class KanbanPlugin extends Plugin {
       const from = match.index;
       const to = match.index + fullMatch.length;
 
+      console.log('[KanbanCardEmbed] Found link:', {
+        fullMatch,
+        filePath,
+        blockId,
+        from,
+        to,
+        surroundingText: text.substring(Math.max(0, from - 10), Math.min(text.length, to + 10)),
+      });
+
       // Check if cursor is within this link (cursor-aware behavior)
       const cursorInLink = editorHasFocus && cursorPos >= from && cursorPos <= to;
 
@@ -3123,7 +3134,18 @@ export default class KanbanPlugin extends Plugin {
       if (!cursorInLink && !selectionOverlapsLink) {
         // Check if the target file is a Kanban board
         const file = this.app.metadataCache.getFirstLinkpathDest(filePath, currentFilePath);
-        if (!file || !hasFrontmatterKey(file)) continue;
+        if (!file || !hasFrontmatterKey(file)) {
+          console.log('[KanbanCardEmbed] Skipping - not a kanban board:', filePath);
+          continue;
+        }
+
+        console.log('[KanbanCardEmbed] Creating decoration for:', {
+          fullMatch,
+          filePath: file.path,
+          blockId,
+          from,
+          to,
+        });
 
         // Create a widget decoration to replace the link
         const pluginInstance = this;
