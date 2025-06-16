@@ -1051,6 +1051,12 @@ function KanbanWorkspaceViewComponent(props: {
             if (updatedMarkdown !== fileContent) {
               await props.plugin.app.vault.modify(targetFile, updatedMarkdown);
               new Notice(`Moved "${card.title}" to Done lane in ${targetFile.basename}.`);
+
+              // Wait for StateManager and cache to update before refreshing workspace view
+              console.log(
+                '[WorkspaceView] handleToggleCardDoneStatus: Waiting for StateManager and cache to process file changes...'
+              );
+              await new Promise((resolve) => setTimeout(resolve, 200)); // Delay for StateManager and cache processing
             }
           }
 
