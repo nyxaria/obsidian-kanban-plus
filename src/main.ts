@@ -22,6 +22,7 @@ import {
   KANBAN_WORKSPACE_VIEW_TYPE,
   KanbanWorkspaceView,
 } from './KanbanWorkspaceView';
+import { MemberView, memberIcon, memberViewType } from './MemberView';
 import {
   DEFAULT_SETTINGS,
   KanbanSettings,
@@ -527,6 +528,7 @@ export default class KanbanPlugin extends Plugin {
 
     this.registerView(kanbanViewType, (leaf) => new KanbanView(leaf, this));
     this.registerView(KANBAN_WORKSPACE_VIEW_TYPE, (leaf) => new KanbanWorkspaceView(leaf, this));
+    this.registerView(memberViewType, (leaf) => new MemberView(leaf, this));
     this.registerView(TIMELINE_VIEW_TYPE, (leaf) => new TimelineView(leaf, this));
     this.registerMonkeyPatches();
     this.registerCommands();
@@ -594,7 +596,7 @@ export default class KanbanPlugin extends Plugin {
       this.newKanban();
     });
 
-    this.addRibbonIcon(KANBAN_WORKSPACE_ICON, 'Open Kanban Workspace View', () => {
+    this.addRibbonIcon(KANBAN_WORKSPACE_ICON, 'Open Table View', () => {
       this.app.workspace.getLeaf(true).setViewState({
         type: KANBAN_WORKSPACE_VIEW_TYPE,
         active: true,
@@ -604,6 +606,13 @@ export default class KanbanPlugin extends Plugin {
     this.addRibbonIcon(TIMELINE_ICON, 'Open Timeline View', () => {
       this.app.workspace.getLeaf(true).setViewState({
         type: TIMELINE_VIEW_TYPE,
+        active: true,
+      });
+    });
+
+    this.addRibbonIcon(memberIcon, 'Open Member Board View', () => {
+      this.app.workspace.getLeaf(true).setViewState({
+        type: memberViewType,
         active: true,
       });
     });
@@ -1321,6 +1330,17 @@ export default class KanbanPlugin extends Plugin {
       callback: () => {
         this.app.workspace.getLeaf(true).setViewState({
           type: TIMELINE_VIEW_TYPE,
+          active: true,
+        });
+      },
+    });
+
+    this.addCommand({
+      id: 'open-member-board-view',
+      name: 'Open member board view',
+      callback: () => {
+        this.app.workspace.getLeaf(true).setViewState({
+          type: memberViewType,
           active: true,
         });
       },
