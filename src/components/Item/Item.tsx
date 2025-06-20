@@ -25,7 +25,7 @@ import {
   isEditCoordinates,
   isEditingActive,
 } from '../types';
-import { DateAndTime, RelativeDate } from './DateAndTime';
+import { DateAndTime } from './DateAndTime';
 import { ItemCheckbox } from './ItemCheckbox';
 import { AssignedMembers, ItemContent, Tags } from './ItemContent';
 import { useItemMenu } from './ItemMenu';
@@ -298,7 +298,6 @@ const ItemInner = memo(function ItemInner({
                 marginBottom: '7px',
               }}
             />
-            <RelativeDate item={item} stateManager={stateManager} />
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end' }}>
             <AssignedMembers

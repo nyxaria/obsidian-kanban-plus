@@ -84,6 +84,7 @@ export class MemberView extends ItemView implements HoverParent {
   private memberCards: MemberCard[] = [];
   private isLoading: boolean = false;
   private error: string | null = null;
+  private scanRootPath: string = ''; // Added scan root path state
 
   // Debug flag - set to false for production to reduce console noise
   private debugDragDrop: boolean = false;
@@ -144,6 +145,7 @@ export class MemberView extends ItemView implements HoverParent {
       'enable-kanban-code-blocks': true,
       'use-kanban-board-background-colors': true,
       'member-view-lane-width': DEFAULT_SETTINGS['member-view-lane-width'],
+      'show-checkboxes': false, // Hide checkboxes in member view
     };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));
@@ -204,6 +206,17 @@ export class MemberView extends ItemView implements HoverParent {
     if (teamMembers.length > 0 && !this.selectedMember) {
       this.selectedMember = teamMembers[0];
     }
+
+    // Register for active leaf changes to refresh when tabbing in/out
+    this.registerEvent(
+      this.app.workspace.on('active-leaf-change', (leaf) => {
+        if (leaf === this.leaf && this.selectedMember) {
+          // This view just became active - refresh the cards
+          console.log('[MemberView] View became active, refreshing cards');
+          this.scanMemberCards();
+        }
+      })
+    );
 
     // Wait for the next frame to ensure DOM is ready, then schedule render
     requestAnimationFrame(() => {
@@ -294,9 +307,13 @@ export class MemberView extends ItemView implements HoverParent {
   async setState(state: any, result: ViewStateResult) {
     await super.setState(state, result);
 
-    // Handle member selection from state
+    // Handle member selection and scan root path from state
     if (state?.selectedMember) {
       this.selectedMember = state.selectedMember;
+    }
+
+    if (state?.scanRootPath !== undefined) {
+      this.scanRootPath = state.scanRootPath;
     }
 
     // Only render if contentEl is ready
@@ -319,6 +336,7 @@ export class MemberView extends ItemView implements HoverParent {
   getState() {
     const state = super.getState();
     state.selectedMember = this.selectedMember;
+    state.scanRootPath = this.scanRootPath;
     return state;
   }
 
@@ -420,7 +438,16 @@ export class MemberView extends ItemView implements HoverParent {
         return;
       }
 
-      const allMdFiles = this.app.vault.getMarkdownFiles();
+      // Filter files based on scan root path
+      let allMdFiles = this.app.vault.getMarkdownFiles();
+
+      if (this.scanRootPath && this.scanRootPath.trim() !== '') {
+        // Filter files to only include those in the specified directory
+        allMdFiles = allMdFiles.filter(
+          (file) =>
+            file.path.startsWith(this.scanRootPath + '/') || file.parent?.path === this.scanRootPath
+        );
+      }
 
       for (const mdFile of allMdFiles) {
         if (!hasFrontmatterKeyRaw(await this.app.vault.cachedRead(mdFile))) {
@@ -701,8 +728,11 @@ export class MemberView extends ItemView implements HoverParent {
         }
       });
 
-      // Check if has "doing" tag
-      const hasDoing = tags.some((tag) => tag.toLowerCase() === 'doing');
+      // Check if has "doing" tag (handle both #doing and doing)
+      const hasDoing = tags.some((tag) => {
+        const cleanTag = tag.replace(/^#/, '').toLowerCase();
+        return cleanTag === 'doing';
+      });
 
       // Process titleRaw like KanbanView does
       const processedTitleRaw = removeBlockId(dedentNewLines(replaceBrs(titleRaw)));
@@ -788,6 +818,8 @@ export class MemberView extends ItemView implements HoverParent {
         tags: result.tags,
         dateStr: result.dateStr,
         timeStr: result.timeStr,
+        checked: result.checked,
+        hasDoing: result.hasDoing,
         willBeIncluded: assignedMembers.includes(this.selectedMember),
       });
 
@@ -890,6 +922,9 @@ export class MemberView extends ItemView implements HoverParent {
         timeStr: item.data.metadata.timeStr,
         hasDate: !!item.data.metadata.date,
         hasTime: !!item.data.metadata.time,
+        checked: card.checked,
+        hasDoing: card.hasDoing,
+        determinedLane: card.checked ? 'done' : card.hasDoing ? 'doing' : 'backlog',
       });
 
       if (card.checked) {
@@ -1052,9 +1087,17 @@ export class MemberView extends ItemView implements HoverParent {
             memberCards: this.memberCards,
             isLoading: this.isLoading,
             error: this.error,
+            scanRootPath: this.scanRootPath,
+            availableDirectories: this.getAvailableKanbanDirectories(),
             onMemberChange: (member: string) => {
               this.selectedMember = member;
               this.scanMemberCards();
+            },
+            onScanRootChange: (path: string) => {
+              this.scanRootPath = path;
+              if (this.selectedMember) {
+                this.scanMemberCards();
+              }
             },
             onRefresh: () => this.scanMemberCards(),
             reactState: this._reactState,
@@ -1088,13 +1131,25 @@ export class MemberView extends ItemView implements HoverParent {
 
   async handleDrop(dragEntity: any, dropEntity: any) {
     // Handle drag and drop for member board
-    console.log('[MemberView] handleDrop:', dragEntity, dropEntity);
+    console.log(
+      '[MemberView] handleDrop: CALLED - dragEntity:',
+      dragEntity,
+      'dropEntity:',
+      dropEntity
+    );
 
     const dragData = dragEntity.getData();
     const dropData = dropEntity.getData();
 
     console.log('[MemberView] handleDrop: Full dragData:', dragData);
     console.log('[MemberView] handleDrop: Full dropData:', dropData);
+    console.log('[MemberView] handleDrop: dropData.type:', dropData?.type);
+    console.log('[MemberView] handleDrop: dropData.id:', dropData?.id);
+    console.log('[MemberView] handleDrop: dropData.memberBoardLane:', dropData?.memberBoardLane);
+    console.log(
+      '[MemberView] handleDrop: dropData.memberBoardLaneId:',
+      dropData?.memberBoardLaneId
+    );
     console.log('[MemberView] handleDrop: dropEntity type and methods:', {
       entityType: typeof dropEntity,
       hasGetPath: typeof dropEntity.getPath === 'function',
@@ -1112,39 +1167,116 @@ export class MemberView extends ItemView implements HoverParent {
       console.log('[MemberView] handleDrop: Full dropData:', dropData);
 
       let targetLaneId;
+
+      // CRITICAL FIX: Force member board lane mapping regardless of source
+      // The member board always has exactly 3 lanes in this order: [backlog, doing, done]
+      const MEMBER_BOARD_LANES = ['backlog', 'doing', 'done'];
+
       if (dropData.type === 'lane') {
-        targetLaneId = dropData.id;
-        console.log('[MemberView] handleDrop: Drop target is LANE with ID:', targetLaneId);
+        // Direct lane drop - use the lane ID if it's a member board lane
+        if (MEMBER_BOARD_LANES.includes(dropData.id)) {
+          targetLaneId = dropData.id;
+          console.log(
+            '[MemberView] handleDrop: Drop target is MEMBER BOARD LANE with ID:',
+            targetLaneId
+          );
+        } else {
+          console.error(
+            '[MemberView] handleDrop: Drop target is not a member board lane:',
+            dropData.id
+          );
+          return;
+        }
       } else if (dropData.type === 'placeholder') {
         // For placeholder, we need to find the parent lane ID from the entity path
         const path = dropEntity.getPath();
         console.log('[MemberView] handleDrop: Drop entity path:', path);
 
         if (path && path.length > 0) {
-          // The first element in the path should be the lane index
+          // CRITICAL: The path should reference the member board structure
           const laneIndex = path[0];
-          const lanes = ['backlog', 'doing', 'done'];
-          targetLaneId = lanes[laneIndex];
-          console.log(
-            '[MemberView] handleDrop: Resolved lane from path - index:',
-            laneIndex,
-            'lane:',
-            targetLaneId,
-            'available lanes:',
-            lanes,
-            'full path:',
-            path
-          );
+
+          // Validate that the lane index is within member board bounds
+          if (laneIndex >= 0 && laneIndex < MEMBER_BOARD_LANES.length) {
+            targetLaneId = MEMBER_BOARD_LANES[laneIndex];
+            console.log(
+              '[MemberView] handleDrop: Resolved MEMBER BOARD lane from path - index:',
+              laneIndex,
+              'lane:',
+              targetLaneId,
+              'MEMBER_BOARD_LANES:',
+              MEMBER_BOARD_LANES,
+              'full path:',
+              path
+            );
+          } else {
+            console.error('[MemberView] handleDrop: Lane index out of member board bounds:', {
+              laneIndex,
+              memberBoardLaneCount: MEMBER_BOARD_LANES.length,
+              path,
+            });
+            return;
+          }
         } else {
           console.error('[MemberView] handleDrop: Invalid or empty path from dropEntity:', path);
+          return;
         }
       } else if (dropData.type === 'item') {
-        // Dropping onto an existing item - use the item's parent lane
-        targetLaneId = dropData.parentLaneId;
-        console.log(
-          '[MemberView] handleDrop: Drop target is ITEM, using parentLaneId:',
-          targetLaneId
-        );
+        // Dropping onto an existing item - determine lane from entity path or item data
+        const path = dropEntity.getPath();
+        console.log('[MemberView] handleDrop: Drop target is ITEM, entity path:', path);
+
+        // Try to get lane from entity path first (most reliable)
+        if (path && path.length > 0) {
+          const laneIndex = path[0];
+
+          // Validate that the lane index is within member board bounds
+          if (laneIndex >= 0 && laneIndex < MEMBER_BOARD_LANES.length) {
+            targetLaneId = MEMBER_BOARD_LANES[laneIndex];
+            console.log(
+              '[MemberView] handleDrop: Resolved MEMBER BOARD lane from item path - index:',
+              laneIndex,
+              'lane:',
+              targetLaneId,
+              'MEMBER_BOARD_LANES:',
+              MEMBER_BOARD_LANES
+            );
+          } else {
+            console.error('[MemberView] handleDrop: Item lane index out of member board bounds:', {
+              laneIndex,
+              memberBoardLaneCount: MEMBER_BOARD_LANES.length,
+              path,
+            });
+            return;
+          }
+        } else if (dropData.parentLaneId && MEMBER_BOARD_LANES.includes(dropData.parentLaneId)) {
+          // Fallback to parentLaneId from item data (only if it's a member board lane)
+          targetLaneId = dropData.parentLaneId;
+          console.log(
+            '[MemberView] handleDrop: Using member board parentLaneId from item data:',
+            targetLaneId
+          );
+        } else {
+          // Last resort: try to determine from item properties
+          if (dropData.checked) {
+            targetLaneId = 'done';
+          } else if (
+            dropData.metadata?.tags?.includes('doing') ||
+            dropData.metadata?.tags?.includes('#doing')
+          ) {
+            targetLaneId = 'doing';
+          } else {
+            targetLaneId = 'backlog';
+          }
+          console.log(
+            '[MemberView] handleDrop: Determined member board lane from item properties:',
+            targetLaneId,
+            'checked:',
+            dropData.checked,
+            'tags:',
+            dropData.metadata?.tags
+          );
+        }
       } else {
         console.error(
           '[MemberView] handleDrop: Unhandled drop type:',
@@ -1152,18 +1284,26 @@ export class MemberView extends ItemView implements HoverParent {
           'dropData:',
           dropData
         );
+        return;
       }
 
-      // Validate that we have a target lane
-      if (!targetLaneId) {
+      // Validate that we have a valid member board target lane
+      if (!targetLaneId || !MEMBER_BOARD_LANES.includes(targetLaneId)) {
         console.error(
-          '[MemberView] handleDrop: Could not determine target lane. dropData:',
+          '[MemberView] handleDrop: Invalid or non-member-board target lane:',
+          targetLaneId,
+          'Valid member board lanes:',
+          MEMBER_BOARD_LANES,
+          'dropData:',
           dropData
         );
         return;
       }
 
-      console.log('[MemberView] handleDrop: Final target lane determined:', targetLaneId);
+      console.log(
+        '[MemberView] handleDrop: Final MEMBER BOARD target lane determined:',
+        targetLaneId
+      );
 
       // Find the member card that was dragged
       const memberCard = this.memberCards.find((card) => card.id === itemId);
@@ -1434,15 +1574,18 @@ export class MemberView extends ItemView implements HoverParent {
         }
 
         // Add "doing" tag if not present
-        if (!updatedCardData.metadata?.tags?.includes('doing')) {
+        if (
+          !updatedCardData.metadata?.tags?.includes('doing') &&
+          !updatedCardData.metadata?.tags?.includes('#doing')
+        ) {
           updatedCardData.metadata = updatedCardData.metadata || {};
           updatedCardData.metadata.tags = updatedCardData.metadata.tags || [];
-          updatedCardData.metadata.tags.push('doing');
+          updatedCardData.metadata.tags.push('#doing');
 
-          // Update titleRaw to include the tag
+          // Update titleRaw to include the tag (preserve formatting)
           if (!updatedCardData.titleRaw.includes('#doing')) {
-            // Insert #doing before any existing block ID
-            const blockIdMatch = updatedCardData.titleRaw.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/);
+            // Insert #doing before any existing block ID, preserving newlines and formatting
+            const blockIdMatch = updatedCardData.titleRaw.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/s);
             if (blockIdMatch) {
               const mainContent = blockIdMatch[1];
               const blockId = blockIdMatch[2] || '';
@@ -1465,14 +1608,20 @@ export class MemberView extends ItemView implements HoverParent {
         }
 
         // Remove "doing" tag if present
-        if (updatedCardData.metadata?.tags?.includes('doing')) {
+        if (
+          updatedCardData.metadata?.tags?.includes('doing') ||
+          updatedCardData.metadata?.tags?.includes('#doing')
+        ) {
           updatedCardData.metadata.tags = updatedCardData.metadata.tags.filter(
-            (tag: string) => tag !== 'doing'
+            (tag: string) => tag !== 'doing' && tag !== '#doing'
           );
 
-          // Update titleRaw to remove the tag
+          // Update titleRaw to remove the tag (preserve formatting)
           updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/\s*#doing\b/g, '');
-          updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/\s+/g, ' ').trim();
+          // Only clean up excessive spaces, but preserve newlines
+          updatedCardData.titleRaw = updatedCardData.titleRaw
+            .replace(/[ \t]+/g, ' ')
+            .replace(/[ \t]+$/gm, '');
         }
         break;
 
@@ -1481,16 +1630,31 @@ export class MemberView extends ItemView implements HoverParent {
         updatedCardData.checked = true;
         updatedCardData.checkChar = 'x';
 
-        if (updatedCardData.metadata?.tags?.includes('doing')) {
+        if (
+          updatedCardData.metadata?.tags?.includes('doing') ||
+          updatedCardData.metadata?.tags?.includes('#doing')
+        ) {
           updatedCardData.metadata.tags = updatedCardData.metadata.tags.filter(
-            (tag: string) => tag !== 'doing'
+            (tag: string) => tag !== 'doing' && tag !== '#doing'
           );
         }
 
-        // Update titleRaw: change checkbox and remove doing tag
+        // Update titleRaw: change checkbox and remove doing tag (preserve formatting)
         updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/^(\s*-\s*)\[[x ]\]/, '$1[x]');
         updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/\s*#doing\b/g, '');
-        updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/\s+/g, ' ').trim();
+        // Only clean up excessive spaces, but preserve newlines
+        updatedCardData.titleRaw = updatedCardData.titleRaw
+          .replace(/[ \t]+/g, ' ')
+          .replace(/[ \t]+$/gm, '');
+
+        // TRIGGER AUTO-MOVE AUTOMATION: If auto-move-done-to-lane is enabled, move to Done lane
+        if (this.plugin.settings['auto-move-done-to-lane']) {
+          console.log(
+            '[MemberView] updateCardViaStateManager: Auto-move-done-to-lane is enabled, will move card to Done lane in source board'
+          );
+          // The StateManager will automatically handle moving the card to the Done lane
+          // when we call setState with the checked=true item
+        }
         break;
 
       default:
@@ -1533,6 +1697,32 @@ export class MemberView extends ItemView implements HoverParent {
     // Use setTimeout to make this non-blocking for immediate UI response
     setTimeout(() => {
       stateManager.setState(updatedBoard, true);
+
+      // If the card was moved to 'done' and auto-move setting is enabled,
+      // trigger the auto-move automation explicitly
+      if (targetLaneId === 'done' && this.plugin.settings['auto-move-done-to-lane']) {
+        console.log(
+          '[MemberView] updateCardViaStateManager: Card moved to done lane with auto-move enabled - triggering automation'
+        );
+
+        // Use updateItem to trigger the handleAutoMoveDoneCard automation
+        // Find the item in the updated board and call updateItem on it
+        const lanes = updatedBoard.children;
+        let itemForAutomation = null;
+
+        // Find the item across all lanes
+        for (const lane of lanes) {
+          const item = lane.children.find((item: any) => item.id === foundCard.id);
+          if (item) {
+            itemForAutomation = item;
+            break;
+          }
+        }
+
+        if (itemForAutomation) {
+          stateManager.updateItem(itemForAutomation.id, { checked: true }, lanes);
+        }
+      }
     }, 0);
   }
 
@@ -1542,19 +1732,19 @@ export class MemberView extends ItemView implements HoverParent {
       case 'doing':
         memberCard.checked = false; // Uncheck if moving from done
         memberCard.hasDoing = true;
-        if (!memberCard.tags.includes('doing')) {
-          memberCard.tags.push('doing');
+        if (!memberCard.tags.includes('doing') && !memberCard.tags.includes('#doing')) {
+          memberCard.tags.push('#doing');
         }
         break;
       case 'backlog':
         memberCard.checked = false; // Uncheck if moving from done
         memberCard.hasDoing = false;
-        memberCard.tags = memberCard.tags.filter((tag) => tag !== 'doing');
+        memberCard.tags = memberCard.tags.filter((tag) => tag !== 'doing' && tag !== '#doing');
         break;
       case 'done':
         memberCard.checked = true;
         memberCard.hasDoing = false;
-        memberCard.tags = memberCard.tags.filter((tag) => tag !== 'doing');
+        memberCard.tags = memberCard.tags.filter((tag) => tag !== 'doing' && tag !== '#doing');
         break;
     }
   }
@@ -1631,8 +1821,8 @@ export class MemberView extends ItemView implements HoverParent {
         // Remove "doing" tag if present in the current line
         if (currentLineHasDoing) {
           updatedLine = updatedLine.replace(/\s*#doing\b/g, '');
-          // Clean up any double spaces
-          updatedLine = updatedLine.replace(/\s+/g, ' ').trim();
+          // Clean up excessive spaces but preserve newlines
+          updatedLine = updatedLine.replace(/[ \t]+/g, ' ').replace(/[ \t]+$/gm, '');
         }
         break;
 
@@ -1646,8 +1836,17 @@ export class MemberView extends ItemView implements HoverParent {
         // Remove "doing" tag if present in the current line
         if (currentLineHasDoing) {
           updatedLine = updatedLine.replace(/\s*#doing\b/g, '');
-          // Clean up any double spaces
-          updatedLine = updatedLine.replace(/\s+/g, ' ').trim();
+          // Clean up excessive spaces but preserve newlines
+          updatedLine = updatedLine.replace(/[ \t]+/g, ' ').replace(/[ \t]+$/gm, '');
+        }
+
+        // TRIGGER AUTO-MOVE AUTOMATION: If auto-move-done-to-lane is enabled
+        if (this.plugin.settings['auto-move-done-to-lane']) {
+          console.log(
+            '[MemberView] updateCardForLane: Auto-move-done-to-lane is enabled, will trigger automation after file save'
+          );
+          // After saving the file, we need to let the StateManager handle the auto-move
+          // This will happen automatically when the file is processed by the StateManager
         }
         break;
 
@@ -1683,5 +1882,26 @@ export class MemberView extends ItemView implements HoverParent {
       '[MemberView] updateCardForLane: Waiting for file system and cache to process changes...'
     );
     await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  // Get all directories that contain kanban boards
+  getAvailableKanbanDirectories(): string[] {
+    const directories = new Set<string>();
+    directories.add(''); // Add empty string for vault root
+
+    const allMdFiles = this.app.vault.getMarkdownFiles();
+
+    for (const mdFile of allMdFiles) {
+      // Check if file has kanban frontmatter (synchronously check cache first)
+      const cache = this.app.metadataCache.getFileCache(mdFile);
+      if (cache?.frontmatter && cache.frontmatter['kanban-plugin']) {
+        // Add the parent directory path
+        if (mdFile.parent && mdFile.parent.path !== '/') {
+          directories.add(mdFile.parent.path);
+        }
+      }
+    }
+
+    return Array.from(directories).sort();
   }
 }

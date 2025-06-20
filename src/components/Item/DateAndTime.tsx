@@ -66,6 +66,7 @@ export function DateAndTime({
   style,
 }: DateProps & DateAndTimeProps) {
   const moveDates = stateManager.useSetting('move-dates');
+  const shouldShowRelativeDate = stateManager.useSetting('show-relative-date');
   // Move dates setting retrieved
   const dateFormat = stateManager.useSetting('date-format'); // User's date format
   const timeFormat = stateManager.useSetting('time-format');
@@ -102,10 +103,26 @@ export function DateAndTime({
   };
   // END MODIFICATION
 
+  // Determine what text to show in the lozenge
+  const displayText = useMemo(() => {
+    if (shouldShowRelativeDate && item.data.metadata.date) {
+      const relativeText = getRelativeDate(item.data.metadata.date, item.data.metadata.time);
+      return rawTimeStr ? `${relativeText} ${rawTimeStr}` : relativeText;
+    } else {
+      return rawTimeStr ? `${rawDateStr} ${rawTimeStr}` : rawDateStr;
+    }
+  }, [
+    shouldShowRelativeDate,
+    rawDateStr,
+    rawTimeStr,
+    item.data.metadata.date,
+    item.data.metadata.time,
+  ]);
+
   // Rendering date and time
 
   const dateProps: HTMLAttributes<HTMLSpanElement> = {}; // This seems to be for the main div for editing
-  dateProps['aria-label'] = t('Edit card');
+  // dateProps['aria-label'] = t('Search date');  <-- removed this
   // dateProps.onClick = onEditDate; // This is now on the parent div
 
   return (
@@ -125,16 +142,12 @@ export function DateAndTime({
         ...style,
       }}
       className={classcat([c('item-metadata-date-lozenge')])}
-      aria-label={t('Edit card')}
+      aria-label={t('Search date')}
+      // title={t('Search date')}  <-- removed this
     >
-      {/* MODIFIED: Render date and time in separate spans */}
       <span onClick={handleDateSearchClick} style={{ cursor: 'pointer' }}>
-        {' '}
-        {/* cursor: help indicates clickable for search */}
-        {rawDateStr}
+        {displayText}
       </span>
-      {rawTimeStr && <span style={{ marginLeft: '0.4em' }}>{rawTimeStr}</span>}
-      {/* {displayString} Original rendering */}
     </div>
   );
 }

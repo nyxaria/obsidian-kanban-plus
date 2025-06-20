@@ -191,6 +191,7 @@ export interface KanbanViewSettings {
   'enable-kanban-code-blocks': boolean;
   'use-kanban-board-background-colors': boolean;
   'member-view-lane-width': number;
+  'show-checkboxes'?: boolean; // Allow member view to control checkbox display
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([

@@ -6,7 +6,7 @@ import { ExplicitPathContext } from 'src/dnd/components/context';
 import { moveEntity } from 'src/dnd/util/data';
 
 import { Icon } from '../Icon/Icon';
-import { DateAndTime, RelativeDate } from '../Item/DateAndTime';
+import { DateAndTime } from '../Item/DateAndTime';
 import { ItemCheckbox } from '../Item/ItemCheckbox';
 import { ItemContent, useDatePickers } from '../Item/ItemContent';
 import { useItemMenu } from '../Item/ItemMenu';
@@ -19,11 +19,9 @@ import { TableItem } from './types';
 export const DateCell = memo(function DateCell({
   item,
   hideDateDisplay,
-  shouldShowRelativeDate,
 }: {
   item: TableItem;
   hideDateDisplay: boolean;
-  shouldShowRelativeDate: boolean;
 }) {
   const { stateManager, filePath } = useContext(KanbanContext);
   const { onEditDate, onEditTime } = useDatePickers(item.item, item.path);
@@ -31,9 +29,6 @@ export const DateCell = memo(function DateCell({
 
   return (
     <>
-      {shouldShowRelativeDate ? (
-        <RelativeDate item={item.item} stateManager={stateManager} />
-      ) : null}
       {!hideDateDisplay ? (
         <DateAndTime
           item={item.item}
