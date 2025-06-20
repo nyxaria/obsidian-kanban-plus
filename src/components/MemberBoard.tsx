@@ -11,9 +11,11 @@ import { DndContext } from '../dnd/components/DndContext';
 import { Droppable } from '../dnd/components/Droppable';
 import { SortPlaceholder } from '../dnd/components/SortPlaceholder';
 import { Sortable } from '../dnd/components/Sortable';
+import { DndManagerContext } from '../dnd/components/context';
 import { getBoardModifiers } from '../helpers/boardModifiers';
 import KanbanPlugin from '../main';
 import { Items } from './Item/Item';
+import { MemberItems } from './MemberItems';
 import { KanbanContext, SearchContext } from './context';
 import { c } from './helpers';
 import { generateInstanceId } from './helpers';
@@ -21,7 +23,7 @@ import { Board, DataTypes, Item, Lane } from './types';
 
 // Debug component to check DndManager context
 function DndDebugInfo() {
-  const dndManager = useContext(KanbanContext)?.boardModifiers?.dndManager;
+  const dndManager = useContext(DndManagerContext);
 
   console.log('[MemberBoard] DndDebugInfo - DndManager context:', {
     hasDndManager: !!dndManager,
@@ -31,6 +33,72 @@ function DndDebugInfo() {
   });
 
   return null;
+}
+
+// Extract lane component to fix hooks violation
+interface MemberLaneProps {
+  lane: Lane;
+  laneIndex: number;
+  laneAccepts: string[];
+  memberViewLaneWidth: number;
+  memberCards: any[];
+  view: MemberView;
+  onRefresh: () => void;
+}
+
+function MemberLane({
+  lane,
+  laneIndex,
+  laneAccepts,
+  memberViewLaneWidth,
+  memberCards,
+  view,
+  onRefresh,
+}: MemberLaneProps) {
+  const laneRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <div className={c('lane-wrapper')} style={{ width: `${memberViewLaneWidth}px` }}>
+      <div ref={laneRef} className={c('lane')}>
+        <div className={c('lane-header-wrapper')}>
+          <div className={c('lane-title')}>
+            <div className={c('lane-title-text')}>{lane.data.title}</div>
+            <div className={c('lane-title-count')}>{lane.children.length}</div>
+          </div>
+        </div>
+        <div className={c('lane-items-wrapper')}>
+          <Droppable
+            elementRef={laneRef}
+            measureRef={laneRef}
+            id={lane.id}
+            index={laneIndex}
+            data={lane}
+          >
+            <ScrollContainer
+              className="member-board-lane-content"
+              id={lane.id}
+              index={laneIndex}
+              triggerTypes={laneAccepts}
+            >
+              <Sortable onSortChange={() => {}} axis="vertical">
+                <MemberItems
+                  items={lane.children}
+                  laneId={lane.id}
+                  shouldMarkItemsComplete={lane.id === 'done'}
+                  targetHighlight={null}
+                  cancelEditCounter={0}
+                  memberCards={memberCards}
+                  view={view}
+                  onCardUpdate={onRefresh}
+                />
+                <SortPlaceholder accepts={laneAccepts} index={lane.children.length} />
+              </Sortable>
+            </ScrollContainer>
+          </Droppable>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 interface MemberBoardProps {
@@ -335,86 +403,49 @@ export function MemberBoard(props: MemberBoardProps) {
               </div>
 
               {/* Board with same appearance as regular Kanban - With drag-and-drop */}
-              <DndContext
-                win={view.getWindow()}
-                onDrop={(dragEntity, dropEntity) => {
-                  console.log('[MemberBoard] DndContext onDrop called:', {
-                    dragEntity,
-                    dropEntity,
-                    dragData: dragEntity?.getData(),
-                    dropData: dropEntity?.getData(),
-                  });
-                  view.handleDrop(dragEntity, dropEntity);
-                }}
-              >
-                <div className={c('board')}>
-                  <div className={c('lanes')}>
-                    {board.children.map((lane, laneIndex) => {
-                      const laneRef = useRef<HTMLDivElement>(null);
-
-                      console.log('[MemberBoard] Rendering lane:', {
-                        laneId: lane.id,
-                        laneIndex,
-                        laneTitle: lane.data.title,
-                        itemCount: lane.children.length,
-                        hasLaneRef: !!laneRef,
+              <KanbanContext.Provider value={kanbanContext}>
+                <SearchContext.Provider value={searchContext}>
+                  <DndContext
+                    win={view.getWindow()}
+                    onDrop={(dragEntity, dropEntity) => {
+                      console.log('[MemberBoard] DndContext onDrop called:', {
+                        dragEntity,
+                        dropEntity,
+                        dragData: dragEntity?.getData(),
+                        dropData: dropEntity?.getData(),
                       });
+                      view.handleDrop(dragEntity, dropEntity);
+                    }}
+                  >
+                    <DndDebugInfo />
+                    <div className={c('board')}>
+                      <div className={c('lanes')}>
+                        {board.children.map((lane, laneIndex) => {
+                          console.log('[MemberBoard] Rendering lane:', {
+                            laneId: lane.id,
+                            laneIndex,
+                            laneTitle: lane.data.title,
+                            itemCount: lane.children.length,
+                          });
 
-                      return (
-                        <div
-                          key={lane.id}
-                          className={c('lane-wrapper')}
-                          style={{ width: `${memberViewLaneWidth}px` }}
-                        >
-                          <div ref={laneRef} className={c('lane')}>
-                            <div className={c('lane-header-wrapper')}>
-                              <div className={c('lane-title')}>
-                                <div className={c('lane-title-text')}>{lane.data.title}</div>
-                                <div className={c('lane-title-count')}>{lane.children.length}</div>
-                              </div>
-                            </div>
-                            <div className={c('lane-items-wrapper')}>
-                              <Droppable
-                                elementRef={laneRef}
-                                measureRef={laneRef}
-                                id={lane.id}
-                                index={laneIndex}
-                                data={lane}
-                              >
-                                <KanbanContext.Provider value={kanbanContext}>
-                                  <SearchContext.Provider value={searchContext}>
-                                    <DndDebugInfo />
-                                    <ScrollContainer
-                                      className="member-board-lane-content"
-                                      id={lane.id}
-                                      index={laneIndex}
-                                      triggerTypes={laneAccepts}
-                                    >
-                                      <Sortable onSortChange={() => {}} axis="vertical">
-                                        <Items
-                                          items={lane.children}
-                                          laneId={lane.id}
-                                          shouldMarkItemsComplete={lane.id === 'done'}
-                                          targetHighlight={null}
-                                          cancelEditCounter={0}
-                                        />
-                                        <SortPlaceholder
-                                          accepts={laneAccepts}
-                                          index={lane.children.length}
-                                        />
-                                      </Sortable>
-                                    </ScrollContainer>
-                                  </SearchContext.Provider>
-                                </KanbanContext.Provider>
-                              </Droppable>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </DndContext>
+                          return (
+                            <MemberLane
+                              key={lane.id}
+                              lane={lane}
+                              laneIndex={laneIndex}
+                              laneAccepts={laneAccepts}
+                              memberViewLaneWidth={memberViewLaneWidth}
+                              memberCards={memberCards}
+                              view={view}
+                              onRefresh={onRefresh}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </DndContext>
+                </SearchContext.Provider>
+              </KanbanContext.Provider>
 
               {memberCards.length === 0 && (
                 <div className={c('member-board-empty-cards')}>

@@ -3,6 +3,7 @@ import update from 'immutability-helper';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { frontmatterFromMarkdown } from 'mdast-util-frontmatter';
 import { frontmatter } from 'micromark-extension-frontmatter';
+import moment from 'moment';
 import {
   HoverParent,
   HoverPopover,
@@ -690,7 +691,7 @@ export class MemberView extends ItemView implements HoverParent {
         matches: assignedMembers.includes(this.selectedMember),
       });
 
-      // Extract tags properly using AST traversal instead of regex on reconstructed text
+      // Extract tags using AST traversal
       const tags: string[] = [];
 
       // Visit the AST to find hashtag nodes
@@ -705,6 +706,41 @@ export class MemberView extends ItemView implements HoverParent {
 
       // Process titleRaw like KanbanView does
       const processedTitleRaw = removeBlockId(dedentNewLines(replaceBrs(titleRaw)));
+
+      // Extract dates and times using regex patterns like regular parsing
+      let dateStr: string | undefined;
+      let timeStr: string | undefined;
+
+      const dateTrigger = '@'; // Default date trigger
+      const timeTrigger = '%'; // Default time trigger
+      const escapeRegExpStr = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      // Extract dates: @{date}, @[[date]], @start{date}, etc.
+      const dateRegExText = `(?:^|\\s)${escapeRegExpStr(dateTrigger)}(?:\\w*)?(?:\\{([^\\}]+?)\\}|\\[\\[([^\\]]+?)\\]\\])(?:\\s+${escapeRegExpStr(timeTrigger)}\\{([^\\}]+?)\\})?`;
+      const dateRegEx = new RegExp(dateRegExText, 'gi');
+
+      let dateMatch;
+      while ((dateMatch = dateRegEx.exec(processedTitleRaw)) !== null) {
+        const datePart = dateMatch[1] || dateMatch[2]; // From {} or [[]]
+        const timePart = dateMatch[3]; // Optional time part
+        if (datePart && !dateStr) {
+          dateStr = datePart.trim();
+          if (timePart && !timeStr) {
+            timeStr = timePart.trim();
+          }
+          break; // Take the first date found
+        }
+      }
+
+      // Extract standalone time if not already captured with date
+      if (!timeStr) {
+        const standaloneTimeRegExText = `(?:^|\\s)${escapeRegExpStr(timeTrigger)}\\{([^\\}]+?)\\}`;
+        const standaloneTimeRegEx = new RegExp(standaloneTimeRegExText, 'gi');
+        const timeMatch = standaloneTimeRegEx.exec(processedTitleRaw);
+        if (timeMatch && timeMatch[1]) {
+          timeStr = timeMatch[1].trim();
+        }
+      }
 
       // Clean title for display - use the processed content but clean it up
       const memberPrefix = '@@'; // Default member assignment prefix
@@ -739,6 +775,9 @@ export class MemberView extends ItemView implements HoverParent {
         tags: tags.map((tag) => (tag.startsWith('#') ? tag : '#' + tag)), // Include # prefix for consistency
         priority,
         depth,
+        // Add date information extracted from AST
+        dateStr,
+        timeStr,
       };
 
       console.log('[MemberView] Created member card:', {
@@ -747,6 +786,8 @@ export class MemberView extends ItemView implements HoverParent {
         titleRaw: result.titleRaw,
         assignedMembers: result.assignedMembers,
         tags: result.tags,
+        dateStr: result.dateStr,
+        timeStr: result.timeStr,
         willBeIncluded: assignedMembers.includes(this.selectedMember),
       });
 
@@ -764,26 +805,92 @@ export class MemberView extends ItemView implements HoverParent {
 
     // Categorize cards
     this.memberCards.forEach((card) => {
+      // Ensure card has all required properties with defaults
+      const safeCard = {
+        id: card.id || generateInstanceId(),
+        title: card.title || '',
+        titleRaw: card.titleRaw || '',
+        checked: card.checked || false,
+        blockId: card.blockId,
+        assignedMembers: card.assignedMembers || [],
+        tags: card.tags || [],
+        priority: card.priority,
+        dateStr: (card as any).dateStr,
+        timeStr: (card as any).timeStr,
+      };
+
       const item: Item = {
-        id: card.id,
+        id: safeCard.id,
         type: 'item',
-        accepts: [],
+        accepts: ['item'], // Allow items to accept other items for drop functionality
         children: [],
         data: {
-          title: card.title, // Use the title directly (now includes nested structure)
-          titleRaw: card.titleRaw,
-          titleSearch: card.title,
-          titleSearchRaw: card.titleRaw,
-          checked: card.checked,
-          checkChar: card.checked ? 'x' : ' ',
-          blockId: card.blockId,
-          assignedMembers: card.assignedMembers,
+          title: safeCard.title, // Use the title directly (now includes nested structure)
+          titleRaw: safeCard.titleRaw,
+          titleSearch: safeCard.title,
+          titleSearchRaw: safeCard.titleRaw,
+          checked: safeCard.checked,
+          checkChar: safeCard.checked ? 'x' : ' ',
+          blockId: safeCard.blockId,
+          assignedMembers: safeCard.assignedMembers,
           metadata: {
-            tags: card.tags, // This should now include the # prefix
-            priority: card.priority as 'high' | 'medium' | 'low' | undefined,
+            tags: safeCard.tags, // This should now include the # prefix
+            priority: safeCard.priority as 'high' | 'medium' | 'low' | undefined,
+            // Add date and time metadata from extracted data
+            dateStr: safeCard.dateStr,
+            timeStr: safeCard.timeStr,
+            date: safeCard.dateStr
+              ? moment(safeCard.dateStr, this.plugin.settings['date-format'] || 'YYYY-MM-DD')
+              : undefined,
+            time: safeCard.timeStr
+              ? moment(safeCard.timeStr, this.plugin.settings['time-format'] || 'HH:mm')
+              : undefined,
+            // Add required metadata properties to prevent undefined errors
+            fileMetadata: {},
+            fileMetadataOrder: [],
+            inlineMetadata: [],
           },
         },
       };
+
+      // Validate that the item has proper metadata structure
+      if (!item.data || !item.data.metadata) {
+        console.error('[MemberView] CRITICAL: Item created without proper metadata structure:', {
+          itemId: item.id,
+          itemData: item.data,
+          originalCard: card,
+        });
+        return; // Skip this item to prevent crashes
+      }
+
+      // Ensure tags is always an array
+      if (!Array.isArray(item.data.metadata.tags)) {
+        console.warn('[MemberView] Item metadata.tags is not an array, fixing:', {
+          itemId: item.id,
+          tags: item.data.metadata.tags,
+        });
+        item.data.metadata.tags = [];
+      }
+
+      // Ensure all required properties exist
+      item.data.metadata.fileMetadata = item.data.metadata.fileMetadata || {};
+      item.data.metadata.fileMetadataOrder = item.data.metadata.fileMetadataOrder || [];
+      item.data.metadata.inlineMetadata = item.data.metadata.inlineMetadata || [];
+
+      // Add parentLaneId to item data for drag and drop tracking
+      (item.data as any).parentLaneId = card.checked ? 'done' : card.hasDoing ? 'doing' : 'backlog';
+
+      console.log('[MemberView] Created item with metadata:', {
+        itemId: item.id,
+        title: item.data.title,
+        hasMetadata: !!item.data.metadata,
+        tags: item.data.metadata.tags,
+        priority: item.data.metadata.priority,
+        dateStr: item.data.metadata.dateStr,
+        timeStr: item.data.metadata.timeStr,
+        hasDate: !!item.data.metadata.date,
+        hasTime: !!item.data.metadata.time,
+      });
 
       if (card.checked) {
         doneCards.push(item);
@@ -825,19 +932,54 @@ export class MemberView extends ItemView implements HoverParent {
       children: doneCards,
     };
 
-    return {
+    const board = {
       id: `member-board-${this.selectedMember}`,
       type: 'board',
       accepts: ['lane'],
       data: {
         settings: this.plugin.settings,
         frontmatter: {},
-        archive: [],
+        archive: [] as any[],
         isSearching: false,
-        errors: [],
+        errors: [] as any[],
       },
       children: [backlogLane, doingLane, doneLane],
     };
+
+    // Debug: Validate all items in the board have proper metadata
+    console.log('[MemberView] Board validation:', {
+      boardId: board.id,
+      laneCount: board.children.length,
+      totalItems: board.children.reduce((sum, lane) => sum + lane.children.length, 0),
+    });
+
+    board.children.forEach((lane, laneIndex) => {
+      console.log(
+        `[MemberView] Lane ${laneIndex} (${lane.data?.title}): ${lane.children.length} items`
+      );
+      lane.children.forEach((item, itemIndex) => {
+        if (!item.data || !item.data.metadata) {
+          console.error(
+            `[MemberView] CRITICAL: Item ${itemIndex} in lane ${laneIndex} has no metadata:`,
+            {
+              itemId: item.id,
+              itemData: item.data,
+            }
+          );
+        } else if (!Array.isArray(item.data.metadata.tags)) {
+          console.error(
+            `[MemberView] CRITICAL: Item ${itemIndex} in lane ${laneIndex} has invalid tags:`,
+            {
+              itemId: item.id,
+              tags: item.data.metadata.tags,
+              tagsType: typeof item.data.metadata.tags,
+            }
+          );
+        }
+      });
+    });
+
+    return board;
   }
 
   async setReactState(newState?: any) {
