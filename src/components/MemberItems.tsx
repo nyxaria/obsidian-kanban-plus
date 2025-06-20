@@ -16,7 +16,7 @@ import { useDragHandle } from 'src/dnd/managers/DragManager';
 import { frontmatterKey } from 'src/parsers/common';
 
 import { MemberView } from '../MemberView';
-import { DateAndTime, RelativeDate } from './Item/DateAndTime';
+import { DateAndTime } from './Item/DateAndTime';
 import { ItemCheckbox } from './Item/ItemCheckbox';
 import { AssignedMembers, ItemContent, Tags } from './Item/ItemContent';
 import { ItemMenuButton } from './Item/ItemMenuButton';
@@ -248,6 +248,7 @@ const MemberItemInner = memo(function MemberItemInner({
           path={path}
           shouldMarkItemsComplete={shouldMarkItemsComplete}
           stateManager={stateManager}
+          isVisible={false}
         />
         <ItemContent
           editState={editState}
@@ -284,7 +285,6 @@ const MemberItemInner = memo(function MemberItemInner({
                 marginBottom: '7px',
               }}
             />
-            <RelativeDate item={item} stateManager={stateManager} />
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end' }}>
             <AssignedMembers
@@ -371,6 +371,8 @@ const MemberDraggableItem = memo(function MemberDraggableItem(props: MemberDragg
               accepts: ['item'],
               parentLaneId: laneId,
               originalIndex: itemIndex,
+              memberBoardItem: true,
+              memberBoardLaneId: laneId,
             }}
           >
             <MemberItemInner {...props} />

@@ -29,7 +29,7 @@ function DndDebugInfo() {
     hasDndManager: !!dndManager,
     dndManagerType: typeof dndManager,
     dragManager: dndManager?.dragManager ? 'present' : 'missing',
-    dropManager: dndManager?.dropManager ? 'present' : 'missing',
+    onDrop: dndManager?.onDrop ? 'present' : 'missing',
   });
 
   return null;
@@ -81,17 +81,35 @@ function MemberLane({
               triggerTypes={laneAccepts}
             >
               <Sortable onSortChange={() => {}} axis="vertical">
-                <MemberItems
-                  items={lane.children}
-                  laneId={lane.id}
-                  shouldMarkItemsComplete={lane.id === 'done'}
-                  targetHighlight={null}
-                  cancelEditCounter={0}
-                  memberCards={memberCards}
-                  view={view}
-                  onCardUpdate={onRefresh}
-                />
-                <SortPlaceholder accepts={laneAccepts} index={lane.children.length} />
+                {lane.children.length > 0 && (
+                  <MemberItems
+                    items={lane.children}
+                    laneId={lane.id}
+                    shouldMarkItemsComplete={lane.id === 'done'}
+                    targetHighlight={null}
+                    cancelEditCounter={0}
+                    memberCards={memberCards}
+                    view={view}
+                    onCardUpdate={onRefresh}
+                  />
+                )}
+                {lane.children.length === 0 ? (
+                  <div
+                    className="member-board-empty-placeholder-wrapper"
+                    onMouseEnter={(e) => {
+                      console.log('[MemberBoard] Empty placeholder hover enter:', lane.id);
+                      e.currentTarget.classList.add('hover');
+                    }}
+                    onMouseLeave={(e) => {
+                      console.log('[MemberBoard] Empty placeholder hover leave:', lane.id);
+                      e.currentTarget.classList.remove('hover');
+                    }}
+                  >
+                    <SortPlaceholder accepts={laneAccepts} index={lane.children.length} />
+                  </div>
+                ) : (
+                  <SortPlaceholder accepts={laneAccepts} index={lane.children.length} />
+                )}
               </Sortable>
             </ScrollContainer>
           </Droppable>
@@ -110,7 +128,10 @@ interface MemberBoardProps {
   memberCards: any[];
   isLoading: boolean;
   error: string | null;
+  scanRootPath: string;
+  availableDirectories: string[];
   onMemberChange: (member: string) => void;
+  onScanRootChange: (path: string) => void;
   onRefresh: () => void;
   reactState: any;
   setReactState: (state: any) => void;
@@ -168,7 +189,10 @@ export function MemberBoard(props: MemberBoardProps) {
     memberCards,
     isLoading,
     error,
+    scanRootPath,
+    availableDirectories,
     onMemberChange,
+    onScanRootChange,
     onRefresh,
     reactState,
     setReactState,
@@ -196,17 +220,17 @@ export function MemberBoard(props: MemberBoardProps) {
       getSetting: (key: string) => {
         const defaults = {
           'show-checkboxes': false,
-          'show-relative-date': false,
+          'show-relative-date': plugin.settings['show-relative-date'] ?? false,
           'move-dates': true,
           'move-tags': true,
           'inline-metadata-position': 'footer',
           'move-task-metadata': true,
           'metadata-keys': [],
-          'date-format': 'YYYY-MM-DD',
-          'time-format': 'HH:mm',
-          'date-display-format': 'YYYY-MM-DD',
-          'link-date-to-daily-note': false,
-          'date-colors': [],
+          'date-format': plugin.settings['date-format'] || 'YYYY-MM-DD',
+          'time-format': plugin.settings['time-format'] || 'HH:mm',
+          'date-display-format': plugin.settings['date-display-format'] || 'YYYY-MM-DD',
+          'link-date-to-daily-note': plugin.settings['link-date-to-daily-note'] ?? false,
+          'date-colors': plugin.settings['date-colors'] || [],
           'tag-colors': plugin.settings['tag-colors'] || [], // Use plugin settings for tag colors
           'tag-symbols': plugin.settings['tag-symbols'] || [], // Use plugin settings for tag symbols
           'hide-lane-tag-display': plugin.settings['hide-lane-tag-display'] || false, // Add hide lane tag setting
@@ -226,8 +250,8 @@ export function MemberBoard(props: MemberBoardProps) {
           'show-view-as-markdown': true,
           'tag-action': 'kanban',
           'tag-sort': [],
-          'time-trigger': '@@',
-          'date-trigger': '@',
+          'time-trigger': plugin.settings['time-trigger'] || '@@',
+          'date-trigger': plugin.settings['date-trigger'] || '@',
           'new-note-folder': '',
           'new-note-template': '',
           'append-archive-date': false,
@@ -314,6 +338,17 @@ export function MemberBoard(props: MemberBoardProps) {
     [selectedMember, onMemberChange]
   );
 
+  const handleScanRootSelect = useCallback(
+    (event: Event) => {
+      const target = event.target as HTMLSelectElement;
+      const newPath = target.value;
+      if (newPath !== scanRootPath) {
+        onScanRootChange(newPath);
+      }
+    },
+    [scanRootPath, onScanRootChange]
+  );
+
   const laneAccepts = [DataTypes.Item];
 
   // Calculate stats width based on member view lane width
@@ -324,7 +359,7 @@ export function MemberBoard(props: MemberBoardProps) {
       className={c('member-board-container')}
       style={{ '--member-view-lane-width': `${memberViewLaneWidth}px` } as any}
     >
-      {/* Header with member selector */}
+      {/* Header with member selector and scan root */}
       <div className={c('member-board-header')}>
         <div className={c('member-board-controls')}>
           <div className={c('member-selector')}>
@@ -341,6 +376,25 @@ export function MemberBoard(props: MemberBoardProps) {
                   {member}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div className={c('scan-root-selector')}>
+            <label htmlFor="scan-root-select">Scan Directory:</label>
+            <select
+              id="scan-root-select"
+              value={scanRootPath}
+              onChange={handleScanRootSelect}
+              className={c('scan-root-select-dropdown')}
+            >
+              <option value="">Vault Root</option>
+              {availableDirectories
+                .filter((dir) => dir !== '') // Remove empty string since it's already shown as "Vault Root"
+                .map((directory) => (
+                  <option key={directory} value={directory}>
+                    {directory}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -413,6 +467,7 @@ export function MemberBoard(props: MemberBoardProps) {
                         dropEntity,
                         dragData: dragEntity?.getData(),
                         dropData: dropEntity?.getData(),
+                        memberBoardScope: `member-board-${selectedMember}`,
                       });
                       view.handleDrop(dragEntity, dropEntity);
                     }}

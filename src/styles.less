@@ -2703,6 +2703,135 @@ body:not(.native-scrollbars) .kanban-plugin__scroll-container::-webkit-scrollbar
   .kanban-plugin__item-title-wrapper:not(:only-child) {
     border-bottom: none;
   }
+
+  /* Empty lane drop zone styles */
+  .member-board-empty-lane-drop-zone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    // width: 100%; <-- i removed this, not needed
+    height: 100%;
+    min-height: 300px;
+    margin: 8px;
+    border: 2px dashed var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-primary-alt);
+    transition:
+      border-color 0.2s ease,
+      background-color 0.2s ease;
+    position: relative;
+    box-sizing: border-box;
+
+    &:hover {
+      border-color: var(--interactive-accent);
+      background: var(--background-modifier-hover);
+    }
+
+    .member-board-empty-lane-message {
+      color: var(--text-muted);
+      font-size: 0.9em;
+      font-weight: 500;
+      text-align: center;
+      opacity: 0.7;
+      transition: opacity 0.2s ease;
+      pointer-events: none; /* Prevent interference with drag events */
+    }
+
+    &:hover .member-board-empty-lane-message {
+      opacity: 1;
+      color: var(--text-normal);
+    }
+  }
+
+  /* Ensure the empty zone Droppable takes full height */
+  .kanban-plugin__lane-items-wrapper > [data-droppable-id$='-empty-zone'] {
+    height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Ensure ScrollContainer takes full height to prevent layout shifts */
+  .member-board-lane-content {
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* When dragging over the empty lane drop zone */
+  .member-board-empty-lane-drop-zone.drag-over {
+    border-color: var(--interactive-accent);
+    background: var(--background-modifier-border);
+
+    .member-board-empty-lane-message {
+      color: var(--interactive-accent);
+      opacity: 1;
+    }
+  }
+
+  /* Style the member board controls */
+  .kanban-plugin__member-board-controls {
+    display: flex;
+    gap: 15px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .kanban-plugin__member-selector,
+  .kanban-plugin__scan-root-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 200px;
+
+    label {
+      font-size: 0.9em;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    select {
+      padding: 6px 8px;
+      border: 1px solid var(--background-modifier-border);
+      border-radius: 4px;
+      background: var(--background-primary);
+      color: var(--text-normal);
+      font-size: 0.9em;
+
+      &:focus {
+        outline: none;
+        border-color: var(--interactive-accent);
+      }
+    }
+  }
+
+  .kanban-plugin__refresh-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    cursor: pointer;
+    font-size: 0.9em;
+
+    &:hover {
+      background: var(--background-modifier-hover);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .lucide-refresh-cw {
+      width: 14px;
+      height: 14px;
+    }
+  }
 }
 
 .kanban-plugin__member-lane-wrapper {
@@ -2745,5 +2874,62 @@ body:not(.native-scrollbars) .kanban-plugin__scroll-container::-webkit-scrollbar
   .kanban-plugin__lane-title-text {
     color: rgb(34, 197, 94);
     font-weight: 600;
+  }
+}
+
+// Make empty lane placeholders much larger and more visible for member board
+.member-board-lane-content {
+  // When a lane has no items, make the placeholder take up significant space
+  .kanban-plugin__placeholder:only-child {
+    min-height: 200px !important;
+    width: calc(100% - 16px) !important;
+    max-width: 100% !important;
+    border: 2px dashed var(--background-modifier-border) !important;
+    border-radius: 8px !important;
+    margin: 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all 0.2s ease !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+    background: var(--background-primary-alt) !important;
+
+    &::after {
+      content: 'Drop cards here' !important;
+      color: var(--text-muted) !important;
+      font-style: italic !important;
+      font-size: 0.9em !important;
+      pointer-events: none !important;
+      user-select: none !important;
+    }
+
+    &:hover,
+    &.is-drag-over {
+      border-color: var(--interactive-accent) !important;
+      border-width: 3px !important;
+      background-color: var(--background-modifier-hover) !important;
+      box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2) !important;
+
+      &::after {
+        color: var(--interactive-accent) !important;
+        font-weight: 600 !important;
+      }
+    }
+  }
+
+  // Wrapper hover handling for empty placeholders
+  .member-board-empty-placeholder-wrapper {
+    &.hover .kanban-plugin__placeholder {
+      border-color: var(--interactive-accent) !important;
+      border-width: 2px !important;
+      background-color: var(--background-modifier-hover) !important;
+      box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2) !important;
+
+      &::after {
+        color: var(--interactive-accent) !important;
+        // font-weight: 600 !important;
+      }
+    }
   }
 }

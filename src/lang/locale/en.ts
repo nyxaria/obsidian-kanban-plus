@@ -239,6 +239,9 @@ const en = {
 
   // components/Item/ItemMenu.ts
   'Edit card': 'Edit card',
+  'Search date': 'Search date',
+  'Search Tag': 'Search Tag',
+  'Search Member': 'Search Member',
   'New note from card': 'New note from card',
   'Archive card': 'Archive card',
   'Delete card': 'Delete card',

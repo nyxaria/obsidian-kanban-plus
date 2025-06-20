@@ -152,7 +152,6 @@ export function useTableColumns(boardData: Board, stateManager: StateManager) {
   const search = useContext(SearchContext);
 
   const [sorting, setSortingRaw] = useState<SortingState>([]);
-  const shouldShowRelativeDate = stateManager.useSetting('show-relative-date');
   const moveDates = stateManager.useSetting('move-dates');
   const moveTags = stateManager.useSetting('move-tags');
   const moveInlineMetadata = stateManager.useSetting('inline-metadata-position') !== 'body';
@@ -182,7 +181,7 @@ export function useTableColumns(boardData: Board, stateManager: StateManager) {
     for (const key of metadata) {
       switch (key) {
         case 'date':
-          if (shouldShowRelativeDate || moveDates) {
+          if (moveDates) {
             columns.push(
               columnHelper.accessor((row) => row.item.data.metadata?.date || null, {
                 header: () => t('Date'),
@@ -191,13 +190,7 @@ export function useTableColumns(boardData: Board, stateManager: StateManager) {
                 cell: (info) => {
                   const date = info.getValue();
                   if (!date) return null;
-                  return (
-                    <DateCell
-                      item={info.row.original}
-                      shouldShowRelativeDate={shouldShowRelativeDate}
-                      hideDateDisplay={!moveDates}
-                    />
-                  );
+                  return <DateCell item={info.row.original} hideDateDisplay={!moveDates} />;
                 },
                 sortUndefined: false,
                 sortingFn: (a, b, id) => {
@@ -268,7 +261,7 @@ export function useTableColumns(boardData: Board, stateManager: StateManager) {
     }
 
     return columns;
-  }, [shouldShowRelativeDate, moveDates, moveTags, ...metadata]);
+  }, [moveDates, moveTags, ...metadata]);
 
   const withInlineMetadata = useMemo(() => {
     const columns = [...withMetadata];

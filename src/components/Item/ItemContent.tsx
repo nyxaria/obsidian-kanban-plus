@@ -15,6 +15,7 @@ import useOnclickOutside from 'react-cool-onclickoutside';
 import { StateManager } from 'src/StateManager';
 import { useNestedEntityPath } from 'src/dnd/components/Droppable';
 import { Path } from 'src/dnd/types';
+import { t } from 'src/lang/helpers';
 import { getTaskStatusDone, toggleTaskString } from 'src/parsers/helpers/inlineMetadata';
 
 import { MarkdownEditor, allowNewLine } from '../Editor/MarkdownEditor';
@@ -255,6 +256,7 @@ export function Tags(props: TagsProps) {
                 ? 'is-search-match'
                 : ''
             }`}
+            aria-label={t('Search Tag')}
             style={{
               cursor: 'pointer',
               ...(tagColor && {
@@ -335,7 +337,7 @@ export function AssignedMembers({
             key={i}
             className={c('item-assigned-member-initials')}
             onClick={handleMemberClick}
-            title={member}
+            aria-label={t('Search Member')}
             style={{
               backgroundColor,
               color: textColor,
