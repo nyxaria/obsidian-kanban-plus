@@ -16,6 +16,7 @@ import {
 } from 'obsidian';
 import { createElement } from 'preact';
 import { render, unmountComponentAtNode } from 'preact/compat';
+import { visit } from 'unist-util-visit';
 
 import { DEFAULT_SETTINGS, KanbanFormat, KanbanSettings, KanbanViewSettings } from './Settings';
 import { StateManager } from './StateManager';
@@ -27,7 +28,6 @@ import { Board, Item, Lane } from './components/types';
 import { DndContext } from './dnd/components/DndContext';
 import { getParentWindow } from './dnd/util/getWindow';
 import { hasFrontmatterKeyRaw } from './helpers';
-import { bindMarkdownEvents } from './helpers/renderMarkdown';
 import { PromiseQueue } from './helpers/util';
 import { t } from './lang/helpers';
 import KanbanPlugin from './main';
@@ -74,6 +74,9 @@ export class MemberView extends ItemView implements HoverParent {
   private memberCards: MemberCard[] = [];
   private isLoading: boolean = false;
   private error: string | null = null;
+
+  // Debug flag - set to false for production to reduce console noise
+  private debugDragDrop: boolean = false;
 
   // Mock file property for compatibility with components that expect view.file
   file: TFile;
@@ -133,8 +136,6 @@ export class MemberView extends ItemView implements HoverParent {
     };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));
-
-    bindMarkdownEvents(this);
   }
 
   getViewType() {
@@ -325,7 +326,9 @@ export class MemberView extends ItemView implements HoverParent {
     return this.viewSettings[key];
   }
 
-  useViewState<K extends keyof KanbanViewSettings>(key: K) {
+  useViewState<K extends keyof KanbanViewSettings>(
+    key: K
+  ): KanbanViewSettings[K] | 'board' | any[] {
     // For member view, return static values that work with the component expectations
     if (key === frontmatterKey) {
       return 'board'; // Always use board view for member board
@@ -344,7 +347,7 @@ export class MemberView extends ItemView implements HoverParent {
 
     menu.addItem((item) => {
       item
-        .setTitle(t('Refresh member board'))
+        .setTitle('Refresh member board')
         .setIcon('lucide-refresh-cw')
         .setSection('pane')
         .onClick(() => {
@@ -365,7 +368,7 @@ export class MemberView extends ItemView implements HoverParent {
     if (!this.actionButtons['refresh-member-board']) {
       this.actionButtons['refresh-member-board'] = this.addAction(
         'lucide-refresh-cw',
-        t('Refresh member board'),
+        'Refresh member board',
         () => {
           this.scanMemberCards();
         }
@@ -488,8 +491,8 @@ export class MemberView extends ItemView implements HoverParent {
       const blockIdMatch = titleRaw.match(/\^([a-zA-Z0-9]+)$/);
       const blockId = blockIdMatch ? blockIdMatch[1] : undefined;
 
-      // Extract assigned members
-      const memberPrefix = stateManager.getSetting('member-assignment-prefix') || '@@';
+      // Extract assigned members - use the correct setting key
+      const memberPrefix = stateManager.getSetting('memberAssignmentPrefix') || '@@';
       const memberRegex = new RegExp(`${memberPrefix}(\\w+)`, 'g');
       const assignedMembers: string[] = [];
       let match;
@@ -497,12 +500,15 @@ export class MemberView extends ItemView implements HoverParent {
         assignedMembers.push(match[1]);
       }
 
-      // Extract tags
-      const tagRegex = /#(\w+(?:\/\w+)*)/g;
+      // Extract tags properly using AST traversal instead of regex on reconstructed text
       const tags: string[] = [];
-      while ((match = tagRegex.exec(titleRaw)) !== null) {
-        tags.push(match[1]);
-      }
+
+      // Visit the AST to find hashtag nodes
+      visit(listItemNode, (node: any) => {
+        if (node.type === 'hashtag') {
+          tags.push(node.value);
+        }
+      });
 
       // Check if has "doing" tag
       const hasDoing = tags.some((tag) => tag.toLowerCase() === 'doing');
@@ -542,9 +548,11 @@ export class MemberView extends ItemView implements HoverParent {
         .replace(/\^[a-zA-Z0-9]+$/, '') // Remove block ID
         .trim();
 
-      // Extract priority
+      // Extract priority with proper typing
       const priorityMatch = cleanTitle.match(/!(low|medium|high)/i);
-      const priority = priorityMatch ? priorityMatch[1].toLowerCase() : undefined;
+      const priority: 'high' | 'medium' | 'low' | undefined = priorityMatch
+        ? (priorityMatch[1].toLowerCase() as 'high' | 'medium' | 'low')
+        : undefined;
       if (priority) {
         cleanTitle = cleanTitle.replace(/!(low|medium|high)/gi, '').trim();
       }
@@ -560,7 +568,7 @@ export class MemberView extends ItemView implements HoverParent {
         sourceStartLine: listItemNode.position?.start.line,
         blockId,
         assignedMembers,
-        tags,
+        tags: tags.map((tag) => (tag.startsWith('#') ? tag : '#' + tag)), // Include # prefix for consistency
         priority,
       };
     } catch (e) {
@@ -577,6 +585,9 @@ export class MemberView extends ItemView implements HoverParent {
       const processNode = (node: any): void => {
         if (node.type === 'text') {
           text += node.value;
+        } else if (node.type === 'hashtag') {
+          // Handle hashtag nodes properly
+          text += '#' + node.value;
         } else if (node.type === 'link') {
           text += `[${node.children?.[0]?.value || ''}](${node.url})`;
         } else if (node.type === 'inlineCode') {
@@ -585,6 +596,9 @@ export class MemberView extends ItemView implements HoverParent {
           text += `**${node.children?.[0]?.value || ''}**`;
         } else if (node.type === 'emphasis') {
           text += `*${node.children?.[0]?.value || ''}*`;
+        } else if (node.type === 'blockid') {
+          // Handle block IDs
+          text += '^' + node.value;
         } else if (node.children) {
           node.children.forEach(processNode);
         }
@@ -612,16 +626,19 @@ export class MemberView extends ItemView implements HoverParent {
         id: card.id,
         type: 'item',
         accepts: [],
+        children: [],
         data: {
           title: card.title,
           titleRaw: card.titleRaw,
+          titleSearch: card.title,
+          titleSearchRaw: card.titleRaw,
           checked: card.checked,
           checkChar: card.checked ? 'x' : ' ',
           blockId: card.blockId,
           assignedMembers: card.assignedMembers,
           metadata: {
-            tags: card.tags,
-            priority: card.priority,
+            tags: card.tags, // This should now include the # prefix
+            priority: card.priority as 'high' | 'medium' | 'low' | undefined,
           },
         },
       };
@@ -1178,7 +1195,7 @@ export class MemberView extends ItemView implements HoverParent {
         // Remove "doing" tag if present
         if (updatedCardData.metadata?.tags?.includes('doing')) {
           updatedCardData.metadata.tags = updatedCardData.metadata.tags.filter(
-            (tag) => tag !== 'doing'
+            (tag: string) => tag !== 'doing'
           );
 
           // Update titleRaw to remove the tag
@@ -1194,7 +1211,7 @@ export class MemberView extends ItemView implements HoverParent {
 
         if (updatedCardData.metadata?.tags?.includes('doing')) {
           updatedCardData.metadata.tags = updatedCardData.metadata.tags.filter(
-            (tag) => tag !== 'doing'
+            (tag: string) => tag !== 'doing'
           );
         }
 
@@ -1227,10 +1244,7 @@ export class MemberView extends ItemView implements HoverParent {
       },
     });
 
-    // Save via StateManager (this will automatically update the file)
-    stateManager.setState(updatedBoard, true);
-
-    // Update our local member cards to reflect the change
+    // 1. IMMEDIATE: Update local member cards first for instant visual feedback
     const updatedMemberCard = { ...memberCard };
     this.updateCardInMemory(updatedMemberCard, targetLaneId);
 
@@ -1240,8 +1254,14 @@ export class MemberView extends ItemView implements HoverParent {
       this.memberCards[memberCardIndex] = updatedMemberCard;
     }
 
-    // Trigger a visual update without full rescan
-    this.setReactState({ stateManagerUpdate: true });
+    // 2. IMMEDIATE: Trigger visual update for instant UI response
+    this.setReactState({ optimisticUpdate: true });
+
+    // 3. BACKGROUND: Save via StateManager (this will automatically update the file)
+    // Use setTimeout to make this non-blocking for immediate UI response
+    setTimeout(() => {
+      stateManager.setState(updatedBoard, true);
+    }, 0);
   }
 
   // Helper method to optimistically update card in memory
