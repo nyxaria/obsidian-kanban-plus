@@ -331,7 +331,11 @@ export const DraggableItem = memo(function DraggableItem(props: DraggableItemPro
   const bindHandle = useDragHandle(measureRef, measureRef);
 
   const isMatch = search?.query ? innerProps.item.data.titleSearch.includes(search.query) : false;
-  const classModifiers: string[] = getItemClassModifiers(innerProps.item);
+  const classModifiers: string[] = getItemClassModifiers({
+    item: innerProps.item,
+    isStatic: innerProps.isStatic,
+    stateManager: undefined, // Not available in this context
+  });
 
   return (
     <div

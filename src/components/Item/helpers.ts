@@ -365,7 +365,25 @@ export function constructMenuTimePickerOnChange({
   };
 }
 
-export function getItemClassModifiers(item: Item) {
+export function getItemClassModifiers({
+  item,
+  isStatic,
+  stateManager,
+}: {
+  item: Item;
+  isStatic?: boolean;
+  stateManager?: StateManager;
+}) {
+  // Defensive check
+  if (!item || !item.data || !item.data.metadata) {
+    console.warn('[getItemClassModifiers] Invalid item structure:', {
+      itemId: item?.id || 'unknown',
+      hasData: !!item?.data,
+      hasMetadata: !!item?.data?.metadata,
+    });
+    return [];
+  }
+
   const date = item.data.metadata.date;
   const classModifiers: string[] = [];
 
@@ -387,8 +405,13 @@ export function getItemClassModifiers(item: Item) {
     classModifiers.push('is-complete');
   }
 
-  for (const tag of item.data.metadata.tags) {
-    classModifiers.push(`has-tag-${tag.slice(1)}`);
+  // Ensure tags is an array before iterating
+  if (Array.isArray(item.data.metadata.tags)) {
+    for (const tag of item.data.metadata.tags) {
+      if (typeof tag === 'string' && tag.length > 1) {
+        classModifiers.push(`has-tag-${tag.slice(1)}`);
+      }
+    }
   }
 
   return classModifiers;

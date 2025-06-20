@@ -2698,6 +2698,11 @@ body:not(.native-scrollbars) .kanban-plugin__scroll-container::-webkit-scrollbar
     overflow-y: auto; /* Enable scrolling */
     overflow-x: hidden;
   }
+
+  /* Remove bottom border from item title wrapper in member view */
+  .kanban-plugin__item-title-wrapper:not(:only-child) {
+    border-bottom: none;
+  }
 }
 
 .kanban-plugin__member-lane-wrapper {
