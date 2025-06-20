@@ -247,7 +247,12 @@ const ItemInner = memo(function ItemInner({
         }}
       >
         <ItemCheckbox
-          isVisible={isHovered && !isEditingActive(editState) && !isStatic}
+          isVisible={
+            isHovered &&
+            !isEditingActive(editState) &&
+            !isStatic &&
+            filePath !== 'member-board-virtual'
+          }
           item={item}
           path={path}
           shouldMarkItemsComplete={shouldMarkItemsComplete ?? false}

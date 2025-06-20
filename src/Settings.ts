@@ -159,6 +159,7 @@ export interface KanbanSettings {
   'hide-linked-cards-when-none-exist'?: boolean; // Hide linked cards display when no cards exist
   'hide-linked-cards-when-only-done'?: boolean; // Hide linked cards display when only done cards exist
   'use-kanban-board-background-colors'?: boolean; // Use kanban board background colors in embeds
+  'member-view-lane-width'?: number; // Width of lanes in member view
 }
 
 export interface KanbanViewSettings {
@@ -189,6 +190,7 @@ export interface KanbanViewSettings {
   'enable-kanban-card-embeds': boolean;
   'enable-kanban-code-blocks': boolean;
   'use-kanban-board-background-colors': boolean;
+  'member-view-lane-width': number;
 }
 
 export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
@@ -261,6 +263,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'hide-linked-cards-when-none-exist',
   'hide-linked-cards-when-only-done',
   'use-kanban-board-background-colors',
+  'member-view-lane-width',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -582,6 +585,39 @@ export class SettingsManager {
               text.inputEl.addClass('error');
             }
           });
+      });
+
+    new Setting(contentEl)
+      .setName(t('Member View Lane Width'))
+      .setDesc(t('Enter a number to set the lane width in pixels for the Member View.'))
+      .addText((text) => {
+        const [value, globalValue] = this.getSetting('member-view-lane-width', local);
+
+        text.inputEl.setAttr('type', 'number');
+        text.inputEl.placeholder = `${globalValue ? globalValue : '272'} (default)`;
+        text.inputEl.value = value ? value.toString() : '';
+
+        text.onChange((val) => {
+          if (val && numberRegEx.test(val)) {
+            text.inputEl.removeClass('error');
+
+            this.applySettingsUpdate({
+              'member-view-lane-width': {
+                $set: parseInt(val),
+              },
+            });
+
+            return;
+          }
+
+          if (val) {
+            text.inputEl.addClass('error');
+          }
+
+          this.applySettingsUpdate({
+            $unset: ['member-view-lane-width'],
+          });
+        });
       });
 
     new Setting(contentEl).setName(t('Expand lists to full width in list view')).then((setting) => {
@@ -2899,6 +2935,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'hide-linked-cards-when-none-exist': true,
   'hide-linked-cards-when-only-done': false,
   'use-kanban-board-background-colors': true,
+  'member-view-lane-width': 272,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {
