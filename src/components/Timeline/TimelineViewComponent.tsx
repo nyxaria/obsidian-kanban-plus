@@ -279,6 +279,10 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             () => {},
             () => props.plugin.settings
           );
+
+          // Initialize the StateManager's compiled settings before parsing
+          tempStateManager.compileSettings();
+
           // Capture the full result from parseMarkdown
           const parsedResult = parseMarkdown(tempStateManager, fileContent) as {
             ast: any; // Adjust 'any' to a more specific mdast type if available/known

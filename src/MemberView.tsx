@@ -1,5 +1,8 @@
 import EventEmitter from 'eventemitter3';
 import update from 'immutability-helper';
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import { frontmatterFromMarkdown } from 'mdast-util-frontmatter';
+import { frontmatter } from 'micromark-extension-frontmatter';
 import {
   HoverParent,
   HoverPopover,
@@ -32,6 +35,11 @@ import { PromiseQueue } from './helpers/util';
 import { t } from './lang/helpers';
 import KanbanPlugin from './main';
 import { frontmatterKey } from './parsers/common';
+import { blockidExtension, blockidFromMarkdown } from './parsers/extensions/blockid';
+import { tagExtension, tagFromMarkdown } from './parsers/extensions/tag';
+import { gfmTaskListItem, gfmTaskListItemFromMarkdown } from './parsers/extensions/taskList';
+import { getNodeContentBoundary, getStringFromBoundary } from './parsers/helpers/ast';
+import { dedentNewLines, removeBlockId, replaceBrs } from './parsers/helpers/parser';
 import { parseMarkdown } from './parsers/parseMarkdown';
 
 export const memberViewType = 'member-board';
@@ -51,6 +59,7 @@ interface MemberCard {
   tags: string[];
   date?: any;
   priority?: string;
+  depth?: number; // Nesting depth for multi-layer lists
 }
 
 export class MemberView extends ItemView implements HoverParent {
@@ -133,6 +142,7 @@ export class MemberView extends ItemView implements HoverParent {
       'enable-kanban-card-embeds': true,
       'enable-kanban-code-blocks': true,
       'use-kanban-board-background-colors': true,
+      'member-view-lane-width': DEFAULT_SETTINGS['member-view-lane-width'],
     };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));
@@ -147,7 +157,7 @@ export class MemberView extends ItemView implements HoverParent {
   }
 
   getDisplayText() {
-    return this.selectedMember ? `Member Board - ${this.selectedMember}` : 'Member Board';
+    return this.selectedMember ? `${this.selectedMember}'s Board` : 'Member Board';
   }
 
   getWindow() {
@@ -418,39 +428,42 @@ export class MemberView extends ItemView implements HoverParent {
 
         try {
           const fileContent = await this.app.vault.cachedRead(mdFile);
-          const tempStateManager = new StateManager(
-            this.app,
-            { file: mdFile } as any,
-            () => {},
-            () => this.plugin.settings
-          );
 
-          const { ast } = parseMarkdown(tempStateManager, fileContent) as {
-            ast: any;
-            settings: KanbanSettings;
-          };
+          // Use direct fromMarkdown instead of parseMarkdown to avoid StateManager dependency
+          // parseMarkdown calls stateManager.compileSettings() which causes errors when stateManager is null
+          const ast = fromMarkdown(fileContent, {
+            extensions: [
+              frontmatter(['yaml']),
+              gfmTaskListItem,
+              tagExtension(),
+              blockidExtension(),
+            ],
+            mdastExtensions: [
+              frontmatterFromMarkdown(['yaml']),
+              gfmTaskListItemFromMarkdown,
+              tagFromMarkdown(),
+              blockidFromMarkdown(),
+            ],
+          });
 
           let currentLaneTitle = 'Unknown Lane';
           for (const astNode of ast.children) {
             if (astNode.type === 'heading') {
-              const headingText = astNode.children?.[0]?.value || 'Unnamed Lane';
+              const firstChild = astNode.children?.[0];
+              const headingText =
+                firstChild && 'value' in firstChild ? firstChild.value : 'Unnamed Lane';
               currentLaneTitle = headingText.replace(/\s*\(\d+\)$/, '').trim();
             } else if (astNode.type === 'list') {
-              for (const listItemNode of astNode.children) {
-                if (listItemNode.type === 'listItem') {
-                  const itemData = this.parseListItemToMemberCard(
-                    tempStateManager,
-                    fileContent,
-                    listItemNode,
-                    mdFile,
-                    currentLaneTitle
-                  );
-
-                  if (itemData && itemData.assignedMembers.includes(this.selectedMember)) {
-                    allCards.push(itemData);
-                  }
-                }
-              }
+              // Process all list items recursively, including nested ones
+              this.processListItemsRecursively(
+                astNode,
+                null, // No StateManager needed for member extraction
+                fileContent,
+                mdFile,
+                currentLaneTitle,
+                allCards,
+                0 // depth level
+              );
             }
           }
         } catch (parseError) {
@@ -469,36 +482,213 @@ export class MemberView extends ItemView implements HoverParent {
     }
   }
 
+  private processListItemsRecursively(
+    listNode: any,
+    stateManager: StateManager | null, // Make optional
+    fileContent: string,
+    file: TFile,
+    laneTitle: string,
+    allCards: MemberCard[],
+    depth: number,
+    processedItems: Set<any> = new Set() // Track already processed items to avoid duplicates
+  ): void {
+    if (!listNode || !listNode.children) return;
+
+    for (const listItemNode of listNode.children) {
+      if (listItemNode.type === 'listItem') {
+        // Skip if this item was already processed as part of a parent's nested structure
+        if (processedItems.has(listItemNode)) {
+          continue;
+        }
+
+        // Check if this item or any of its descendants has member assignments for the selected member
+        const hasSelectedMemberInTree = this.hasSelectedMemberInTree(listItemNode);
+
+        if (hasSelectedMemberInTree) {
+          // Process this item (including all its nested structure)
+          const itemData = this.parseListItemToMemberCard(
+            stateManager,
+            fileContent,
+            listItemNode,
+            file,
+            laneTitle,
+            depth
+          );
+
+          if (itemData && itemData.assignedMembers.includes(this.selectedMember)) {
+            allCards.push(itemData);
+
+            // Mark all nested items as processed to avoid double-processing
+            this.markNestedItemsAsProcessed(listItemNode, processedItems);
+          }
+        } else {
+          // This item doesn't have the selected member, but continue checking nested items
+          // in case there are deeply nested assignments
+          if (listItemNode.children) {
+            for (const childNode of listItemNode.children) {
+              if (childNode.type === 'list') {
+                this.processListItemsRecursively(
+                  childNode,
+                  stateManager,
+                  fileContent,
+                  file,
+                  laneTitle,
+                  allCards,
+                  depth + 1,
+                  processedItems
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Helper method to check if an item tree contains the selected member
+  private hasSelectedMemberInTree(listItemNode: any): boolean {
+    // Check the current item using AST traversal
+    let hasSelectedMember = false;
+
+    // Visit the AST to find member assignments
+    visit(listItemNode, (node: any) => {
+      if (node.type === 'text' && node.value) {
+        const memberPrefix = '@@'; // Default member assignment prefix
+        const memberRegex = new RegExp(`${memberPrefix}(\\w+)`, 'g');
+        let match;
+        while ((match = memberRegex.exec(node.value)) !== null) {
+          if (match[1] === this.selectedMember) {
+            hasSelectedMember = true;
+            return;
+          }
+        }
+      }
+    });
+
+    if (hasSelectedMember) {
+      return true;
+    }
+
+    // Check nested items recursively
+    if (listItemNode.children) {
+      for (const childNode of listItemNode.children) {
+        if (childNode.type === 'list' && childNode.children) {
+          for (const nestedListItem of childNode.children) {
+            if (nestedListItem.type === 'listItem') {
+              if (this.hasSelectedMemberInTree(nestedListItem)) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  // Helper method to mark all nested items as processed
+  private markNestedItemsAsProcessed(listItemNode: any, processedItems: Set<any>): void {
+    processedItems.add(listItemNode);
+
+    if (listItemNode.children) {
+      for (const childNode of listItemNode.children) {
+        if (childNode.type === 'list' && childNode.children) {
+          for (const nestedListItem of childNode.children) {
+            if (nestedListItem.type === 'listItem') {
+              this.markNestedItemsAsProcessed(nestedListItem, processedItems);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Helper method to extract all member assignments from an item tree
+  private extractMembersFromItemTree(listItemNode: any): string[] {
+    const allMembers: string[] = [];
+    const memberPrefix = '@@'; // Default member assignment prefix
+    const memberRegex = new RegExp(`${memberPrefix}(\\w+)`, 'g');
+
+    // Extract from current item using AST traversal
+    visit(listItemNode, (node: any) => {
+      if (node.type === 'text' && node.value) {
+        let match;
+        while ((match = memberRegex.exec(node.value)) !== null) {
+          if (!allMembers.includes(match[1])) {
+            allMembers.push(match[1]);
+          }
+        }
+      }
+    });
+
+    return allMembers;
+  }
+
   private parseListItemToMemberCard(
-    stateManager: StateManager,
+    stateManager: StateManager | null, // Make optional
     fileContent: string,
     listItemNode: any,
     file: TFile,
-    laneTitle: string
+    laneTitle: string,
+    depth: number = 0
   ): MemberCard | null {
     try {
-      // Extract basic task info
-      const titleRaw = this.extractTitleFromListItem(listItemNode);
-      if (!titleRaw) return null;
-
       // Check if it's a task
       const isTask = listItemNode.checked !== null;
-      if (!isTask) return null;
+      if (!isTask) {
+        console.log('[MemberView] Not a task, skipping');
+        return null;
+      }
 
       const checked = listItemNode.checked === true;
+
+      // Use KanbanView approach: get the content boundary and extract content
+      const startNode = listItemNode.children[0];
+      const endNode = listItemNode.children[listItemNode.children.length - 1];
+
+      const start =
+        startNode.type === 'paragraph'
+          ? getNodeContentBoundary(startNode).start
+          : startNode.position.start.offset;
+      const end =
+        endNode.type === 'paragraph'
+          ? getNodeContentBoundary(endNode).end
+          : endNode.position.end.offset;
+
+      const itemBoundary = { start, end };
+      let titleRaw = getStringFromBoundary(fileContent, itemBoundary);
+
+      // Handle empty task (same as KanbanView)
+      if (titleRaw === '[' + (listItemNode.checked ? listItemNode.checkChar || ' ' : ' ') + ']') {
+        titleRaw = '';
+      }
+
+      if (!titleRaw) {
+        console.log('[MemberView] No titleRaw extracted, skipping');
+        return null;
+      }
+
+      console.log('[MemberView] parseListItemToMemberCard: Processing item:', {
+        titleRaw,
+        filePath: file.path,
+        laneTitle,
+        depth,
+        selectedMember: this.selectedMember,
+      });
 
       // Extract block ID
       const blockIdMatch = titleRaw.match(/\^([a-zA-Z0-9]+)$/);
       const blockId = blockIdMatch ? blockIdMatch[1] : undefined;
 
-      // Extract assigned members - use the correct setting key
-      const memberPrefix = stateManager.getSetting('memberAssignmentPrefix') || '@@';
-      const memberRegex = new RegExp(`${memberPrefix}(\\w+)`, 'g');
-      const assignedMembers: string[] = [];
-      let match;
-      while ((match = memberRegex.exec(titleRaw)) !== null) {
-        assignedMembers.push(match[1]);
-      }
+      // Extract assigned members from the entire item tree (including nested items)
+      const assignedMembers = this.extractMembersFromItemTree(listItemNode);
+
+      console.log('[MemberView] Extracted members:', {
+        assignedMembers,
+        selectedMember: this.selectedMember,
+        matches: assignedMembers.includes(this.selectedMember),
+      });
 
       // Extract tags properly using AST traversal instead of regex on reconstructed text
       const tags: string[] = [];
@@ -513,39 +703,17 @@ export class MemberView extends ItemView implements HoverParent {
       // Check if has "doing" tag
       const hasDoing = tags.some((tag) => tag.toLowerCase() === 'doing');
 
-      // Debug: log tag parsing for the card we just updated
-      if (blockId && (blockId.includes('srq6cdcei') || titleRaw.includes('FC M+L'))) {
-        console.log('[MemberView] Parsing card after update:', {
-          titleRaw,
-          tags,
-          hasDoing,
-          checked,
-          file: file.path,
-          line: listItemNode.position?.start.line,
-          position: listItemNode.position,
-        });
-      }
+      // Process titleRaw like KanbanView does
+      const processedTitleRaw = removeBlockId(dedentNewLines(replaceBrs(titleRaw)));
 
-      // Debug: log any card that contains "Make system diagrams" or has the specific block ID
-      if (titleRaw.includes('Make system diagrams') || blockId === '6oucxl') {
-        console.log('[MemberView] Parsing target card during rescan:', {
-          titleRaw,
-          tags,
-          hasDoing,
-          checked,
-          assignedMembers,
-          selectedMember: this.selectedMember,
-          willBeIncluded: assignedMembers.includes(this.selectedMember),
-          file: file.path,
-          line: listItemNode.position?.start.line,
-        });
-      }
-
-      // Clean title for display
-      let cleanTitle = titleRaw
+      // Clean title for display - use the processed content but clean it up
+      const memberPrefix = '@@'; // Default member assignment prefix
+      const memberRegex = new RegExp(`${memberPrefix}\\w+`, 'g');
+      let cleanTitle = processedTitleRaw
         .replace(memberRegex, '') // Remove member assignments
-        .replace(/#\w+(?:\/\w+)*/g, '') // Remove tags
-        .replace(/\^[a-zA-Z0-9]+$/, '') // Remove block ID
+        .replace(/\s*#\w+(?:\/\w+)*/g, '') // Remove tags (including preceding spaces)
+        .replace(/\s*\^[a-zA-Z0-9]+$/, '') // Remove block ID (including preceding spaces)
+        .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
         .trim();
 
       // Extract priority with proper typing
@@ -557,10 +725,10 @@ export class MemberView extends ItemView implements HoverParent {
         cleanTitle = cleanTitle.replace(/!(low|medium|high)/gi, '').trim();
       }
 
-      return {
+      const result = {
         id: blockId || generateInstanceId(),
         title: cleanTitle,
-        titleRaw,
+        titleRaw: processedTitleRaw, // Use the processed version like KanbanView
         checked,
         hasDoing,
         sourceBoardPath: file.path,
@@ -570,48 +738,22 @@ export class MemberView extends ItemView implements HoverParent {
         assignedMembers,
         tags: tags.map((tag) => (tag.startsWith('#') ? tag : '#' + tag)), // Include # prefix for consistency
         priority,
+        depth,
       };
+
+      console.log('[MemberView] Created member card:', {
+        id: result.id,
+        title: result.title,
+        titleRaw: result.titleRaw,
+        assignedMembers: result.assignedMembers,
+        tags: result.tags,
+        willBeIncluded: assignedMembers.includes(this.selectedMember),
+      });
+
+      return result;
     } catch (e) {
       console.error('[MemberView] Error parsing list item:', e);
       return null;
-    }
-  }
-
-  private extractTitleFromListItem(listItemNode: any): string {
-    try {
-      // Convert the list item AST back to markdown text
-      let text = '';
-
-      const processNode = (node: any): void => {
-        if (node.type === 'text') {
-          text += node.value;
-        } else if (node.type === 'hashtag') {
-          // Handle hashtag nodes properly
-          text += '#' + node.value;
-        } else if (node.type === 'link') {
-          text += `[${node.children?.[0]?.value || ''}](${node.url})`;
-        } else if (node.type === 'inlineCode') {
-          text += `\`${node.value}\``;
-        } else if (node.type === 'strong') {
-          text += `**${node.children?.[0]?.value || ''}**`;
-        } else if (node.type === 'emphasis') {
-          text += `*${node.children?.[0]?.value || ''}*`;
-        } else if (node.type === 'blockid') {
-          // Handle block IDs
-          text += '^' + node.value;
-        } else if (node.children) {
-          node.children.forEach(processNode);
-        }
-      };
-
-      if (listItemNode.children) {
-        listItemNode.children.forEach(processNode);
-      }
-
-      return text.trim();
-    } catch (e) {
-      console.error('[MemberView] Error extracting title from list item:', e);
-      return '';
     }
   }
 
@@ -628,7 +770,7 @@ export class MemberView extends ItemView implements HoverParent {
         accepts: [],
         children: [],
         data: {
-          title: card.title,
+          title: card.title, // Use the title directly (now includes nested structure)
           titleRaw: card.titleRaw,
           titleSearch: card.title,
           titleSearchRaw: card.titleRaw,
@@ -642,18 +784,6 @@ export class MemberView extends ItemView implements HoverParent {
           },
         },
       };
-
-      // Debug: log categorization for the card we just updated
-      if (card.titleRaw.includes('FC M+L')) {
-        console.log('[MemberView] Categorizing card:', {
-          title: card.title,
-          titleRaw: card.titleRaw,
-          tags: card.tags,
-          hasDoing: card.hasDoing,
-          checked: card.checked,
-          willGoTo: card.checked ? 'done' : card.hasDoing ? 'doing' : 'backlog',
-        });
-      }
 
       if (card.checked) {
         doneCards.push(item);

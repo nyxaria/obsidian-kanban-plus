@@ -1,35 +1,34 @@
 import classcat from 'classcat';
 import { TFile } from 'obsidian';
-import { Component, memo } from 'preact/compat';
+import { Component, memo, useMemo } from 'preact/compat';
 import { useCallback, useContext, useEffect, useRef, useState } from 'preact/hooks';
 import { ScrollContainer } from 'src/dnd/components/ScrollContainer';
-import { SortPlaceholder } from 'src/dnd/components/SortPlaceholder';
-import { Sortable } from 'src/dnd/components/Sortable';
 
 import { MemberView } from '../MemberView';
+import { DEFAULT_SETTINGS } from '../Settings';
+import { StateManager } from '../StateManager';
 import { DndContext } from '../dnd/components/DndContext';
 import { Droppable } from '../dnd/components/Droppable';
-import { DndManagerContext } from '../dnd/components/context';
+import { SortPlaceholder } from '../dnd/components/SortPlaceholder';
+import { Sortable } from '../dnd/components/Sortable';
 import { getBoardModifiers } from '../helpers/boardModifiers';
-import { t } from '../lang/helpers';
 import KanbanPlugin from '../main';
 import { Items } from './Item/Item';
 import { KanbanContext, SearchContext } from './context';
 import { c } from './helpers';
+import { generateInstanceId } from './helpers';
 import { Board, DataTypes, Item, Lane } from './types';
 
 // Debug component to check DndManager context
 function DndDebugInfo() {
-  const dndManager = useContext(DndManagerContext);
+  const dndManager = useContext(KanbanContext)?.boardModifiers?.dndManager;
 
-  useEffect(() => {
-    console.log('[MemberBoard] DndDebugInfo - DndManager context:', {
-      hasDndManager: !!dndManager,
-      dndManagerType: typeof dndManager,
-      dragManager: dndManager?.dragManager ? 'present' : 'missing',
-      dropManager: dndManager?.dropManager ? 'present' : 'missing',
-    });
-  }, [dndManager]);
+  console.log('[MemberBoard] DndDebugInfo - DndManager context:', {
+    hasDndManager: !!dndManager,
+    dndManagerType: typeof dndManager,
+    dragManager: dndManager?.dragManager ? 'present' : 'missing',
+    dropManager: dndManager?.dropManager ? 'present' : 'missing',
+  });
 
   return null;
 }
@@ -50,6 +49,47 @@ interface MemberBoardProps {
   emitter: any;
 }
 
+// Add interface for filtered tags - now unused but kept for potential future use
+interface TagFilterOptions {
+  hideLaneTagDisplay: boolean;
+  hideBoardTagDisplay: boolean;
+  laneNames: string[];
+  boardName?: string;
+}
+
+// Add helper function to filter tags - now unused but kept for potential future use
+function filterTagsForDisplay(tags: string[], options: TagFilterOptions): string[] {
+  const { hideLaneTagDisplay, hideBoardTagDisplay, laneNames, boardName } = options;
+
+  if (!hideLaneTagDisplay && !hideBoardTagDisplay) {
+    return tags; // No filtering needed
+  }
+
+  return tags.filter((tag) => {
+    const tagWithoutHash = tag.replace(/^#/, '').toLowerCase();
+
+    // Check if this is a board tag (matches board name)
+    if (hideBoardTagDisplay && boardName) {
+      const boardTagPattern = boardName.toLowerCase().replace(/\s+/g, '-');
+      if (tagWithoutHash === boardTagPattern) {
+        return false; // Hide this tag
+      }
+    }
+
+    // Check if this is a lane tag (matches any lane name)
+    if (hideLaneTagDisplay) {
+      for (const laneName of laneNames) {
+        const laneTagPattern = laneName.toLowerCase().replace(/\s+/g, '-');
+        if (tagWithoutHash === laneTagPattern) {
+          return false; // Hide this tag
+        }
+      }
+    }
+
+    return true; // Show this tag
+  });
+}
+
 export function MemberBoard(props: MemberBoardProps) {
   const {
     plugin,
@@ -67,164 +107,81 @@ export function MemberBoard(props: MemberBoardProps) {
     emitter,
   } = props;
 
-  // Create a comprehensive mock StateManager for the Items component
-  const mockFile = {
-    path: 'member-board-virtual',
-    name: 'Member Board',
-    basename: 'Member Board',
-    extension: 'md',
-    stat: { mtime: Date.now(), ctime: Date.now(), size: 0 },
-    vault: view.app.vault,
-  };
+  console.log('[MemberBoard] Context setup:', {
+    hasKanbanContext: !!useContext(KanbanContext),
+    hasStateManager: !!useContext(KanbanContext)?.stateManager,
+    hasBoardModifiers: !!useContext(KanbanContext)?.boardModifiers,
+    hasSearchContext: !!useContext(SearchContext),
+    filePath: useContext(KanbanContext)?.filePath || 'member-board-virtual',
+    boardId: board?.id,
+    selectedMember,
+    memberCardsCount: memberCards?.length || 0,
+  });
 
-  const mockStateManager = {
-    // Core properties that components expect
-    file: mockFile,
-    app: view.app,
-    state: board,
-    viewSet: new Set([view]),
-    emitter: view.emitter,
+  // Get the member view lane width from settings
+  const memberViewLaneWidth =
+    plugin.settings['member-view-lane-width'] || DEFAULT_SETTINGS['member-view-lane-width'] || 272;
 
-    // Settings methods
-    useSetting: (key: string) => {
-      const defaults = {
-        'show-checkboxes': true,
-        'show-relative-date': false,
-        'move-dates': true,
-        'move-tags': true,
-        'inline-metadata-position': 'footer',
-        'move-task-metadata': true,
-        'metadata-keys': [],
-        'date-format': 'YYYY-MM-DD',
-        'time-format': 'HH:mm',
-        'date-display-format': 'YYYY-MM-DD',
-        'link-date-to-daily-note': false,
-        'date-colors': [],
-        'tag-colors': [],
-        'lane-width': 272,
-        'full-list-lane-width': false,
-        'new-card-insertion-method': 'prepend',
-        hideHashForTagsWithoutSymbols: false,
-        'hide-lane-tag-display': false,
-        'hide-board-tag-display': false,
-        editable: false, // Make member board read-only
-      };
-      return defaults[key] ?? plugin.settings[key] ?? null;
-    },
-    getSetting: (key: string) => {
-      const defaults = {
-        'show-checkboxes': true,
-        'show-relative-date': false,
-        'move-dates': true,
-        'move-tags': true,
-        'inline-metadata-position': 'footer',
-        'move-task-metadata': true,
-        'metadata-keys': [],
-        'date-format': 'YYYY-MM-DD',
-        'time-format': 'HH:mm',
-        'date-display-format': 'YYYY-MM-DD',
-        'link-date-to-daily-note': false,
-        'date-colors': [],
-        'tag-colors': plugin.settings['tag-colors'] || [],
-        'tag-symbols': plugin.settings['tag-symbols'] || [],
-        'lane-width': 272,
-        'full-list-lane-width': false,
-        'new-card-insertion-method': 'prepend',
-        hideHashForTagsWithoutSymbols: plugin.settings.hideHashForTagsWithoutSymbols || false,
-        'hide-lane-tag-display': false,
-        'hide-board-tag-display': false,
-        editable: false,
-      };
-      return defaults[key] ?? plugin.settings[key] ?? null;
-    },
-    getSettingRaw: (key: string) => {
-      return mockStateManager.getSetting(key);
-    },
-    getGlobalSetting: (key: string) => {
-      return plugin.settings[key] ?? null;
-    },
-
-    // State management methods
-    setState: () => {}, // No-op for member board
-    softRefresh: () => {},
-    saveToDisk: () => {},
-    setError: (error: any) => {
-      console.error('[MockStateManager] Error:', error);
-    },
-
-    // Item management methods
-    updateItemContent: (item: any, content: string) => item, // No-op
-    getNewItem: (content: string, checkChar: string, forceEdit?: boolean, laneName?: string) => {
-      const id = 'mock-' + Math.random().toString(36).substr(2, 9);
-      return {
-        id,
-        type: 'item',
-        accepts: [],
-        data: {
-          title: content.trim(),
-          titleRaw: content,
-          titleSearch: content,
-          titleSearchRaw: content,
-          blockId: id,
-          metadata: {
-            dateStr: undefined,
-            date: undefined,
-            startDateStr: undefined,
-            startDate: undefined,
-            time: undefined,
-            timeStr: undefined,
-            tags: [],
-            fileAccessor: undefined,
-            file: undefined,
-            fileMetadata: undefined,
-            fileMetadataOrder: undefined,
-          },
-          line: 0,
-          assignedMembers: [],
-          checked: checkChar !== ' ',
-          checkChar: checkChar || ' ',
-          position: {
-            start: { line: 1, column: 1, offset: 0 },
-            end: { line: 1, column: content.length + 1, offset: content.length },
-          },
-          forceEditMode: forceEdit || false,
-        },
-        children: [],
-      };
-    },
-
-    // Parser methods
-    parser: {
-      newItem: (content: string, checkChar: string, forceEdit?: boolean, laneName?: string) => {
-        return mockStateManager.getNewItem(content, checkChar, forceEdit, laneName);
+  // Create a mock StateManager that provides the necessary methods for tag functionality
+  const mockStateManager = useMemo(() => {
+    return {
+      getSetting: (key: string) => {
+        const defaults = {
+          'show-checkboxes': false,
+          'show-relative-date': false,
+          'move-dates': true,
+          'move-tags': true,
+          'inline-metadata-position': 'footer',
+          'move-task-metadata': true,
+          'metadata-keys': [],
+          'date-format': 'YYYY-MM-DD',
+          'time-format': 'HH:mm',
+          'date-display-format': 'YYYY-MM-DD',
+          'link-date-to-daily-note': false,
+          'date-colors': [],
+          'tag-colors': plugin.settings['tag-colors'] || [], // Use plugin settings for tag colors
+          'tag-symbols': plugin.settings['tag-symbols'] || [], // Use plugin settings for tag symbols
+          'hide-lane-tag-display': plugin.settings['hide-lane-tag-display'] || false, // Add hide lane tag setting
+          'hide-board-tag-display': plugin.settings['hide-board-tag-display'] || false, // Add hide board tag setting
+          hideHashForTagsWithoutSymbols: plugin.settings['hideHashForTagsWithoutSymbols'] || false, // Add hide hash setting
+          'lane-width': memberViewLaneWidth,
+          'full-list-lane-width': false,
+          'new-card-insertion-method': 'append',
+          'new-line-trigger': 'shift-enter',
+          'hide-card-count': false,
+          'max-archive-size': -1,
+          'show-add-list': true,
+          'show-archive-all': true,
+          'show-board-settings': true,
+          'show-search': true,
+          'show-set-view': true,
+          'show-view-as-markdown': true,
+          'tag-action': 'kanban',
+          'tag-sort': [],
+          'time-trigger': '@@',
+          'date-trigger': '@',
+          'new-note-folder': '',
+          'new-note-template': '',
+          'append-archive-date': false,
+          'archive-date-format': 'MMM D, YYYY h:mm a',
+          'archive-date-separator': ' - ',
+          'archive-with-date': false,
+          'date-picker-week-start': 0,
+          'date-time-display-format': 'MMM D, YYYY h:mm a',
+          'table-sizing': {},
+        };
+        return defaults[key] || DEFAULT_SETTINGS[key];
       },
-      updateItemContent: (item: any, content: string) => item,
-      boardToMd: () => '',
-      mdToBoard: () => board,
-      reparseBoard: () => board,
-    },
-
-    // Compilation methods
-    compileSettings: () => {},
-    compiledSettings: {},
-
-    // Event handling
-    stateReceivers: [],
-    settingsNotifiers: new Map(),
-
-    // Utility methods
-    getAView: () => view,
-    hasError: () => false,
-    onEmpty: () => {},
-    getGlobalSettings: () => plugin.settings,
-
-    // Build methods
-    buildSettingRetrievers: () => ({
-      getGlobalSettings: () => plugin.settings,
-      getGlobalSetting: (key: string) => plugin.settings[key] ?? null,
-      getSetting: (key: string) => mockStateManager.getSetting(key),
-    }),
-  };
+      useSetting: (key: string) => {
+        // For member board, we return the same as getSetting
+        // This is used by components like Tags to get dynamic settings
+        return mockStateManager.getSetting(key);
+      },
+      file: view.file,
+      state: board,
+      app: plugin.app,
+    };
+  }, [plugin, view, board, memberViewLaneWidth]);
 
   const boardModifiers = getBoardModifiers(view, mockStateManager);
 
@@ -291,14 +248,16 @@ export function MemberBoard(props: MemberBoardProps) {
 
   const laneAccepts = [DataTypes.Item];
 
+  // Calculate stats width based on member view lane width
+  const statsWidth = `calc(3 * ${memberViewLaneWidth}px + 2 * 10px)`;
+
   return (
-    <div className={c('member-board-container')}>
+    <div
+      className={c('member-board-container')}
+      style={{ '--member-view-lane-width': `${memberViewLaneWidth}px` } as any}
+    >
       {/* Header with member selector */}
       <div className={c('member-board-header')}>
-        <div className={c('member-board-title')}>
-          <h2>Member Board</h2>
-        </div>
-
         <div className={c('member-board-controls')}>
           <div className={c('member-selector')}>
             <label htmlFor="member-select">Team Member:</label>
@@ -356,7 +315,7 @@ export function MemberBoard(props: MemberBoardProps) {
           {!isLoading && (
             <>
               {/* Stats */}
-              <div className={c('member-board-stats')}>
+              <div className={c('member-board-stats')} style={{ width: statsWidth }}>
                 <div className={c('stat-item')}>
                   <span className={c('stat-label')}>Total Cards:</span>
                   <span className={c('stat-value')}>{memberCards.length}</span>
@@ -402,7 +361,11 @@ export function MemberBoard(props: MemberBoardProps) {
                       });
 
                       return (
-                        <div key={lane.id} className={c('lane-wrapper')} style={{ width: '272px' }}>
+                        <div
+                          key={lane.id}
+                          className={c('lane-wrapper')}
+                          style={{ width: `${memberViewLaneWidth}px` }}
+                        >
                           <div ref={laneRef} className={c('lane')}>
                             <div className={c('lane-header-wrapper')}>
                               <div className={c('lane-title')}>

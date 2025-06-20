@@ -105,6 +105,9 @@ const en = {
   'Timeline Card Height': 'Timeline Card Height',
   'The height of each card in the timeline view, in pixels.':
     'The height of each card in the timeline view, in pixels.',
+  'Member View Lane Width': 'Member View Lane Width',
+  'Enter a number to set the lane width in pixels for the Member View.':
+    'Enter a number to set the lane width in pixels for the Member View.',
 
   'Move dates to card footer': 'Move dates to card footer',
   "When toggled, dates will be displayed in the card's footer instead of the card's body.":
