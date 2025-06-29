@@ -2,6 +2,7 @@ import update from 'immutability-helper';
 import { Menu, MenuItem, Notice, TFile } from 'obsidian';
 import { useCallback, useEffect, useState } from 'preact/hooks';
 
+import { KanbanView } from '../KanbanView';
 import { MemberView } from '../MemberView';
 import { t } from '../lang/helpers';
 import { TagNameModal } from '../modals/TagNameModal';
@@ -46,7 +47,7 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
     // Create a mock StateManager for getAllTagsFromKanbanBoards
     const mockStateManager = {
       app: view.app,
-      getSetting: (key: string) => view.plugin.settings[key],
+      getSetting: (key: string) => (view.plugin.settings as any)[key],
     } as any;
 
     getAllTagsFromKanbanBoards(mockStateManager)
@@ -78,34 +79,120 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
           .onClick(async () => {
             const sourceFile = view.app.vault.getAbstractFileByPath(memberCard.sourceBoardPath);
             if (sourceFile instanceof TFile) {
-              const leaf = view.app.workspace.splitActiveLeaf();
-              await leaf.openFile(sourceFile);
+              // Check if there's already a KanbanView open for this file
+              const existingKanbanLeaves = view.app.workspace
+                .getLeavesOfType('kanban')
+                .filter((leaf) => (leaf.view as any).file?.path === sourceFile.path);
 
-              // If we have a block ID, scroll to it
-              if (memberCard.blockId) {
-                const editor = (leaf.view as any).editor;
-                if (editor) {
-                  // Find the line with the block ID
-                  const content = editor.getValue();
-                  const lines = content.split('\n');
-                  const blockIdPattern = new RegExp(`\\^${escapeRegExpStr(memberCard.blockId)}$`);
+              let targetLeaf;
+              let kanbanView;
 
-                  for (let i = 0; i < lines.length; i++) {
-                    if (blockIdPattern.test(lines[i])) {
-                      editor.setCursor(i, 0);
-                      editor.scrollIntoView({ from: { line: i, ch: 0 }, to: { line: i, ch: 0 } });
-                      break;
+              if (existingKanbanLeaves.length > 0) {
+                // Use existing KanbanView
+                targetLeaf = existingKanbanLeaves[0];
+                kanbanView = targetLeaf.view;
+
+                // Activate the existing leaf
+                view.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
+              } else {
+                // Create new leaf and open file in KanbanView
+                targetLeaf = view.app.workspace.splitActiveLeaf();
+                await targetLeaf.openFile(sourceFile);
+
+                // Ensure it opens as Kanban view (not markdown)
+                if (targetLeaf.view.getViewType() !== 'kanban') {
+                  view.plugin.kanbanFileModes[(targetLeaf as any).id || sourceFile.path] = 'kanban';
+                  await view.plugin.setKanbanView(targetLeaf);
+                }
+
+                kanbanView = targetLeaf.view;
+              }
+
+              // Now highlight the card in the KanbanView using the same approach as TimelineView
+              if (kanbanView && kanbanView.getViewType() === 'kanban') {
+                // Clean the title to match what's displayed in KanbanView (remove metadata)
+                let cleanTitle = memberCard.titleRaw;
+
+                // Remove block ID
+                cleanTitle = cleanTitle.replace(/\s*\^[a-zA-Z0-9]+/g, '');
+                // Remove member assignments
+                cleanTitle = cleanTitle.replace(/\s*@@\w+/g, '');
+                // Remove tags
+                cleanTitle = cleanTitle.replace(/\s*#\w+/g, '');
+                // Remove dates
+                cleanTitle = cleanTitle.replace(/\s*@\{[^}]+\}/g, '');
+                cleanTitle = cleanTitle.replace(/\s*@start\{[^}]+\}/g, '');
+                // Remove priorities
+                cleanTitle = cleanTitle.replace(/\s*![a-zA-Z]+/g, '');
+                // Clean up extra whitespace and newlines
+                cleanTitle = cleanTitle.replace(/\s+/g, ' ').trim();
+
+                // Debug: Log what titles are actually in the KanbanView
+                const board = (kanbanView as KanbanView).getBoard();
+                if (board) {
+                  console.log('[MemberItemMenu] Available cards in KanbanView board:');
+                  for (const lane of board.children) {
+                    console.log(`  Lane '${lane.data.title}':`);
+                    for (const item of lane.children) {
+                      console.log(`    - Card title: "${item.data.title}"`);
+                      console.log(`    - Card titleRaw: "${item.data.titleRaw}"`);
+                      console.log(`    - Card blockId: "${item.data.blockId}"`);
+                      console.log(`    - Card id: "${item.id}"`);
                     }
                   }
+                } else {
+                  console.log('[MemberItemMenu] No board data available in KanbanView');
                 }
-              } else if (memberCard.sourceStartLine) {
-                // Use source line number if available
-                const editor = (leaf.view as any).editor;
-                if (editor) {
-                  const line = memberCard.sourceStartLine - 1; // Convert to 0-indexed
-                  editor.setCursor(line, 0);
-                  editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } });
+
+                // Prepare navigation state similar to TimelineView
+                // Use blockId if available (most reliable), otherwise use cleaned cardTitle
+                const navigationState = {
+                  file: memberCard.sourceBoardPath,
+                  eState: {
+                    filePath: memberCard.sourceBoardPath,
+                    blockId: memberCard.blockId || undefined,
+                    cardTitle: !memberCard.blockId ? cleanTitle : undefined, // Use cleaned title for better matching
+                    listName: undefined as string | undefined, // Let KanbanView figure this out
+                    preventSetViewData: true, // Prevent reloading the view data
+                  },
+                };
+
+                console.log('[MemberItemMenu] Navigation state for highlighting:', {
+                  blockId: navigationState.eState.blockId,
+                  cardTitle: navigationState.eState.cardTitle,
+                  cleanedTitle: cleanTitle,
+                  memberCardTitle: memberCard.title,
+                  memberCardTitleRaw: memberCard.titleRaw,
+                  memberCardBlockId: memberCard.blockId,
+                  usingBlockId: !!memberCard.blockId,
+                  blockIdType: typeof memberCard.blockId,
+                  blockIdLength: memberCard.blockId?.length,
+                });
+
+                // PROMINENT DEBUG: Show what we're using for highlighting
+                if (memberCard.blockId) {
+                  console.log(
+                    `🎯 [MemberItemMenu] USING BLOCK ID for highlighting: "${memberCard.blockId}"`
+                  );
+                } else {
+                  console.log(`🎯 [MemberItemMenu] USING TITLE for highlighting: "${cleanTitle}"`);
                 }
+
+                // Use setState to properly integrate with the highlighting system
+                (kanbanView as any).setState(navigationState, { history: true });
+
+                // Add a slight delay to ensure setState has processed and the view is ready
+                setTimeout(() => {
+                  if (kanbanView && (kanbanView as any).applyHighlight) {
+                    console.log(
+                      '[MemberItemMenu] Directly calling applyHighlight on KanbanView instance for:',
+                      memberCard.sourceBoardPath,
+                      'with target:',
+                      navigationState.eState
+                    );
+                    (kanbanView as any).applyHighlight();
+                  }
+                }, 150);
               }
             } else {
               new Notice(`Could not find source file: ${memberCard.sourceBoardPath}`);
@@ -323,7 +410,7 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
             // Create a mock StateManager for date picker
             const mockStateManager = {
               getSetting: (key: string) =>
-                view.plugin.settings[key] ||
+                (view.plugin.settings as any)[key] ||
                 {
                   'date-format': 'YYYY-MM-DD',
                   'date-display-format': 'YYYY-MM-DD',

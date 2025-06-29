@@ -705,9 +705,25 @@ export class MemberView extends ItemView implements HoverParent {
         selectedMember: this.selectedMember,
       });
 
-      // Extract block ID
-      const blockIdMatch = titleRaw.match(/\^([a-zA-Z0-9]+)$/);
+      // Extract block ID - look for ^blockId anywhere in the content
+      const blockIdMatch = titleRaw.match(/\^([a-zA-Z0-9]+)/);
       const blockId = blockIdMatch ? blockIdMatch[1] : undefined;
+
+      console.log('[MemberView] Block ID extraction debug:', {
+        titleRaw: titleRaw,
+        blockIdMatch: blockIdMatch,
+        extractedBlockId: blockId,
+        regexPattern: '/\\^([a-zA-Z0-9]+)/',
+      });
+
+      // PROMINENT DEBUG: Show blockId extraction result
+      if (blockId) {
+        console.log(
+          `🔍 [MemberView] BLOCK ID FOUND: "${blockId}" in card: "${titleRaw.substring(0, 50)}..."`
+        );
+      } else {
+        console.log(`❌ [MemberView] NO BLOCK ID FOUND in card: "${titleRaw.substring(0, 50)}..."`);
+      }
 
       // Extract assigned members from the entire item tree (including nested items)
       const assignedMembers = this.extractMembersFromItemTree(listItemNode);
@@ -814,6 +830,7 @@ export class MemberView extends ItemView implements HoverParent {
         id: result.id,
         title: result.title,
         titleRaw: result.titleRaw,
+        blockId: result.blockId,
         assignedMembers: result.assignedMembers,
         tags: result.tags,
         dateStr: result.dateStr,
