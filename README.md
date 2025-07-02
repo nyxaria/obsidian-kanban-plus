@@ -69,7 +69,7 @@ If you find this plugin useful and would like to support its development, you ca
 
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/nyxaria?label=Sponsor&logo=GitHub%20Sponsors&style=for-the-badge)](https://github.com/sponsors/nyxaria)
 
-<a href="https://coff.ee/nyxaria"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=&slug=nyxaria&button_colour=5F7FFF&font_colour=ffffff&font_family=Lato&outline_colour=000000&coffee_colour=FFDD00"></a>
+<script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="nyxaria" data-color="#FFDD00" data-emoji=""  data-font="Cookie" data-text="Buy me a coffee" data-outline-color="#000000" data-font-color="#000000" data-coffee-color="#ffffff" ></script>
 
 ## Acknowledgements
 
