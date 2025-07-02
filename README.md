@@ -69,7 +69,7 @@ If you find this plugin useful and would like to support its development, you ca
 
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/nyxaria?label=Sponsor&logo=GitHub%20Sponsors&style=for-the-badge)](https://github.com/sponsors/nyxaria)
 
-<a href="https://coff.ee/nyxaria"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=&slug=nyxaria&button_colour=5F7FFF&font_colour=ffffff&font_family=Lato&outline_colour=000000&coffee_colour=FFDD00"></a>
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/nyxaria)
 
 ## Acknowledgements
 
