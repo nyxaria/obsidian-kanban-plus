@@ -1014,47 +1014,47 @@ export class SettingsManager {
 
     contentEl.createEl('h4', { text: t('Tags') });
 
-    new Setting(contentEl)
-      .setName(t('Move tags to card footer'))
-      .setDesc(
-        t("When toggled, tags will be displayed in the card's footer instead of the card's body.")
-      )
-      .then((setting) => {
-        let toggleComponent: ToggleComponent;
+    // new Setting(contentEl)
+    //   .setName(t('Move tags to card footer'))
+    //   .setDesc(
+    //     t("When toggled, tags will be displayed in the card's footer instead of the card's body.")
+    //   )
+    //   .then((setting) => {
+    //     let toggleComponent: ToggleComponent;
 
-        setting
-          .addToggle((toggle) => {
-            toggleComponent = toggle;
+    //     setting
+    //       .addToggle((toggle) => {
+    //         toggleComponent = toggle;
 
-            const [value, globalValue] = this.getSetting('move-tags', local);
+    //         const [value, globalValue] = this.getSetting('move-tags', local);
 
-            if (value !== undefined) {
-              toggle.setValue(value as boolean);
-            } else if (globalValue !== undefined) {
-              toggle.setValue(globalValue as boolean);
-            }
+    //         if (value !== undefined) {
+    //           toggle.setValue(value as boolean);
+    //         } else if (globalValue !== undefined) {
+    //           toggle.setValue(globalValue as boolean);
+    //         }
 
-            toggle.onChange((newValue) => {
-              this.applySettingsUpdate({
-                'move-tags': {
-                  $set: newValue,
-                },
-              });
-            });
-          })
-          .addExtraButton((b) => {
-            b.setIcon('lucide-rotate-ccw')
-              .setTooltip(t('Reset to default'))
-              .onClick(() => {
-                const [, globalValue] = this.getSetting('move-tags', local);
-                toggleComponent.setValue(!!globalValue);
+    //         toggle.onChange((newValue) => {
+    //           this.applySettingsUpdate({
+    //             'move-tags': {
+    //               $set: newValue,
+    //             },
+    //           });
+    //         });
+    //       })
+    //       .addExtraButton((b) => {
+    //         b.setIcon('lucide-rotate-ccw')
+    //           .setTooltip(t('Reset to default'))
+    //           .onClick(() => {
+    //             const [, globalValue] = this.getSetting('move-tags', local);
+    //             toggleComponent.setValue(!!globalValue);
 
-                this.applySettingsUpdate({
-                  $unset: ['move-tags'],
-                });
-              });
-          });
-      });
+    //             this.applySettingsUpdate({
+    //               $unset: ['move-tags'],
+    //             });
+    //           });
+    //       });
+    //   });
 
     new Setting(contentEl)
       .setName(t('Tag click action'))
@@ -1262,47 +1262,47 @@ export class SettingsManager {
 
     contentEl.createEl('h4', { text: t('Date & Time') });
 
-    new Setting(contentEl)
-      .setName(t('Move dates to card footer'))
-      .setDesc(
-        t("When toggled, dates will be displayed in the card's footer instead of the card's body.")
-      )
-      .then((setting) => {
-        let toggleComponent: ToggleComponent;
+    // new Setting(contentEl)
+    //   .setName(t('Move dates to card footer'))
+    //   .setDesc(
+    //     t("When toggled, dates will be displayed in the card's footer instead of the card's body.")
+    //   )
+    //   .then((setting) => {
+    //     let toggleComponent: ToggleComponent;
 
-        setting
-          .addToggle((toggle) => {
-            toggleComponent = toggle;
+    //     setting
+    //       .addToggle((toggle) => {
+    //         toggleComponent = toggle;
 
-            const [value, globalValue] = this.getSetting('move-dates', local);
+    //         const [value, globalValue] = this.getSetting('move-dates', local);
 
-            if (value !== undefined) {
-              toggle.setValue(value as boolean);
-            } else if (globalValue !== undefined) {
-              toggle.setValue(globalValue as boolean);
-            }
+    //         if (value !== undefined) {
+    //           toggle.setValue(value as boolean);
+    //         } else if (globalValue !== undefined) {
+    //           toggle.setValue(globalValue as boolean);
+    //         }
 
-            toggle.onChange((newValue) => {
-              this.applySettingsUpdate({
-                'move-dates': {
-                  $set: newValue,
-                },
-              });
-            });
-          })
-          .addExtraButton((b) => {
-            b.setIcon('lucide-rotate-ccw')
-              .setTooltip(t('Reset to default'))
-              .onClick(() => {
-                const [, globalValue] = this.getSetting('move-dates', local);
-                toggleComponent.setValue((globalValue as boolean) ?? true);
+    //         toggle.onChange((newValue) => {
+    //           this.applySettingsUpdate({
+    //             'move-dates': {
+    //               $set: newValue,
+    //             },
+    //           });
+    //         });
+    //       })
+    //       .addExtraButton((b) => {
+    //         b.setIcon('lucide-rotate-ccw')
+    //           .setTooltip(t('Reset to default'))
+    //           .onClick(() => {
+    //             const [, globalValue] = this.getSetting('move-dates', local);
+    //             toggleComponent.setValue((globalValue as boolean) ?? true);
 
-                this.applySettingsUpdate({
-                  $unset: ['move-dates'],
-                });
-              });
-          });
-      });
+    //             this.applySettingsUpdate({
+    //               $unset: ['move-dates'],
+    //             });
+    //           });
+    //       });
+    //   });
 
     new Setting(contentEl)
       .setName(t('Date trigger'))
@@ -2860,7 +2860,24 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'archive-date-format': 'MMM D, YYYY h:mm a',
   'archive-date-separator': ' - ',
   'archive-with-date': false,
-  'date-colors': [],
+  'date-colors': [
+    {
+      isToday: false,
+      distance: 7,
+      unit: 'days',
+      direction: 'after',
+      color: 'rgba(255, 192, 20, 0.99)',
+      backgroundColor: 'rgba(0, 0, 0, 0.02)',
+    },
+    {
+      distance: 1,
+      unit: 'days',
+      direction: 'after',
+      color: 'rgba(255, 86, 86, 0.96)',
+      isBefore: true,
+      backgroundColor: 'rgba(0, 0, 0, 0.03)',
+    },
+  ],
   'date-display-format': 'MMM D, YYYY h:mm a',
   'date-format': 'YYYY-MM-DD',
   'date-picker-week-start': 0,
@@ -2869,13 +2886,13 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'full-list-lane-width': false,
   'hide-card-count': false,
   'inline-metadata-position': 'body',
-  'lane-width': 272,
+  'lane-width': 283,
   'link-date-to-daily-note': false,
   'list-collapse': [],
   'max-archive-size': -1,
   'metadata-keys': [],
-  'move-dates': false,
-  'move-tags': false,
+  'move-dates': true,
+  'move-tags': true,
   'move-task-metadata': false,
   'new-card-insertion-method': 'append',
   'new-line-trigger': 'shift-enter',
@@ -2885,17 +2902,94 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'show-archive-all': true,
   'show-board-settings': true,
   'show-checkboxes': true,
-  'show-relative-date': false,
+  'show-relative-date': true,
   'show-search': true,
   'show-set-view': true,
   'show-view-as-markdown': true,
   'table-sizing': {},
   'tag-action': 'kanban',
-  'tag-colors': [],
+  'tag-colors': [
+    {
+      tagKey: '#done',
+      color: 'rgba(215, 215, 215, 1)',
+      backgroundColor: 'rgba(245, 240, 255, 0.23)',
+    },
+    {
+      tagKey: '#bug',
+      color: 'rgba(211, 211, 211, 1)',
+      backgroundColor: 'rgba(255, 0, 0, 0.58)',
+    },
+    {
+      tagKey: '#doing',
+      color: 'rgba(240, 240, 240, 1)',
+      backgroundColor: 'rgba(0, 139, 7, 1)',
+    },
+    {
+      tagKey: '#feature',
+      color: 'rgba(242, 242, 242, 1)',
+      backgroundColor: 'rgba(123, 62, 255, 1)',
+    },
+    {
+      tagKey: '#improvement',
+      color: 'rgba(255, 255, 255, 1)',
+      backgroundColor: 'rgba(0, 117, 185, 1)',
+    },
+  ],
   'tag-sort': [],
   'time-format': 'HH:mm',
   'time-trigger': '@@',
-  'tag-symbols': [],
+  'tag-symbols': [
+    {
+      id: 'default-done',
+      type: 'tag-symbol',
+      accepts: [],
+      children: [],
+      data: {
+        tagKey: '#done',
+        symbol: '☑️',
+      },
+    },
+    {
+      id: 'default-bug',
+      type: 'tag-symbol',
+      accepts: [],
+      children: [],
+      data: {
+        tagKey: '#bug',
+        symbol: '❌',
+      },
+    },
+    {
+      id: 'default-doing',
+      type: 'tag-symbol',
+      accepts: [],
+      children: [],
+      data: {
+        tagKey: '#doing',
+        symbol: '🚀',
+      },
+    },
+    {
+      id: 'default-feature',
+      type: 'tag-symbol',
+      accepts: [],
+      children: [],
+      data: {
+        tagKey: '#feature',
+        symbol: '✨',
+      },
+    },
+    {
+      id: 'default-improvement',
+      type: 'tag-symbol',
+      accepts: [],
+      children: [],
+      data: {
+        tagKey: '#improvement',
+        symbol: '📈',
+      },
+    },
+  ],
   'new-card-template': '',
   'new-lane-template': '',
   'show-button-for-new-card': true,
@@ -2909,26 +3003,32 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   savedWorkspaceViews: [],
   lastSelectedWorkspaceViewId: undefined,
   clickOutsideCardToSaveEdit: true,
-  hideHashForTagsWithoutSymbols: false,
-  teamMembers: [],
-  teamMemberColors: {},
+  hideHashForTagsWithoutSymbols: true,
+  teamMembers: ['Me'],
+  teamMemberColors: {
+    Me: {
+      background: '#afffad',
+      text: '#404040',
+      email: 'my@email',
+    },
+  },
   editable: true,
   memberAssignmentPrefix: '@@',
-  'auto-move-done-to-lane': false,
-  'auto-add-lane-tag': false,
-  'auto-add-board-tag': false,
-  'hide-lane-tag-display': false,
-  'hide-board-tag-display': false,
-  'apply-tag-colors-globally': false,
-  'apply-tag-symbols-globally': false,
-  enableDueDateEmailReminders: false,
+  'auto-move-done-to-lane': true,
+  'auto-add-lane-tag': true,
+  'auto-add-board-tag': true,
+  'hide-lane-tag-display': true,
+  'hide-board-tag-display': true,
+  'apply-tag-colors-globally': true,
+  'apply-tag-symbols-globally': true,
+  enableDueDateEmailReminders: true,
   dueDateReminderLastRun: 0,
-  dueDateReminderTimeframeDays: 1,
-  enableAutomaticEmailSending: false,
+  dueDateReminderTimeframeDays: 7,
+  enableAutomaticEmailSending: true,
   automaticEmailSenderAddress: '',
   automaticEmailAppPassword: '',
-  automaticEmailSendingFrequencyDays: 1,
-  hideDoneLane: false,
+  automaticEmailSendingFrequencyDays: 7,
+  hideDoneLane: true,
   timelineDayWidth: 50,
   timelineCardHeight: 40,
   'enable-kanban-card-embeds': true,
@@ -2936,7 +3036,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'hide-linked-cards-when-none-exist': true,
   'hide-linked-cards-when-only-done': false,
   'use-kanban-board-background-colors': true,
-  'member-view-lane-width': 272,
+  'member-view-lane-width': 350,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {

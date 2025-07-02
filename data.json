@@ -1,0 +1,533 @@
+{
+  "kanban-plugin": "board",
+  "append-archive-date": false,
+  "archive-date-format": "MMM D, YYYY h:mm a",
+  "archive-date-separator": " - ",
+  "archive-with-date": false,
+  "date-colors": [
+    {
+      "isToday": false,
+      "distance": 7,
+      "unit": "days",
+      "direction": "after",
+      "color": "rgba(255, 192, 20, 0.99)",
+      "backgroundColor": "rgba(0, 0, 0, 0.02)"
+    },
+    {
+      "distance": 1,
+      "unit": "days",
+      "direction": "after",
+      "color": "rgba(255, 86, 86, 0.96)",
+      "isBefore": true,
+      "backgroundColor": "rgba(0, 0, 0, 0.03)"
+    }
+  ],
+  "date-display-format": "MMM D, YYYY h:mm a",
+  "date-format": "DD-MM-YYYY",
+  "date-picker-week-start": 0,
+  "date-time-display-format": "MMM D, YYYY h:mm a",
+  "date-trigger": "@",
+  "full-list-lane-width": false,
+  "hide-card-count": false,
+  "inline-metadata-position": "body",
+  "lane-width": 283,
+  "link-date-to-daily-note": false,
+  "list-collapse": [],
+  "max-archive-size": -1,
+  "metadata-keys": [],
+  "move-dates": true,
+  "move-tags": true,
+  "move-task-metadata": false,
+  "new-card-insertion-method": "append",
+  "new-line-trigger": "shift-enter",
+  "new-note-folder": "",
+  "new-note-template": "",
+  "show-add-list": true,
+  "show-archive-all": true,
+  "show-board-settings": true,
+  "show-checkboxes": true,
+  "show-relative-date": true,
+  "show-search": true,
+  "show-set-view": true,
+  "show-view-as-markdown": true,
+  "table-sizing": {},
+  "tag-action": "obsidian",
+  "tag-colors": [
+    {
+      "tagKey": "#mechanics",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(131, 0, 0, 0.52)"
+    },
+    {
+      "tagKey": "#electronics",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(0, 76, 255, 0.52)"
+    },
+    {
+      "tagKey": "#software",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(0, 174, 9, 0.52)"
+    },
+    {
+      "tagKey": "#arm",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(136, 85, 255, 0.52)"
+    },
+    {
+      "tagKey": "#grippers",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(229, 0, 254, 0.52)"
+    },
+    {
+      "tagKey": "#integration",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(0, 0, 0, 0.52)"
+    },
+    {
+      "tagKey": "#done",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(245, 240, 255, 0.23)"
+    },
+    {
+      "tagKey": "#customers",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(0, 238, 255, 0.54)"
+    },
+    {
+      "tagKey": "#research",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(204, 208, 0, 0.57)"
+    },
+    {
+      "tagKey": "#business",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(255, 130, 0, 0.39)"
+    },
+    {
+      "tagKey": "#product",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(74, 112, 30, 0.54)"
+    },
+    {
+      "tagKey": "#overall",
+      "color": "rgba(0, 0, 0, 1)",
+      "backgroundColor": "rgba(255, 255, 255, 1)"
+    },
+    {
+      "tagKey": "#sourcing",
+      "color": "rgba(255, 255, 255, 1)",
+      "backgroundColor": "rgba(161, 225, 77, 0.69)"
+    },
+    {
+      "tagKey": "#tools",
+      "color": "rgba(215, 215, 215, 1)",
+      "backgroundColor": "rgba(139, 116, 188, 0.89)"
+    },
+    {
+      "tagKey": "#kanban",
+      "color": "rgba(211, 211, 211, 1)",
+      "backgroundColor": "rgba(50, 112, 26, 0.8)"
+    },
+    {
+      "tagKey": "#bug",
+      "color": "rgba(211, 211, 211, 1)",
+      "backgroundColor": "rgba(255, 0, 0, 0.58)"
+    },
+    {
+      "tagKey": "#review",
+      "color": "rgba(211, 211, 211, 1)",
+      "backgroundColor": "rgba(110, 110, 255, 1)"
+    },
+    {
+      "tagKey": "#doing",
+      "color": "rgba(240, 240, 240, 1)",
+      "backgroundColor": "rgba(0, 139, 7, 1)"
+    },
+    {
+      "tagKey": "#feature",
+      "color": "rgba(242, 242, 242, 1)",
+      "backgroundColor": "rgba(123, 62, 255, 1)"
+    },
+    {
+      "tagKey": "#improvement",
+      "color": "rgba(255, 255, 255, 1)",
+      "backgroundColor": "rgba(0, 117, 185, 1)"
+    }
+  ],
+  "tag-sort": [],
+  "time-format": "HH:mm",
+  "time-trigger": "@@",
+  "tag-symbols": [
+    {
+      "id": "d1fhp0283",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#mechanics",
+        "symbol": "🔧"
+      }
+    },
+    {
+      "id": "xxyhvsq6o",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#electronics",
+        "symbol": "⚡"
+      }
+    },
+    {
+      "id": "67tyldna9",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#software",
+        "symbol": "🌐"
+      }
+    },
+    {
+      "id": "2cjmq88jw",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#arm",
+        "symbol": "🏗️"
+      }
+    },
+    {
+      "id": "vm3qkjr09",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#grippers",
+        "symbol": "🦾"
+      }
+    },
+    {
+      "id": "vnyqf0zll",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#done",
+        "symbol": "☑️"
+      }
+    },
+    {
+      "id": "ydzkz7d6v",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#integration",
+        "symbol": "⚙️"
+      }
+    },
+    {
+      "id": "4sj7lal6q",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#research",
+        "symbol": "🔬"
+      }
+    },
+    {
+      "id": "lncf5uj16",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#customer",
+        "symbol": "👔"
+      }
+    },
+    {
+      "id": "9j6lmun6o",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#business",
+        "symbol": "💰"
+      }
+    },
+    {
+      "id": "uk9494wvr",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#sourcing",
+        "symbol": "💳"
+      }
+    },
+    {
+      "id": "gvj1sxqr7",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#product",
+        "symbol": "🤖"
+      }
+    },
+    {
+      "id": "gvcpz49hr",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#overall",
+        "symbol": "🗺️"
+      }
+    },
+    {
+      "id": "03pn3gkb0",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#tools",
+        "symbol": "🪛"
+      }
+    },
+    {
+      "id": "r9zt15tlf",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#kanban",
+        "symbol": "📓"
+      }
+    },
+    {
+      "id": "mlgdxhwzc",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#customers",
+        "symbol": "👨‍💼"
+      }
+    },
+    {
+      "id": "7jqj6flzr",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#bug",
+        "symbol": "❌"
+      }
+    },
+    {
+      "id": "x6xf5fy4u",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#review",
+        "symbol": "🔎"
+      }
+    },
+    {
+      "id": "su88jojx9",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#doing",
+        "symbol": "🚀"
+      }
+    },
+    {
+      "id": "dhgy3atar",
+      "type": "tag-symbol",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#feature",
+        "symbol": "✨"
+      }
+    },
+    {
+      "accepts": [],
+      "type": "tag-symbol",
+      "children": [],
+      "data": {
+        "tagKey": "#improvement",
+        "symbol": "📈"
+      },
+      "id": "jshedyxgs"
+    }
+  ],
+  "new-card-template": "",
+  "new-lane-template": "",
+  "show-button-for-new-card": true,
+  "archive-heading": "## Archive",
+  "archive-empty-tasks": false,
+  "enable-markdown-preview-checkbox-toggle": false,
+  "default-time": "12:00",
+  "filter-display-mode": "popover",
+  "inline-date-format": "relative",
+  "inline-time-format": "h:mm A",
+  "savedWorkspaceViews": [
+    {
+      "id": "1747696635749",
+      "name": "mechanics",
+      "tags": [
+        "mechanics"
+      ],
+      "members": [],
+      "excludeArchive": true,
+      "excludeDone": true,
+      "sortCriteria": "default",
+      "sortDirection": "asc",
+      "scanRootPath": "Monomotion Mechanics/_Kanban"
+    },
+    {
+      "id": "1747722785934",
+      "name": "electronics",
+      "tags": [
+        "electronics"
+      ],
+      "members": [],
+      "excludeArchive": true,
+      "excludeDone": true,
+      "sortCriteria": "default",
+      "sortDirection": "asc",
+      "scanRootPath": "Monomotion Mechanics/_Kanban"
+    },
+    {
+      "id": "1748156867189",
+      "name": "george",
+      "tags": [],
+      "members": [
+        "George"
+      ],
+      "excludeArchive": true,
+      "excludeDone": true,
+      "sortCriteria": "default",
+      "sortDirection": "asc",
+      "scanRootPath": "Monomotion Mechanics/_Kanban"
+    },
+    {
+      "id": "1748254403655",
+      "name": "weekly",
+      "tags": [],
+      "members": [],
+      "dueDateFilter": {
+        "value": 6,
+        "unit": "days"
+      },
+      "excludeArchive": true,
+      "excludeDone": true,
+      "sortCriteria": "dueDate",
+      "sortDirection": "asc",
+      "scanRootPath": "Monomotion Mechanics/_Kanban"
+    },
+    {
+      "id": "1748260567752",
+      "name": "overview",
+      "tags": [],
+      "members": [],
+      "excludeArchive": true,
+      "excludeDone": true,
+      "sortCriteria": "dueDate",
+      "sortDirection": "asc",
+      "scanRootPath": "Monomotion Mechanics/_Kanban"
+    }
+  ],
+  "lastSelectedWorkspaceViewId": "1748260567752",
+  "clickOutsideCardToSaveEdit": true,
+  "hideHashForTagsWithoutSymbols": true,
+  "teamMembers": [
+    "George",
+    "Misha",
+    "Test"
+  ],
+  "teamMemberColors": {
+    "George": {
+      "background": "#afffad",
+      "text": "#404040",
+      "email": "george.hartt@icloud.com"
+    },
+    "Misha": {
+      "background": "#8e22c9",
+      "text": "#e0e0e0",
+      "email": ""
+    },
+    "Test": {
+      "background": "",
+      "text": ""
+    }
+  },
+  "editable": true,
+  "memberAssignmentPrefix": "@@",
+  "auto-move-done-to-lane": true,
+  "auto-add-lane-tag": true,
+  "auto-add-board-tag": true,
+  "hide-lane-tag-display": true,
+  "hide-board-tag-display": true,
+  "apply-tag-colors-globally": true,
+  "apply-tag-symbols-globally": true,
+  "enableDueDateEmailReminders": true,
+  "dueDateReminderLastRun": 1751041202909,
+  "dueDateReminderTimeframeDays": 7,
+  "enableAutomaticEmailSending": true,
+  "automaticEmailSenderAddress": "monomotionkanban@gmail.com",
+  "automaticEmailAppPassword": "ppwqhvlkwtorbowp",
+  "automaticEmailSendingFrequencyDays": 7,
+  "hideDoneLane": true,
+  "timelineDayWidth": 180,
+  "timelineCardHeight": 40,
+  "enable-kanban-card-embeds": true,
+  "enable-kanban-code-blocks": true,
+  "hide-linked-cards-when-none-exist": true,
+  "hide-linked-cards-when-only-done": false,
+  "use-kanban-board-background-colors": true,
+  "member-view-lane-width": 350,
+  "hide-done-tasks": false,
+  "hide-tags-in-title": false,
+  "inline-metadata-field-names": {},
+  "max-list-items": 0,
+  "max-related-notes": 5,
+  "new-item-trigger": "-",
+  "new-lane-width": 272,
+  "show-filter": true,
+  "show-item-menu": true,
+  "show-week-numbers": false,
+  "sort-by": "position",
+  "sort-direction": "asc",
+  "task-completion-event": false,
+  "allow-markdown-links": false,
+  "allow-task-drag": true,
+  "archive-trigger": "- [x] ",
+  "disable-file-menu-actions": false,
+  "pretty-kanban-board-links": false,
+  "new-board-template": "",
+  "board-archive-folder": "",
+  "board-archive-obsidian-command": false,
+  "memberDisplayStyle": "initials",
+  "tag-emojis": [
+    {
+      "id": "i9ld45bht",
+      "type": "tag-emoji",
+      "accepts": [],
+      "children": [],
+      "data": {
+        "tagKey": "#mechanics",
+        "emoji": "🏠"
+      }
+    }
+  ],
+  "showHashForTagsWithoutSymbols": false
+}
