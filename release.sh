@@ -1,0 +1,1 @@
+npm run build && mv main.js release/ && mv styles.css release/ && cp manifest.json release/
