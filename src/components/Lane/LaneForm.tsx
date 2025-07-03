@@ -4,6 +4,7 @@ import useOnclickOutside from 'react-cool-onclickoutside';
 import { t } from 'src/lang/helpers';
 import { parseLaneTitle } from 'src/parsers/helpers/parser';
 
+import { debugLog } from '../../helpers/debugLogger';
 import { MarkdownEditor, allowNewLine } from '../Editor/MarkdownEditor';
 import { KanbanContext } from '../context';
 import { c, generateInstanceId } from '../helpers';
@@ -41,7 +42,7 @@ export function LaneForm({ onNewLane, closeLaneForm }: LaneFormProps) {
       });
 
       setTimeout(() => {
-        console.log(
+        debugLog(
           '[LaneForm] createLane (inner setTimeout): Dispatching CM changes and local state updates.'
         );
         cm.dispatch({
@@ -98,7 +99,7 @@ export function LaneForm({ onNewLane, closeLaneForm }: LaneFormProps) {
           className={c('lane-action-add')}
           onClick={() => {
             setTimeout(() => {
-              console.log('[LaneForm] Add list onClick: Calling createLane via setTimeout');
+              debugLog('[LaneForm] Add list onClick: Calling createLane via setTimeout');
               if (editorRef.current) {
                 createLane(editorRef.current, editorRef.current.state.doc.toString());
               }

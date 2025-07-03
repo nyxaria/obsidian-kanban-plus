@@ -1,3 +1,4 @@
+import { debugLog } from '../../helpers/debugLogger';
 import { FileWithPath, fromEvent } from 'file-selector';
 import { Platform, TFile, TFolder, htmlToMarkdown, moment, parseLinktext, setIcon } from 'obsidian';
 import { StateManager } from 'src/StateManager';
@@ -108,7 +109,7 @@ export function constructMenuDatePickerOnChange({
   const escapedTimeTrigger = escapeRegExpStr(timeTrigger as string);
 
   // --- DEBUG LOGS FOR TRIGGERS ---
-  console.log('[constructMenuDatePickerOnChange] Triggers:', {
+  debugLog('[constructMenuDatePickerOnChange] Triggers:', {
     dateTrigger,
     escapedDateTrigger,
     timeTrigger,
@@ -147,10 +148,10 @@ export function constructMenuDatePickerOnChange({
 
     // --- DEBUG LOGS START --- -> Combined with new logic
     if (hasDate) {
-      console.log(
+      debugLog(
         '[constructMenuDatePickerOnChange] Editing existing date (by remove & add logic):'
       );
-      console.log('  Original titleRaw (after priority strip):', JSON.stringify(titleRaw));
+      debugLog('  Original titleRaw (after priority strip):', JSON.stringify(titleRaw));
 
       // 1. Perform logic similar to "Remove Date"
       // More robust regex to remove date and associated time if present
@@ -164,15 +165,15 @@ export function constructMenuDatePickerOnChange({
       );
 
       titleRaw = titleRaw.replace(robustDateTimeRemoveRegex, '').trim();
-      console.log('  titleRaw after internal date removal:', JSON.stringify(titleRaw));
+      debugLog('  titleRaw after internal date removal:', JSON.stringify(titleRaw));
 
       // 2. Now, proceed as if we are adding a new date to this cleaned titleRaw
       titleRaw = `${titleRaw} ${dateTrigger}${wrappedDate}`.trim();
-      console.log('  titleRaw after re-adding new date:', JSON.stringify(titleRaw));
+      debugLog('  titleRaw after re-adding new date:', JSON.stringify(titleRaw));
     } else {
       // This is the logic for ADDING a new date (hasDate is false initially)
       titleRaw = `${titleRaw} ${dateTrigger}${wrappedDate}`.trim();
-      console.log(
+      debugLog(
         '[constructMenuDatePickerOnChange] Adding new date (hasDate was false). titleRaw:',
         JSON.stringify(titleRaw)
       );

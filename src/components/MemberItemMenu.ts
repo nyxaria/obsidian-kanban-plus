@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 
 import { KanbanView } from '../KanbanView';
 import { MemberView } from '../MemberView';
+import { debugLog } from '../helpers/debugLogger';
 import { t } from '../lang/helpers';
 import { TagNameModal } from '../modals/TagNameModal';
 import { getAllTagsFromKanbanBoards } from '../utils/kanbanTags';
@@ -130,18 +131,18 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
                 // Debug: Log what titles are actually in the KanbanView
                 const board = (kanbanView as KanbanView).getBoard();
                 if (board) {
-                  console.log('[MemberItemMenu] Available cards in KanbanView board:');
+                  debugLog('[MemberItemMenu] Available cards in KanbanView board:');
                   for (const lane of board.children) {
-                    console.log(`  Lane '${lane.data.title}':`);
+                    debugLog(`  Lane '${lane.data.title}':`);
                     for (const item of lane.children) {
-                      console.log(`    - Card title: "${item.data.title}"`);
-                      console.log(`    - Card titleRaw: "${item.data.titleRaw}"`);
-                      console.log(`    - Card blockId: "${item.data.blockId}"`);
-                      console.log(`    - Card id: "${item.id}"`);
+                      debugLog(`    - Card title: "${item.data.title}"`);
+                      debugLog(`    - Card titleRaw: "${item.data.titleRaw}"`);
+                      debugLog(`    - Card blockId: "${item.data.blockId}"`);
+                      debugLog(`    - Card id: "${item.id}"`);
                     }
                   }
                 } else {
-                  console.log('[MemberItemMenu] No board data available in KanbanView');
+                  debugLog('[MemberItemMenu] No board data available in KanbanView');
                 }
 
                 // Prepare navigation state similar to TimelineView
@@ -157,7 +158,7 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
                   },
                 };
 
-                console.log('[MemberItemMenu] Navigation state for highlighting:', {
+                debugLog('[MemberItemMenu] Navigation state for highlighting:', {
                   blockId: navigationState.eState.blockId,
                   cardTitle: navigationState.eState.cardTitle,
                   cleanedTitle: cleanTitle,
@@ -171,11 +172,11 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
 
                 // PROMINENT DEBUG: Show what we're using for highlighting
                 if (memberCard.blockId) {
-                  console.log(
+                  debugLog(
                     `🎯 [MemberItemMenu] USING BLOCK ID for highlighting: "${memberCard.blockId}"`
                   );
                 } else {
-                  console.log(`🎯 [MemberItemMenu] USING TITLE for highlighting: "${cleanTitle}"`);
+                  debugLog(`🎯 [MemberItemMenu] USING TITLE for highlighting: "${cleanTitle}"`);
                 }
 
                 // Use setState to properly integrate with the highlighting system
@@ -184,7 +185,7 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
                 // Add a slight delay to ensure setState has processed and the view is ready
                 setTimeout(() => {
                   if (kanbanView && (kanbanView as any).applyHighlight) {
-                    console.log(
+                    debugLog(
                       '[MemberItemMenu] Directly calling applyHighlight on KanbanView instance for:',
                       memberCard.sourceBoardPath,
                       'with target:',

@@ -1,3 +1,4 @@
+import { debugLog } from '../helpers/debugLogger';
 import update from 'immutability-helper';
 import moment from 'moment';
 import { Notice, TFile } from 'obsidian';
@@ -73,7 +74,7 @@ function InteractiveMarkdownRenderer(props: {
       const hrefValue = resolvedPath || linkPath;
 
       // Debug logging
-      console.log('Link processing:', {
+      debugLog('Link processing:', {
         linkPath,
         resolvedFile: resolvedFile?.path,
         hrefValue,
@@ -834,7 +835,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
   };
 
   const handleCardClick = (card: LinkedCard) => {
-    console.log('[LinkedCardsDisplay] handleCardClick called:', {
+    debugLog('[LinkedCardsDisplay] handleCardClick called:', {
       cardTitle: card.title,
       boardPath: card.boardPath,
       blockId: card.blockId,
@@ -846,7 +847,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
       linkText += `#^${card.blockId.replace(/^\^/, '')}`;
     }
 
-    console.log('[LinkedCardsDisplay] Opening link:', linkText);
+    debugLog('[LinkedCardsDisplay] Opening link:', linkText);
     plugin.app.workspace.openLinkText(linkText, currentFilePath, false);
   };
 
@@ -1012,7 +1013,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
   const allCardsAreDone = linkedCards.length > 0 && linkedCards.every((card) => card.checked);
 
   // Debug logging
-  console.log('LinkedCardsDisplay Debug:', {
+  debugLog('LinkedCardsDisplay Debug:', {
     linkedCardsCount: linkedCards.length,
     filteredCardsCount: filteredCards.length,
     hideWhenNoneExistSetting: hideWhenNoneExistSetting,
@@ -1031,7 +1032,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
 
   // Hide if no cards at all and setting is enabled
   if (linkedCards.length === 0 && hideWhenNoneExist) {
-    console.log('LinkedCardsDisplay: Hiding due to no cards and setting enabled');
+    debugLog('LinkedCardsDisplay: Hiding due to no cards and setting enabled');
     // Return a hidden marker instead of null to help with CSS targeting
     return (
       <div className="kanban-plugin__linked-cards-hidden-marker" style={{ display: 'none' }} />
@@ -1040,7 +1041,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
 
   // Hide if setting is enabled and all cards are done
   if (hideWhenOnlyDone && allCardsAreDone) {
-    console.log('LinkedCardsDisplay: Hiding due to setting enabled with all done');
+    debugLog('LinkedCardsDisplay: Hiding due to setting enabled with all done');
     return null;
   }
 
@@ -1048,11 +1049,11 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
   // (Don't hide if all cards are done - let the user use "Show Done" checkbox)
   // (Don't hide if no cards exist at all - that's handled by the first condition)
   if (linkedCards.length > 0 && filteredCards.length === 0 && !allCardsAreDone) {
-    console.log('LinkedCardsDisplay: Hiding due to no filtered cards (mixed done/undone)');
+    debugLog('LinkedCardsDisplay: Hiding due to no filtered cards (mixed done/undone)');
     return null;
   }
 
-  console.log('LinkedCardsDisplay: Rendering component with', filteredCards.length, 'cards');
+  debugLog('LinkedCardsDisplay: Rendering component with', filteredCards.length, 'cards');
 
   return (
     <div className="kanban-plugin__linked-cards-container">
@@ -1083,7 +1084,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
               className="kanban-plugin__linked-card-item"
               style={cardStyle}
               onClick={(e) => {
-                console.log('[LinkedCardsDisplay] Card div clicked:', {
+                debugLog('[LinkedCardsDisplay] Card div clicked:', {
                   target: e.target,
                   currentTarget: e.currentTarget,
                   cardTitle: card.title,

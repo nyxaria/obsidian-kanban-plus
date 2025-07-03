@@ -1,3 +1,4 @@
+import { debugLog } from '../helpers/debugLogger';
 import update from 'immutability-helper';
 import { App, MarkdownView, TFile, moment } from 'obsidian';
 import Preact, { Dispatch, RefObject, useEffect } from 'preact/compat';
@@ -430,7 +431,7 @@ export function useSearchValue(
       items,
       query,
       search: (query, immediate) => {
-        console.log(
+        debugLog(
           '[useSearchValue] search function called with query:',
           query,
           'immediate:',

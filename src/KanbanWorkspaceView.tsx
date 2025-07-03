@@ -40,6 +40,7 @@ import { getTagColorFn, getTagSymbolFn } from './components/helpers';
 import { Lane } from './components/types';
 import { ItemData, TagColor, TagSymbolSetting, TeamMemberColorConfig } from './components/types';
 import { hasFrontmatterKey } from './helpers';
+import { debugLog } from './helpers/debugLogger';
 import KanbanPlugin from './main';
 import { ListFormat } from './parsers/List';
 import { listItemToItemData } from './parsers/formats/list';
@@ -210,7 +211,7 @@ async function moveCardToDoneLaneInMarkdown(
   targetFile: TFile, // Pass TFile for StateManager context
   cardToMove: WorkspaceCard
 ): Promise<string> {
-  console.log(
+  debugLog(
     '[WorkspaceView] moveCardToDoneLaneInMarkdown: Called with card:',
     cardToMove.title,
     'for file:',
@@ -230,7 +231,7 @@ async function moveCardToDoneLaneInMarkdown(
 
   try {
     const board = parser.mdToBoard(markdownContent);
-    console.log(
+    debugLog(
       '[WorkspaceView] moveCardToDoneLaneInMarkdown: Parsed markdown to board object with',
       board.children?.length || 0,
       'lanes'
@@ -255,7 +256,7 @@ async function moveCardToDoneLaneInMarkdown(
         sourceLaneIndex = i;
         itemIndexInSourceLane = itemIdx;
         cardItemData = lane.children[itemIdx].data; // Get the ItemData
-        console.log(
+        debugLog(
           `[WorkspaceView] moveCardToDoneLaneInMarkdown: Found card '${cardItemData.titleRaw}' in lane '${lane.data.title}'`
         );
         break;
@@ -273,7 +274,7 @@ async function moveCardToDoneLaneInMarkdown(
     // Find or create "Done" lane
     let doneLaneIndex = board.children.findIndex((lane) => lane.data.title === DONE_LANE_NAME);
     let boardForUpdate = board;
-    console.log(
+    debugLog(
       `[WorkspaceView] moveCardToDoneLaneInMarkdown: Initial Done lane index: ${doneLaneIndex}`
     );
 
@@ -290,13 +291,13 @@ async function moveCardToDoneLaneInMarkdown(
       };
       boardForUpdate = update(board, { children: { $push: [newLane] } });
       doneLaneIndex = boardForUpdate.children.length - 1;
-      console.log(
+      debugLog(
         `[WorkspaceView] moveCardToDoneLaneInMarkdown: "Done" lane created at index ${doneLaneIndex}. Board now has ${boardForUpdate.children?.length || 0} lanes`
       );
     }
 
     if (sourceLaneIndex === doneLaneIndex) {
-      console.log(
+      debugLog(
         `[WorkspaceView] moveCardToDoneLaneInMarkdown: Card ${cardToMove.title} is already in the Done lane.`
       );
       return markdownContent;
@@ -305,7 +306,7 @@ async function moveCardToDoneLaneInMarkdown(
     // Perform the move using immutability-helper on the board structure
     const itemToMoveFromBoard =
       boardForUpdate.children[sourceLaneIndex].children[itemIndexInSourceLane];
-    console.log(
+    debugLog(
       `[WorkspaceView] moveCardToDoneLaneInMarkdown: Moving item from source lane ${sourceLaneIndex} to done lane ${doneLaneIndex}`
     );
     const movedBoard = update(boardForUpdate, {
@@ -462,8 +463,8 @@ function KanbanWorkspaceViewComponent(props: {
     };
   }, []);
 
-  // console.log('[WorkspaceView] Raw tag-colors setting:', JSON.stringify(props.plugin.settings['tag-colors'], null, 2));
-  // console.log('[WorkspaceView] Raw tag-symbols setting:', JSON.stringify(props.plugin.settings['tag-symbols'], null, 2));
+  // debugLog('[WorkspaceView] Raw tag-colors setting:', JSON.stringify(props.plugin.settings['tag-colors'], null, 2));
+  // debugLog('[WorkspaceView] Raw tag-symbols setting:', JSON.stringify(props.plugin.settings['tag-symbols'], null, 2));
 
   const getTagColor = useMemo(() => {
     return getTagColorFn(props.plugin.settings['tag-colors'] || []);
@@ -516,7 +517,7 @@ function KanbanWorkspaceViewComponent(props: {
       currentSortDirection: 'asc' | 'desc',
       currentScanRootPath: string // ADDED: New parameter
     ) => {
-      console.log(
+      debugLog(
         '[WorkspaceView] handleScanDirectory called with:',
         'Tags:',
         tagsToFilterBy,
@@ -545,7 +546,7 @@ function KanbanWorkspaceViewComponent(props: {
       const app = props.plugin.app;
 
       // --- DEBUG LOG AT START OF SCAN ---
-      console.log('[WorkspaceView] handleScanDirectory: Received filter arguments:', {
+      debugLog('[WorkspaceView] handleScanDirectory: Received filter arguments:', {
         tagsToFilterBy,
         membersToFilterBy,
         currentDueDateValue,
@@ -575,7 +576,7 @@ function KanbanWorkspaceViewComponent(props: {
         const abstractFile = app.vault.getAbstractFileByPath(currentScanRootPath.trim());
         if (abstractFile instanceof TFolder) {
           targetFolder = abstractFile;
-          console.log(`[WorkspaceView] Scanning user-defined root path: ${targetFolder.path}`);
+          debugLog(`[WorkspaceView] Scanning user-defined root path: ${targetFolder.path}`);
         } else {
           if (isMounted.current) {
             setError(
@@ -591,7 +592,7 @@ function KanbanWorkspaceViewComponent(props: {
       } else {
         // Default to vault root if no path is specified
         targetFolder = app.vault.getRoot();
-        console.log('[WorkspaceView] Scanning from vault root (no specific path provided).');
+        debugLog('[WorkspaceView] Scanning from vault root (no specific path provided).');
       }
       // END MODIFIED
 
@@ -618,7 +619,7 @@ function KanbanWorkspaceViewComponent(props: {
 
               // <<< ADDED DEBUG LOGS for Overall.md >>>
               if (mdFile.path === 'Monomotion Mechanics/Kanban/Overall.md') {
-                console.log(
+                debugLog(
                   `[WorkspaceView] DEBUG SCAN: Content of ${mdFile.path} being processed in handleScanDirectory (first 500 chars):`,
                   fileContent.substring(0, 500) + '...'
                 );
@@ -639,19 +640,19 @@ function KanbanWorkspaceViewComponent(props: {
 
               // <<< ADDED DEBUG LOGS for Overall.md AST >>>
               if (mdFile.path === 'Monomotion Mechanics/Kanban/Overall.md') {
-                console.log(
+                debugLog(
                   `[WorkspaceView] DEBUG SCAN: AST for ${mdFile.path} (first 1000 chars of stringified):`,
                   JSON.stringify(ast, null, 2).substring(0, 1000) + '...'
                 );
-                console.log(
+                debugLog(
                   `[WorkspaceView] DEBUG SCAN: AST for ${mdFile.path} has ${ast.children.length} top-level children.`
                 );
                 ast.children.forEach((child, index) => {
-                  console.log(
+                  debugLog(
                     `[WorkspaceView] DEBUG SCAN: AST Child ${index} for ${mdFile.path} - Type: ${child.type}`
                   );
                   if (child.type === 'list') {
-                    console.log(
+                    debugLog(
                       `[WorkspaceView] DEBUG SCAN: List Child ${index} for ${mdFile.path} has ${(child as MdastList).children.length} items.`
                     );
                   }
@@ -713,7 +714,7 @@ function KanbanWorkspaceViewComponent(props: {
         if (isMounted.current) {
           setAllScannedTags(sortedUniqueTags);
         }
-        console.log('[WorkspaceView] All scanned tags (for dropdown):', sortedUniqueTags);
+        debugLog('[WorkspaceView] All scanned tags (for dropdown):', sortedUniqueTags);
 
         // Now, filter from allCardsDataPreFilter to populate the final allCards array for display
         for (const internalCard of allCardsDataPreFilter) {
@@ -765,8 +766,8 @@ function KanbanWorkspaceViewComponent(props: {
             passesDoneFilter
           ) {
             // console.log and allCards.push logic was here, it's correct
-            // ... (The existing console.log('[WorkspaceView] PRE-PUSH...') and allCards.push({...}) logic remains here)
-            console.log(
+            // ... (The existing debugLog('[WorkspaceView] PRE-PUSH...') and allCards.push({...}) logic remains here)
+            debugLog(
               '[WorkspaceView] PRE-PUSH. Card Title:',
               itemData.titleRaw.slice(0, 20),
               'itemData.metadata.date:',
@@ -881,7 +882,7 @@ function KanbanWorkspaceViewComponent(props: {
 
   // Effect to re-scan when filters change
   useEffect(() => {
-    console.log(
+    debugLog(
       '[EffectUpdate] Filters changed. activeFilterTags before calling handleScanDirectory:',
       JSON.stringify(activeFilterTags) // Log the current value of activeFilterTags for this effect run
     );
@@ -912,7 +913,7 @@ function KanbanWorkspaceViewComponent(props: {
   // Effect to listen for refresh events from the parent ItemView
   useEffect(() => {
     const refresher = () => {
-      console.log(
+      debugLog(
         "[KanbanWorkspaceViewComponent] 'refresh-data' event received. Calling handleScanDirectory."
       );
       // Ensure we use the latest filter states when refreshing
@@ -1053,7 +1054,7 @@ function KanbanWorkspaceViewComponent(props: {
               new Notice(`Moved "${card.title}" to Done lane in ${targetFile.basename}.`);
 
               // Wait for StateManager and cache to update before refreshing workspace view
-              console.log(
+              debugLog(
                 '[WorkspaceView] handleToggleCardDoneStatus: Waiting for StateManager and cache to process file changes...'
               );
               await new Promise((resolve) => setTimeout(resolve, 200)); // Delay for StateManager and cache processing
@@ -1061,7 +1062,7 @@ function KanbanWorkspaceViewComponent(props: {
           }
 
           // --- DEBUG LOG BEFORE REFRESH ---
-          console.log(
+          debugLog(
             '[WorkspaceView] handleToggleCardDoneStatus: Calling handleScanDirectory with filters:',
             {
               activeFilterTags: [...activeFilterTags],
@@ -1185,7 +1186,7 @@ function KanbanWorkspaceViewComponent(props: {
       });
 
       if (existingLeaf) {
-        console.log(
+        debugLog(
           `[WorkspaceView] handleRowClick: Found existing Kanban view for ${card.sourceBoardPath}. Activating and setting state.`,
           navigationState
         );
@@ -1196,7 +1197,7 @@ function KanbanWorkspaceViewComponent(props: {
           { history: true }
         );
       } else {
-        console.log(
+        debugLog(
           `[WorkspaceView] handleRowClick: No existing Kanban view found for ${card.sourceBoardPath}. Opening link '${linkPath}' with newLeaf: 'tab' and state:`,
           navigationState
         );
@@ -1404,24 +1405,24 @@ function KanbanWorkspaceViewComponent(props: {
 
       // --- Assign Members ---
       const rawTeamMembers = props.plugin.settings.teamMembers || [];
-      console.log('[WorkspaceView] rawTeamMembers', rawTeamMembers);
+      debugLog('[WorkspaceView] rawTeamMembers', rawTeamMembers);
       // Filter for actual, non-empty string members
       const validTeamMembers = rawTeamMembers.filter(
         (member) => typeof member === 'string' && member.trim() !== ''
       );
 
       if (validTeamMembers.length > 0) {
-        console.log('[WorkspaceView] validTeamMembers', validTeamMembers);
+        debugLog('[WorkspaceView] validTeamMembers', validTeamMembers);
         menu.addItem((item) => {
           item.setTitle('Assign/Unassign Members').setIcon('users');
 
           const memberSubMenu = (item as any).setSubmenu(); // Use (item as any) to call setSubmenu and assign its result
 
           validTeamMembers.forEach((member) => {
-            console.log('[WorkspaceView] member', member);
+            debugLog('[WorkspaceView] member', member);
             memberSubMenu.addItem((subItem: MenuItem) => {
               // Add items to the menu returned by setSubmenu
-              console.log(
+              debugLog(
                 '[WorkspaceView] subItem',
                 subItem,
                 member,
@@ -1436,10 +1437,10 @@ function KanbanWorkspaceViewComponent(props: {
 
                   if (isAssigned) {
                     updatedMembers = updatedMembers.filter((m) => m !== member);
-                    console.log('[WorkspaceView] updatedMembers isAssigned', updatedMembers);
+                    debugLog('[WorkspaceView] updatedMembers isAssigned', updatedMembers);
                   } else {
                     updatedMembers.push(member);
-                    console.log('[WorkspaceView] updatedMembers else', updatedMembers);
+                    debugLog('[WorkspaceView] updatedMembers else', updatedMembers);
                   }
 
                   // 1. Update local state
@@ -1575,7 +1576,7 @@ function KanbanWorkspaceViewComponent(props: {
                 });
             });
           });
-          console.log('[WorkspaceView] memberSubMenu HERE', memberSubMenu);
+          debugLog('[WorkspaceView] memberSubMenu HERE', memberSubMenu);
         });
       }
 
@@ -1608,7 +1609,7 @@ function KanbanWorkspaceViewComponent(props: {
               .onClick(async () => {
                 const newPriority =
                   currentCardPriority === priorityValue ? undefined : priorityValue;
-                console.log(
+                debugLog(
                   '[WorkspaceView] Assign Priority onClick: currentCardPriority:',
                   currentCardPriority,
                   'priorityValue:',
@@ -1740,7 +1741,7 @@ function KanbanWorkspaceViewComponent(props: {
 
                     // Add new priority (if any)
                     if (newPriority) {
-                      console.log(
+                      debugLog(
                         '[WorkspaceView] updateLineWithPriority: Constructing priority tag. newPriority value:',
                         newPriority
                       );
@@ -2091,7 +2092,7 @@ function KanbanWorkspaceViewComponent(props: {
               .setTitle(tag) // Display WITHOUT # in menu
               .setChecked(activeFilterTags.includes(tag)) // activeFilterTags stores tags without #
               .onClick(() => {
-                console.log(
+                debugLog(
                   '[TagDropdownClick] Before setActiveFilterTags. Current activeFilterTags:',
                   JSON.stringify(activeFilterTags),
                   'Tag to toggle:',
@@ -2101,7 +2102,7 @@ function KanbanWorkspaceViewComponent(props: {
                   const newSelectedTags = prevSelectedTags.includes(tag)
                     ? prevSelectedTags.filter((t) => t !== tag)
                     : [...prevSelectedTags, tag];
-                  console.log(
+                  debugLog(
                     '[TagDropdownClick] Inside setActiveFilterTags. New selected tags calculated:',
                     JSON.stringify(newSelectedTags)
                   );
@@ -2157,7 +2158,7 @@ function KanbanWorkspaceViewComponent(props: {
   // END ADDED SECTION
 
   // ADDED: Log activeFilterTags right before rendering the display
-  console.log(
+  debugLog(
     '[KanbanWorkspaceViewComponent] Rendering activeFilterTags for display:',
     JSON.stringify(activeFilterTags)
   );
@@ -2862,7 +2863,7 @@ function KanbanWorkspaceViewComponent(props: {
                 // Due date calculation for display
                 let dueDateDisplay = '';
                 const isCardDateMoment = moment.isMoment(card.date);
-                console.log(
+                debugLog(
                   '[WorkspaceView] IN MAP. Card Title:',
                   card.title.slice(0, 20),
                   'card.date:',
@@ -2874,7 +2875,7 @@ function KanbanWorkspaceViewComponent(props: {
                   'Source Board:',
                   card.sourceBoardName
                 );
-                // console.log('card:', card); // Reduced logging for clarity
+                // debugLog('card:', card); // Reduced logging for clarity
 
                 if (card.date) {
                   try {
@@ -2883,8 +2884,8 @@ function KanbanWorkspaceViewComponent(props: {
                       ? card.date.clone().startOf('day')
                       : moment(card.date).startOf('day');
 
-                    // console.log('cardDateMoment:', cardDateMoment);
-                    // console.log('todayMoment:', todayMoment);
+                    // debugLog('cardDateMoment:', cardDateMoment);
+                    // debugLog('todayMoment:', todayMoment);
                     if (cardDateMoment.isValid()) {
                       const diffDays = cardDateMoment.diff(todayMoment, 'days');
                       dueDateDisplay = diffDays === 0 ? 'Today' : `${diffDays}`;
@@ -3133,7 +3134,7 @@ export class KanbanWorkspaceView extends ItemView {
 
   // ADDED: Method to handle file/folder renames
   async handleRename(file: TAbstractFile, oldPath: string) {
-    console.log(`[KanbanWorkspaceView] handleRename: File '${oldPath}' renamed to '${file.path}'`);
+    debugLog(`[KanbanWorkspaceView] handleRename: File '${oldPath}' renamed to '${file.path}'`);
     let settingsChanged = false;
     let currentLeafViewAffected = false;
 
@@ -3142,13 +3143,13 @@ export class KanbanWorkspaceView extends ItemView {
 
     const updatedSavedViews = savedViews.map((view) => {
       if (view.scanRootPath === oldPath) {
-        console.log(
+        debugLog(
           `[KanbanWorkspaceView] handleRename: Updating scanRootPath in saved view '${view.name}' from '${oldPath}' to '${file.path}'`
         );
         settingsChanged = true;
         if (this.currentLeafSavedViewId === view.id) {
           currentLeafViewAffected = true;
-          console.log(
+          debugLog(
             `[KanbanWorkspaceView] handleRename: scanRootPath for current leaf's view ('${view.name}') updated.`
           );
         }
@@ -3168,7 +3169,7 @@ export class KanbanWorkspaceView extends ItemView {
     // If a saved view's scanRootPath was updated, the component's useEffect for settings changes
     // should have updated its internal scanRootPath state before this scan runs.
     // If a file *within* a scan path was renamed, this refresh will pick up that change.
-    console.log(
+    debugLog(
       "[KanbanWorkspaceView] handleRename: Triggering 'refresh-data' to re-scan with potentially updated configurations."
     );
     this.viewEvents.trigger('refresh-data');
@@ -3186,7 +3187,7 @@ export class KanbanWorkspaceView extends ItemView {
     this.activeSavedViewNameForDisplay = name;
     this.currentLeafSavedViewId = id; // Set the instance property
 
-    console.log(
+    debugLog(
       `[KanbanWorkspaceView] setViewConfigurationForLeaf: Name: ${name}, ID: ${id}. Current this.currentLeafSavedViewId is now ${this.currentLeafSavedViewId}`
     );
 
@@ -3200,13 +3201,13 @@ export class KanbanWorkspaceView extends ItemView {
   }
 
   public refreshHeader() {
-    console.log(
+    debugLog(
       `[KanbanWorkspaceView] refreshHeader START for leaf: ${(this.leaf as any).id}. Current display name: '${this.activeSavedViewNameForDisplay}'`
     );
     this.app.workspace.trigger('layout-change');
     this.app.workspace.trigger('layout-ready'); // Added this event
     (this.leaf as any).updateHeader?.(); // More direct attempt to update the header
-    console.log(
+    debugLog(
       "[KanbanWorkspaceView] refreshHeader END: Called app.workspace.trigger('layout-change'), app.workspace.trigger('layout-ready'), and (leaf as any).updateHeader()."
     );
   }
@@ -3217,14 +3218,14 @@ export class KanbanWorkspaceView extends ItemView {
 
   getDisplayText() {
     const leafId = (this.leaf as any).id ?? 'N/A_LEAF_ID';
-    console.log(
+    debugLog(
       `[KanbanWorkspaceView] getDisplayText START for leaf: ${leafId}. activeSavedViewNameForDisplay: '${this.activeSavedViewNameForDisplay}', currentLeafSavedViewId: '${this.currentLeafSavedViewId}'`
     );
 
     if (this.activeSavedViewNameForDisplay) {
       const name = this.activeSavedViewNameForDisplay;
       const displayText = `${name.charAt(0).toUpperCase() + name.slice(1)}`;
-      console.log(
+      debugLog(
         `[KanbanWorkspaceView] getDisplayText RETURNING (from activeSavedViewNameForDisplay): '${displayText}' for leaf: ${leafId}`
       );
       return displayText;
@@ -3237,13 +3238,13 @@ export class KanbanWorkspaceView extends ItemView {
       const activeView = savedViews.find((v) => v.id === lastViewId);
       if (activeView && activeView.name) {
         const displayText = `${activeView.name.charAt(0).toUpperCase() + activeView.name.slice(1)}`;
-        console.log(
+        debugLog(
           `[KanbanWorkspaceView] getDisplayText RETURNING (from global fallback): '${displayText}' for leaf: ${leafId}`
         );
         return displayText;
       }
     }
-    console.log(
+    debugLog(
       `[KanbanWorkspaceView] getDisplayText RETURNING (default 'Workspace') for leaf: ${leafId}`
     );
     return 'Workspace';
@@ -3257,7 +3258,7 @@ export class KanbanWorkspaceView extends ItemView {
   getState() {
     const state = super.getState();
     state.currentLeafSavedViewId = this.currentLeafSavedViewId;
-    console.log(
+    debugLog(
       `[KanbanWorkspaceView] getState: Saving currentLeafSavedViewId: ${this.currentLeafSavedViewId} for leaf: ${(this.leaf as any).id}`
     );
     return state;
@@ -3265,7 +3266,7 @@ export class KanbanWorkspaceView extends ItemView {
 
   // Override setState to restore our leaf-specific view ID
   async setState(state: any, result: ViewStateResult) {
-    console.log(
+    debugLog(
       `[KanbanWorkspaceView] setState: Received state for leaf ${(this.leaf as any).id}:`,
       JSON.stringify(state) // Log the full state, be cautious with large states in production
     );
@@ -3280,7 +3281,7 @@ export class KanbanWorkspaceView extends ItemView {
         );
         if (savedView) {
           this.activeSavedViewNameForDisplay = savedView.name;
-          console.log(
+          debugLog(
             `[KanbanWorkspaceView] setState: Restored currentLeafSavedViewId: ${this.currentLeafSavedViewId}, Name: ${savedView.name} for leaf: ${(this.leaf as any).id}`
           );
         } else {
@@ -3292,7 +3293,7 @@ export class KanbanWorkspaceView extends ItemView {
         }
       } else {
         // currentLeafSavedViewId is present in state but is null, undefined, or empty string
-        console.log(
+        debugLog(
           `[KanbanWorkspaceView] setState: currentLeafSavedViewId is present in state but null/empty: '${incomingLeafId}'. Clearing leaf-specific view for leaf: ${(this.leaf as any).id}`
         );
         this.currentLeafSavedViewId = null;
@@ -3302,7 +3303,7 @@ export class KanbanWorkspaceView extends ItemView {
       // The key 'currentLeafSavedViewId' IS NOT PRESENT in the incoming state.
       // In this case, we do NOT modify this.currentLeafSavedViewId or this.activeSavedViewNameForDisplay.
       // This prevents generic state updates (e.g., from onResize or other plugins) from wiping our leaf-specific view.
-      console.log(
+      debugLog(
         `[KanbanWorkspaceView] setState: Incoming state for leaf ${(this.leaf as any).id} does NOT contain 'currentLeafSavedViewId'. Preserving existing values: ID=${this.currentLeafSavedViewId}, Name=${this.activeSavedViewNameForDisplay}`
       );
     }
@@ -3318,19 +3319,19 @@ export class KanbanWorkspaceView extends ItemView {
     const idToUseForKeyAndProp =
       explicitInitialId === undefined ? this.currentLeafSavedViewId : explicitInitialId;
 
-    console.log(
+    debugLog(
       `[KanbanWorkspaceView] renderReactComponent: Rendering for leaf ${(this.leaf as any).id}. ID for key/prop: ${idToUseForKeyAndProp}, Name for display: ${this.activeSavedViewNameForDisplay}`
     );
 
     if (this.contentEl) {
       // Use Preact's unmountComponentAtNode
       const unmounted = unmountComponentAtNode(this.contentEl);
-      console.log(
+      debugLog(
         `[KanbanWorkspaceView] renderReactComponent: Attempted unmount. Was component unmounted? ${unmounted}. contentEl children after unmount: ${this.contentEl.children.length}`
       );
       // Aggressive cleanup if unmount fails or leaves children
       if (!unmounted || this.contentEl.children.length > 0) {
-        console.log(
+        debugLog(
           `[KanbanWorkspaceView] renderReactComponent: Unmount returned ${unmounted} or children still exist. Clearing innerHTML.`
         );
         this.contentEl.innerHTML = '';
@@ -3348,7 +3349,7 @@ export class KanbanWorkspaceView extends ItemView {
         }),
         this.contentEl
       );
-      console.log(
+      debugLog(
         '[KanbanWorkspaceView] renderReactComponent: Preact component rendered/updated using createElement.'
       );
     } else {
@@ -3372,7 +3373,7 @@ export class KanbanWorkspaceView extends ItemView {
       const isObsidianReportingThisAsActiveView =
         this.app.workspace.getActiveViewOfType(KanbanWorkspaceView) === this;
 
-      console.log(
+      debugLog(
         `[KanbanWorkspaceView] onload (setTimeout ${timeoutDuration}ms): Checking initial active state. Details:`,
         {
           currentActiveLeafPolled: currentActiveLeafPolled
@@ -3390,12 +3391,12 @@ export class KanbanWorkspaceView extends ItemView {
       );
 
       if (isActiveLeafThisViewLeaf || isObsidianReportingThisAsActiveView) {
-        console.log(
+        debugLog(
           `[KanbanWorkspaceView] onload (setTimeout ${timeoutDuration}ms): View determined active on load. Triggering 'refresh-data'. Conditions: (polledActiveLeaf === this.leaf): ${isActiveLeafThisViewLeaf}, (getActiveViewOfType === this): ${isObsidianReportingThisAsActiveView}`
         );
         this.viewEvents.trigger('refresh-data');
       } else {
-        console.log(
+        debugLog(
           `[KanbanWorkspaceView] onload (setTimeout ${timeoutDuration}ms): View is NOT determined active on load.`
         );
       }
@@ -3406,7 +3407,7 @@ export class KanbanWorkspaceView extends ItemView {
     const timeoutDuration = 1000; // Centralized timeout duration
 
     if (eventLeaf === this.leaf) {
-      console.log(
+      debugLog(
         `[KanbanWorkspaceView] handleActiveLeafChange: Event is for this.leaf. Scheduling refresh check in ${timeoutDuration}ms.`,
         {
           eventLeafId: (eventLeaf as any)?.id ?? 'N/A',
@@ -3421,7 +3422,7 @@ export class KanbanWorkspaceView extends ItemView {
         const isThisViewStillActiveViaApi =
           this.app.workspace.getActiveViewOfType(KanbanWorkspaceView) === this;
 
-        console.log(
+        debugLog(
           `[KanbanWorkspaceView] handleActiveLeafChange (setTimeout ${timeoutDuration}ms): Post-timeout check for this.leaf. Details:`,
           {
             eventLeafAtEventTime: eventLeaf
@@ -3441,18 +3442,18 @@ export class KanbanWorkspaceView extends ItemView {
         );
 
         if (isThisLeafStillActiveViaPolled || isThisViewStillActiveViaApi) {
-          console.log(
+          debugLog(
             `[KanbanWorkspaceView] handleActiveLeafChange (setTimeout ${timeoutDuration}ms): Confirmed active. Triggering 'refresh-data'. Conditions: (polledActiveLeaf === this.leaf): ${isThisLeafStillActiveViaPolled}, (getActiveViewOfType === this): ${isThisViewStillActiveViaApi}`
           );
           this.viewEvents.trigger('refresh-data');
         } else {
-          console.log(
+          debugLog(
             `[KanbanWorkspaceView] handleActiveLeafChange (setTimeout ${timeoutDuration}ms): View no longer considered active post-timeout.`
           );
         }
       }, timeoutDuration);
     } else {
-      console.log(
+      debugLog(
         `[KanbanWorkspaceView] handleActiveLeafChange: Event leaf (viewType: ${eventLeaf?.view?.getViewType()}, id: ${(eventLeaf as any)?.id ?? 'N/A'}) is not this.leaf (viewType: ${this.getViewType()}, id: ${(this.leaf as any)?.id ?? 'N/A'}). Ignoring.`,
         {
           eventLeafPassed: eventLeaf

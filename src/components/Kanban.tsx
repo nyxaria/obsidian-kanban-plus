@@ -1,3 +1,4 @@
+import { debugLog } from '../helpers/debugLogger';
 import animateScrollTo from 'animated-scroll-to';
 import classcat from 'classcat';
 import EventEmitter from 'eventemitter3';
@@ -146,7 +147,7 @@ export const Kanban = ({
       if (view.pendingHighlightScroll) reason = 'pendingHighlightScroll is true';
       if (view.currentSearchMatch)
         reason += (reason ? ' and ' : '') + 'currentSearchMatch is present';
-      console.log(
+      debugLog(
         `[Kanban Component] useEffect: Relevant condition met (${reason}). Calling view.setReactState({}).`
       );
       setReactState({});
@@ -155,7 +156,7 @@ export const Kanban = ({
 
   useEffect(() => {
     const handleCancelEdits = () => {
-      console.log('[Kanban Component] Received "cancelAllCardEdits" event. Incrementing counter.');
+      debugLog('[Kanban Component] Received "cancelAllCardEdits" event. Incrementing counter.');
       setCancelEditCounter((c) => c + 1);
     };
     emitter.on('cancelAllCardEdits', handleCancelEdits);
@@ -240,12 +241,12 @@ export const Kanban = ({
   // END ADDED
 
   useEffect(() => {
-    console.log(
+    debugLog(
       '[Kanban Component] useEffect for initialSearch: view.initialSearchQuery is:',
       view.initialSearchQuery
     );
     if (view.initialSearchQuery) {
-      console.log('[Kanban Component] Applying initial search:', view.initialSearchQuery);
+      debugLog('[Kanban Component] Applying initial search:', view.initialSearchQuery);
       searchValue.search(view.initialSearchQuery, true);
       view.initialSearchQuery = undefined;
     }

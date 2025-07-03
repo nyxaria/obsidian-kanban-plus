@@ -12,6 +12,7 @@ import { DndManagerContext, EntityManagerContext } from 'src/dnd/components/cont
 import { hasFrontmatterKey } from 'src/helpers';
 import { PromiseCapability } from 'src/helpers/util';
 
+import { debugLog } from '../../helpers/debugLogger';
 import { applyCheckboxIndexes } from '../../helpers/renderMarkdown';
 import { KanbanCardEmbed } from '../KanbanCardEmbed';
 import { IntersectionObserverContext, KanbanContext, SortContext } from '../context';
@@ -112,7 +113,7 @@ export class BasicMarkdownRenderer extends Component {
       this.searchMatches.length > 0 &&
       this.view.currentSearchMatch?.content
     ) {
-      console.log(
+      debugLog(
         '[BasicMarkdownRenderer] Applying Mark.js highlights for global search matches:',
         this.searchMatches
       );
@@ -122,7 +123,7 @@ export class BasicMarkdownRenderer extends Component {
       });
       // Remove duplicate terms to avoid marking issues if search terms overlap or are identical
       const uniqueTerms = [...new Set(termsToMark)];
-      console.log('[BasicMarkdownRenderer] Unique terms to mark:', uniqueTerms);
+      debugLog('[BasicMarkdownRenderer] Unique terms to mark:', uniqueTerms);
 
       this.mark.unmark({
         // Clear previous marks from Mark.js before applying new ones

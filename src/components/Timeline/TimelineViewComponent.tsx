@@ -1,3 +1,4 @@
+import { debugLog } from '../../helpers/debugLogger';
 // May need to move/share this
 // import { MdastHeading, MdastList, MdastListItem, MdastRoot } from 'mdast'; // Removed due to import errors
 import moment from 'moment';
@@ -235,7 +236,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
 
   // Moved scanCards definition before useEffect hooks that use it
   const scanCards = useCallback(async () => {
-    console.log('[TimelineView] Starting scanCards...');
+    debugLog('[TimelineView] Starting scanCards...');
     if (!isMounted.current) return;
     setIsLoading(true);
     setError(null);
@@ -265,7 +266,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
     try {
       const targetFolder = app.vault.getRoot();
       const allMdFiles = await recursivelyGetAllMdFilesInFolder(targetFolder);
-      console.log(`[TimelineView] Found ${allMdFiles.length} MD files to scan.`);
+      debugLog(`[TimelineView] Found ${allMdFiles.length} MD files to scan.`);
 
       for (const mdFile of allMdFiles) {
         try {
@@ -288,72 +289,72 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
             ast: any; // Adjust 'any' to a more specific mdast type if available/known
             settings: any; // Adjust 'any' to KanbanSettings if appropriate
           };
-          console.log(
+          debugLog(
             `[TimelineView] DEBUG: After parseMarkdown for ${mdFile.path}. parsedResult exists: ${!!parsedResult}, settings exists: ${!!parsedResult?.settings}`
           );
 
           // Log the value being checked for board identification
           const kanbanPluginSetting = parsedResult?.settings?.['kanban-plugin'];
-          console.log(
+          debugLog(
             `[TimelineView] File: ${mdFile.path}, kanban-plugin setting: "${kanbanPluginSetting}" (Type: ${typeof kanbanPluginSetting})`
           );
 
           // Check if the parsed file is a Kanban board based on its settings
           if (parsedResult && parsedResult.settings && kanbanPluginSetting === 'board') {
-            console.log(
+            debugLog(
               `[TimelineView] File ${mdFile.path} identified as a Kanban board. Processing for timeline cards.`
             );
             const ast = parsedResult.ast; // Use the AST from the parsed result
 
             // Existing logic for processing ast.children (headings, colors, lists) starts here
-            console.log(
+            debugLog(
               `[TimelineView] Processing AST for ${mdFile.path}. Number of root children: ${ast.children.length}`
             );
             let currentLaneColor: string | undefined = undefined;
             let currentLaneTitle: string | undefined = undefined;
 
             for (const astNode of ast.children) {
-              console.log(`[TimelineView] AST Node: type=${astNode.type}`);
+              debugLog(`[TimelineView] AST Node: type=${astNode.type}`);
               if (astNode.type === 'heading') {
                 currentLaneColor = undefined;
                 currentLaneTitle = getHeadingText(astNode as any);
-                console.log(
+                debugLog(
                   `[TimelineView] Encountered heading: "${currentLaneTitle}". Reset color. Searching for color comment...`
                 );
                 const headingIndex = ast.children.indexOf(astNode);
                 for (let i = headingIndex + 1; i < ast.children.length; i++) {
                   const nextNode = ast.children[i];
-                  console.log(
+                  debugLog(
                     `[TimelineView]  Sub-check for color: nextNode type=${nextNode.type}, index=${i}`
                   );
                   if (nextNode.type === 'html') {
                     const htmlContent = nextNode.value as string;
-                    console.log(`[TimelineView]    HTML node content: "${htmlContent}"`);
+                    debugLog(`[TimelineView]    HTML node content: "${htmlContent}"`);
                     const colorCommentRegex =
                       /<!--\s*kanban-lane-background-color:\s*(#[0-9a-fA-F]{6}|[a-zA-Z]+)\s*-->/i;
                     const colorMatch = colorCommentRegex.exec(htmlContent);
                     if (colorMatch && colorMatch[1]) {
                       currentLaneColor = colorMatch[1].trim();
-                      console.log(
+                      debugLog(
                         `[TimelineView]    Found and set lane color: ${currentLaneColor}`
                       );
                       break;
                     } else {
-                      console.log(`[TimelineView]    HTML node did not match color regex.`);
+                      debugLog(`[TimelineView]    HTML node did not match color regex.`);
                     }
                   } else if (nextNode.type === 'list' || nextNode.type === 'heading') {
-                    console.log(
+                    debugLog(
                       `[TimelineView]  Stopping color search for current heading; encountered ${nextNode.type}.`
                     );
                     break;
                   }
                 }
                 if (!currentLaneColor) {
-                  console.log(`[TimelineView] No color comment found for the preceding heading.`);
+                  debugLog(`[TimelineView] No color comment found for the preceding heading.`);
                 }
               }
               if (astNode.type === 'list') {
-                console.log(
+                debugLog(
                   `[TimelineView] Processing list. Active lane color for this list: ${currentLaneColor}`
                 );
                 for (const listItemNode of (astNode as any).children) {
@@ -488,7 +489,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                         assignedMembers: itemData.assignedMembers,
                         line: itemData.line,
                       };
-                      console.log(
+                      debugLog(
                         `[TimelineView] Adding card: "${card.titleRaw.substring(0, 30)}...", assigned laneColor: ${card.laneColor}, File: ${mdFile.path}`
                       );
                       allFetchedCards.push(card);
@@ -500,7 +501,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                         maxDate = cardDueDate.clone().endOf('day');
                       }
                     } else {
-                      console.log(
+                      debugLog(
                         `[TimelineView] Card SKIPPED due to invalid/missing dates: "${itemData.titleRaw.substring(0, 30)}...", File: ${mdFile.path}`
                       );
                     }
@@ -512,7 +513,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
           } else {
             // Optional: Log if a file was parsed but not identified as a Kanban board.
             // This might be noisy if there are many non-Kanban files.
-            // console.log(`[TimelineView] File ${mdFile.path} is not a Kanban board or has no 'kanban-plugin: board' setting. Skipping for timeline.`);
+            // debugLog(`[TimelineView] File ${mdFile.path} is not a Kanban board or has no 'kanban-plugin: board' setting. Skipping for timeline.`);
           }
         } catch (e) {
           console.error(
@@ -542,7 +543,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
       if (isMounted.current) setError(`Error scanning directory: ${(e as Error).message}`);
     }
     if (isMounted.current) setIsLoading(false);
-    console.log('[TimelineView] Finished scanCards.');
+    debugLog('[TimelineView] Finished scanCards.');
   }, [props.plugin, props.app, props.view]); // Added props.app and props.view to dependencies
 
   // Corrected useEffect for initial scanCards call
@@ -661,7 +662,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
   }, [cards, isLoading, timelineStartDate, timelineEndDate, CARD_HEIGHT_PX, ROW_GAP_PX]); // Rerun if cards, loading state, or layout params change
 
   useEffect(() => {
-    console.log(
+    debugLog(
       '[TimelineView] Timeline range updated: StartDate:',
       timelineStartDate?.format('YYYY-MM-DD'),
       'EndDate:',
@@ -697,7 +698,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
         isResizingRight,
       };
     }
-    // console.log('[TimelineView] handleDragStart:', cardId, 'isResizingLeft:', isResizingLeft, 'isResizingRight:', isResizingRight, 'originalStart:', card?.startDate?.format('YYYY-MM-DD'), 'originalDue:', card?.dueDate?.format('YYYY-MM-DD'));
+    // debugLog('[TimelineView] handleDragStart:', cardId, 'isResizingLeft:', isResizingLeft, 'isResizingRight:', isResizingRight, 'originalStart:', card?.startDate?.format('YYYY-MM-DD'), 'originalDue:', card?.dueDate?.format('YYYY-MM-DD'));
   };
 
   const handleDragOver = (e: DragEvent) => {
@@ -708,7 +709,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
   };
 
   const handleDragEnd = () => {
-    // console.log('[TimelineView] handleDragEnd, clearing draggedItemData');
+    // debugLog('[TimelineView] handleDragEnd, clearing draggedItemData');
     draggedItemData.current = null;
   };
 
@@ -750,7 +751,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
     let newDueDate: moment.Moment;
 
     if (isResizingLeft) {
-      // console.log('[TimelineView] Drop detected for RESIZING LEFT');
+      // debugLog('[TimelineView] Drop detected for RESIZING LEFT');
       newStartDate = timelineStartDate.clone().add(dayIndexDroppedOn, 'days').startOf('day');
       newDueDate = currentCardDueDate.clone(); // Due date does not change when resizing left
 
@@ -775,9 +776,9 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
           }
         }
       }
-      // console.log(`[TimelineView] Resizing Left: Card '${draggedCard.title}' New Start: ${newStartDate.format('YYYY-MM-DD')}, Due (unchanged): ${newDueDate.format('YYYY-MM-DD')}`);
+      // debugLog(`[TimelineView] Resizing Left: Card '${draggedCard.title}' New Start: ${newStartDate.format('YYYY-MM-DD')}, Due (unchanged): ${newDueDate.format('YYYY-MM-DD')}`);
     } else if (isResizingRight) {
-      // console.log('[TimelineView] Drop detected for RESIZING RIGHT');
+      // debugLog('[TimelineView] Drop detected for RESIZING RIGHT');
       newStartDate = currentCardStartDate.clone(); // Start date does not change
       newDueDate = timelineStartDate.clone().add(dayIndexDroppedOn, 'days').endOf('day');
 
@@ -797,17 +798,17 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
           }
         }
       }
-      // console.log(`[TimelineView] Resizing Right: Card '${draggedCard.title}' New Due: ${newDueDate.format('YYYY-MM-DD')}, Start (unchanged): ${newStartDate.format('YYYY-MM-DD')}`);
+      // debugLog(`[TimelineView] Resizing Right: Card '${draggedCard.title}' New Due: ${newDueDate.format('YYYY-MM-DD')}, Start (unchanged): ${newStartDate.format('YYYY-MM-DD')}`);
     } else {
       // Moving the whole card
-      // console.log('[TimelineView] Drop detected for MOVING card');
+      // debugLog('[TimelineView] Drop detected for MOVING card');
       newStartDate = timelineStartDate.clone().add(dayIndexDroppedOn, 'days').startOf('day');
       const durationDays = currentCardDueDate.diff(currentCardStartDate, 'days');
       newDueDate = newStartDate.clone().add(Math.max(0, durationDays), 'days').endOf('day'); // Ensure duration is not negative
-      // console.log(`[TimelineView] Moving Card: '${draggedCard.title}' New Start: ${newStartDate.format('YYYY-MM-DD')}, New Due: ${newDueDate.format('YYYY-MM-DD')}`);
+      // debugLog(`[TimelineView] Moving Card: '${draggedCard.title}' New Start: ${newStartDate.format('YYYY-MM-DD')}, New Due: ${newDueDate.format('YYYY-MM-DD')}`);
     }
 
-    // console.log(`[TimelineView] Card '${draggedCard.title}' (ID: ${draggedCard.id}) dropped. isResizingLeft: ${isResizingLeft}, isResizingRight: ${isResizingRight}. New Start: ${newStartDate.format(props.plugin.settings['date-format'])}, New Due: ${newDueDate.format(props.plugin.settings['date-format'])}`);
+    // debugLog(`[TimelineView] Card '${draggedCard.title}' (ID: ${draggedCard.id}) dropped. isResizingLeft: ${isResizingLeft}, isResizingRight: ${isResizingRight}. New Start: ${newStartDate.format(props.plugin.settings['date-format'])}, New Due: ${newDueDate.format(props.plugin.settings['date-format'])}`);
 
     try {
       await updateCardDatesInMarkdown(
@@ -818,7 +819,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
         newDueDate,
         props.plugin.settings
       );
-      console.log(
+      debugLog(
         `[TimelineView] Successfully updated dates in Markdown for card: ${draggedCard.title}`
       );
       // OPTIMISTIC UI UPDATE: Update the card in the local state
@@ -882,7 +883,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
         // Add a slight delay to ensure setState has processed and the view is ready
         setTimeout(() => {
           if (kanbanView && kanbanView.applyHighlight) {
-            console.log(
+            debugLog(
               '[TimelineView] Directly calling applyHighlight on KanbanView instance for:',
               cardData.sourceBoardPath
             );
@@ -950,24 +951,24 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
 
   const renderTimelineCards = () => {
     if (!timelineStartDate || !timelineEndDate || cards.length === 0) {
-      // console.log('[TimelineView] renderTimelineCards: No cards or timeline range to render.');
+      // debugLog('[TimelineView] renderTimelineCards: No cards or timeline range to render.');
       return null;
     }
-    // console.log('[TimelineView] renderTimelineCards: Rendering cards. Count:', cards.length);
+    // debugLog('[TimelineView] renderTimelineCards: Rendering cards. Count:', cards.length);
 
     return cards.map((card, index) => {
       if (!card.startDate || !card.dueDate) {
-        // console.log(`[TimelineView] Card ${card.id} skipped (missing start/due date in render):`, card);
+        // debugLog(`[TimelineView] Card ${card.id} skipped (missing start/due date in render):`, card);
         return null;
       }
 
       const cardStartDate = moment(card.startDate).startOf('day');
       const cardDueDate = moment(card.dueDate).endOf('day');
 
-      // console.log(`[TimelineView] Rendering card ${card.id}: ${card.title}, Start: ${cardStartDate.format('YYYY-MM-DD')}, Due: ${cardDueDate.format('YYYY-MM-DD')}`);
+      // debugLog(`[TimelineView] Rendering card ${card.id}: ${card.title}, Start: ${cardStartDate.format('YYYY-MM-DD')}, Due: ${cardDueDate.format('YYYY-MM-DD')}`);
 
       if (cardDueDate.isBefore(timelineStartDate) || cardStartDate.isAfter(timelineEndDate)) {
-        // console.log(`[TimelineView] Card ${card.id} is outside current timeline range. Start: ${timelineStartDate.format('YYYY-MM-DD')}, End: ${timelineEndDate.format('YYYY-MM-DD')}`);
+        // debugLog(`[TimelineView] Card ${card.id} is outside current timeline range. Start: ${timelineStartDate.format('YYYY-MM-DD')}, End: ${timelineEndDate.format('YYYY-MM-DD')}`);
         return null;
       }
 
@@ -1262,7 +1263,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
           </p>
         )}
         {!isLoading && !error && !renderError && timelineStartDate && timelineEndDate && (
-          // console.log('[TimelineView] Rendering main timeline grid. Width:', totalTimelineWidth, 'Height:', totalTimelineHeight),
+          // debugLog('[TimelineView] Rendering main timeline grid. Width:', totalTimelineWidth, 'Height:', totalTimelineHeight),
           <div
             style={{
               flexGrow: 1,

@@ -1,3 +1,4 @@
+import { debugLog } from '../helpers/debugLogger';
 import classcat from 'classcat';
 import { TFile } from 'obsidian';
 import { Component, memo, useMemo } from 'preact/compat';
@@ -25,7 +26,7 @@ import { Board, DataTypes, Item, Lane } from './types';
 function DndDebugInfo() {
   const dndManager = useContext(DndManagerContext);
 
-  console.log('[MemberBoard] DndDebugInfo - DndManager context:', {
+  debugLog('[MemberBoard] DndDebugInfo - DndManager context:', {
     hasDndManager: !!dndManager,
     dndManagerType: typeof dndManager,
     dragManager: dndManager?.dragManager ? 'present' : 'missing',
@@ -97,11 +98,11 @@ function MemberLane({
                   <div
                     className="member-board-empty-placeholder-wrapper"
                     onMouseEnter={(e) => {
-                      console.log('[MemberBoard] Empty placeholder hover enter:', lane.id);
+                      debugLog('[MemberBoard] Empty placeholder hover enter:', lane.id);
                       e.currentTarget.classList.add('hover');
                     }}
                     onMouseLeave={(e) => {
-                      console.log('[MemberBoard] Empty placeholder hover leave:', lane.id);
+                      debugLog('[MemberBoard] Empty placeholder hover leave:', lane.id);
                       e.currentTarget.classList.remove('hover');
                     }}
                   >
@@ -199,7 +200,7 @@ export function MemberBoard(props: MemberBoardProps) {
     emitter,
   } = props;
 
-  console.log('[MemberBoard] Context setup:', {
+  debugLog('[MemberBoard] Context setup:', {
     hasKanbanContext: !!useContext(KanbanContext),
     hasStateManager: !!useContext(KanbanContext)?.stateManager,
     hasBoardModifiers: !!useContext(KanbanContext)?.boardModifiers,
@@ -289,7 +290,7 @@ export function MemberBoard(props: MemberBoardProps) {
     items: new Set(),
   };
 
-  console.log('[MemberBoard] Context setup:', {
+  debugLog('[MemberBoard] Context setup:', {
     hasKanbanContext: !!kanbanContext,
     hasStateManager: !!kanbanContext.stateManager,
     hasBoardModifiers: !!kanbanContext.boardModifiers,
@@ -462,7 +463,7 @@ export function MemberBoard(props: MemberBoardProps) {
                   <DndContext
                     win={view.getWindow()}
                     onDrop={(dragEntity, dropEntity) => {
-                      console.log('[MemberBoard] DndContext onDrop called:', {
+                      debugLog('[MemberBoard] DndContext onDrop called:', {
                         dragEntity,
                         dropEntity,
                         dragData: dragEntity?.getData(),
@@ -476,7 +477,7 @@ export function MemberBoard(props: MemberBoardProps) {
                     <div className={c('board')}>
                       <div className={c('lanes')}>
                         {board.children.map((lane, laneIndex) => {
-                          console.log('[MemberBoard] Rendering lane:', {
+                          debugLog('[MemberBoard] Rendering lane:', {
                             laneId: lane.id,
                             laneIndex,
                             laneTitle: lane.data.title,

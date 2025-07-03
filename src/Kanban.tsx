@@ -43,7 +43,7 @@ export function Kanban({
   }
 
   if (!board) {
-    console.log('[Kanban.tsx] Board prop is null. Rendering empty board state or loading indicator.');
+    debugLog('[Kanban.tsx] Board prop is null. Rendering empty board state or loading indicator.');
     // Depending on desired behavior, could show a loading state or specific message.
     // For now, delegating to KanbanEmpty or similar logic if applicable, or just a simple message.
     return (
@@ -65,7 +65,7 @@ export function Kanban({
   }
 
   // Log details of each lane BEFORE rendering them
-  console.log(`[Kanban.tsx] Preparing to render lanes for board ID: ${board.id}. Number of lanes: ${board.data.lanes?.length}`);
+  debugLog(`[Kanban.tsx] Preparing to render lanes for board ID: ${board.id}. Number of lanes: ${board.data.lanes?.length}`);
   if (board.data.lanes && Array.isArray(board.data.lanes)) {
     board.data.lanes.forEach((lane, index) => {
       if (!lane) {
@@ -82,7 +82,7 @@ export function Kanban({
         );
         // Potentially render a fallback or skip this lane in actual rendering logic if needed
       }
-      // console.log(`[Kanban.tsx] Lane ${index} (ID: ${lane.id}): Title is '${lane.data.title}' (Type: ${typeof lane.data.title})`);
+      // debugLog(`[Kanban.tsx] Lane ${index} (ID: ${lane.id}): Title is '${lane.data.title}' (Type: ${typeof lane.data.title})`);
     });
   } else {
     console.warn(`[Kanban.tsx] board.data.lanes is not an array or is undefined for board ID: ${board.id}. Lanes:`, board.data.lanes);
