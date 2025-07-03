@@ -35,6 +35,7 @@ import {
   hasFrontmatterKey,
   hasFrontmatterKeyRaw,
 } from './helpers';
+import { debugLog } from './helpers/debugLogger';
 import { bindMarkdownEvents } from './helpers/renderMarkdown';
 import { PromiseQueue } from './helpers/util';
 import { t } from './lang/helpers';
@@ -118,6 +119,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       'enable-kanban-card-embeds': true,
       'enable-kanban-code-blocks': true,
       'use-kanban-board-background-colors': true,
+      'member-view-lane-width': 350,
     };
 
     this.previewQueue = new PromiseQueue(() => this.emitter.emit('queueEmpty'));
@@ -266,7 +268,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       return null;
     }
     const stateManager = this.plugin.stateManagers.get(this.file);
-    console.log(
+    debugLog(
       `[KanbanView] getBoard: For file ${this.file.path}. StateManager found: ${!!stateManager}.`
     );
     if (!stateManager) {
@@ -274,7 +276,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       return null;
     }
     // Detailed log for stateManager.state
-    console.log(
+    debugLog(
       `[KanbanView] getBoard: Checking stateManager.state for ${this.file.path}. stateManager.state is currently:`,
       stateManager.state ? JSON.stringify(stateManager.state.id) : 'null or undefined' // Log ID if state exists
     );
@@ -284,7 +286,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       );
       return null;
     }
-    console.log(
+    debugLog(
       `[KanbanView] getBoard: Returning state for ${this.file.path}. Board ID from SM: ${stateManager.state.id}, SM file prop: ${stateManager.file?.path}`
     );
     return stateManager.state;
@@ -331,7 +333,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       });
     }
 
-    console.log(
+    debugLog(
       '[KanbanView] onload: Entered. targetHighlightLocation will be set by setState if eState is provided directly.'
     );
 
@@ -352,30 +354,30 @@ export class KanbanView extends TextFileView implements HoverParent {
     // Check for pending highlight state stored on the leaf by the monkeypatch
     const pendingHighlightState = (this.leaf as any)._kanbanPendingHighlightState;
     if (pendingHighlightState) {
-      console.log(
+      debugLog(
         '[KanbanView] onload: Found _kanbanPendingHighlightState on leaf:',
         JSON.stringify(pendingHighlightState, null, 2)
       );
       if (pendingHighlightState.blockId) {
         this.targetHighlightLocation = { blockId: pendingHighlightState.blockId };
-        console.log(
+        debugLog(
           '[KanbanView] onload: Applied blockId from _kanbanPendingHighlightState to targetHighlightLocation.'
         );
       } else if (pendingHighlightState.match) {
         this.targetHighlightLocation = pendingHighlightState;
-        console.log(
+        debugLog(
           '[KanbanView] onload: Applied full match object from _kanbanPendingHighlightState to targetHighlightLocation.'
         );
       }
       delete (this.leaf as any)._kanbanPendingHighlightState;
-      console.log('[KanbanView] onload: Cleared _kanbanPendingHighlightState from leaf.');
+      debugLog('[KanbanView] onload: Cleared _kanbanPendingHighlightState from leaf.');
     }
 
     // Schedule initial render / React state update
     // This ensures that even if setState doesn't trigger it due to no specific conditions being met,
     // the React component still gets a chance to render and register with StateManager.
     setTimeout(() => {
-      console.log('[KanbanView] onload (setTimeout): Triggering initial setReactState.');
+      debugLog('[KanbanView] onload (setTimeout): Triggering initial setReactState.');
       this.setReactState({}); // Pass empty state to ensure it uses current view state
     }, 50); // Small delay to allow other sync onload processes to complete
 
@@ -384,7 +386,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         this.plugin.removeView(this);
         this.plugin.addView(this, this.data, this.isPrimary);
         // Ensure React state is updated after migration as well
-        console.log('[KanbanView] onWindowMigrated: Triggering setReactState after addView.');
+        debugLog('[KanbanView] onWindowMigrated: Triggering setReactState after addView.');
         this.setReactState({});
       })
     );
@@ -415,7 +417,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       // Check if the currently open file in this view is the one that was renamed.
       // this.file should ideally be the new file object by the time this is called.
       if (this.file.path === file.path && this.file.path !== oldPath) {
-        console.log(
+        debugLog(
           `[KanbanView] handleRename: View for ${file.path} (formerly ${oldPath}) detected rename.`
         );
         // It's important that handleViewFileRename can correctly update based on oldPath
@@ -424,7 +426,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       } else if (this.file.path === oldPath && file.path !== oldPath) {
         // This is a fallback if this.file somehow hasn't updated yet.
         // This view instance is still associated with the oldPath.
-        console.log(
+        debugLog(
           `[KanbanView] handleRename: View for ${oldPath} (now ${file.path}) detected rename. Instance file path matches oldPath.`
         );
         // We still pass 'this' (which refers to the view of oldPath) and oldPath.
@@ -472,11 +474,11 @@ export class KanbanView extends TextFileView implements HoverParent {
     }
 
     // Await the addView process to ensure StateManager is fully ready
-    console.log(
+    debugLog(
       `[KanbanView] setViewData: About to call await this.plugin.addView for ${this.file?.path}`
     );
     await this.plugin.addView(this, data, this.isPrimary);
-    console.log(
+    debugLog(
       `[KanbanView] setViewData: Call to plugin.addView completed for ${this.file?.path}. Data length: ${data?.length}, clear: ${clear}, isPrimary: ${this.isPrimary}`
     );
 
@@ -485,13 +487,13 @@ export class KanbanView extends TextFileView implements HoverParent {
   }
 
   async setState(state: any, result: ViewStateResult) {
-    console.log('[KanbanView] setState called with state:', state, 'and result:', result);
+    debugLog('[KanbanView] setState called with state:', state, 'and result:', result);
 
     // Debug: Log all properties of state to see where the hash might be
-    console.log('[KanbanView] setState: Full state object keys:', Object.keys(state));
+    debugLog('[KanbanView] setState: Full state object keys:', Object.keys(state));
     if (state.eState) {
-      console.log('[KanbanView] setState: eState object keys:', Object.keys(state.eState));
-      console.log('[KanbanView] setState: eState object:', state.eState);
+      debugLog('[KanbanView] setState: eState object keys:', Object.keys(state.eState));
+      debugLog('[KanbanView] setState: eState object:', state.eState);
     }
 
     this.currentSearchMatch = null;
@@ -501,7 +503,7 @@ export class KanbanView extends TextFileView implements HoverParent {
     if (state?.subpath && state.subpath.startsWith('#^')) {
       const blockId = state.subpath.substring(2); // Remove #^
       this.targetHighlightLocation = { blockId };
-      console.log(
+      debugLog(
         '[KanbanView] setState: Determined targetHighlightLocation from URL subpath (blockId):',
         this.targetHighlightLocation
       );
@@ -509,13 +511,13 @@ export class KanbanView extends TextFileView implements HoverParent {
 
     // Check for blockId in other possible locations
     if (!this.targetHighlightLocation && state?.hash) {
-      console.log('[KanbanView] setState: Found hash in state:', state.hash);
+      debugLog('[KanbanView] setState: Found hash in state:', state.hash);
       if (state.hash.startsWith('^') || state.hash.startsWith('%5E')) {
         const blockId = state.hash.startsWith('%5E')
           ? decodeURIComponent(state.hash).substring(1)
           : state.hash.substring(1);
         this.targetHighlightLocation = { blockId };
-        console.log(
+        debugLog(
           '[KanbanView] setState: Determined targetHighlightLocation from state.hash (blockId):',
           this.targetHighlightLocation
         );
@@ -525,11 +527,11 @@ export class KanbanView extends TextFileView implements HoverParent {
     // Check window location hash as fallback
     if (!this.targetHighlightLocation) {
       const windowHash = this.getWindow().location.hash;
-      console.log('[KanbanView] setState: Window location hash:', windowHash);
+      debugLog('[KanbanView] setState: Window location hash:', windowHash);
       if (windowHash && windowHash.startsWith('#^')) {
         const blockId = windowHash.substring(2); // Remove #^
         this.targetHighlightLocation = { blockId };
-        console.log(
+        debugLog(
           '[KanbanView] setState: Determined targetHighlightLocation from window.location.hash (blockId):',
           this.targetHighlightLocation
         );
@@ -543,13 +545,13 @@ export class KanbanView extends TextFileView implements HoverParent {
           cardTitle: state.eState.cardTitle,
           listName: state.eState.listName,
         };
-        console.log(
+        debugLog(
           '[KanbanView] setState: Determined targetHighlightLocation from eState (blockId/cardTitle/listName):',
           this.targetHighlightLocation
         );
       } else if (state.eState.match) {
         this.targetHighlightLocation = { match: state.eState.match };
-        console.log(
+        debugLog(
           '[KanbanView] setState: Determined targetHighlightLocation from eState.match:',
           this.targetHighlightLocation
         );
@@ -558,21 +560,21 @@ export class KanbanView extends TextFileView implements HoverParent {
 
     if (!this.targetHighlightLocation && state?.targetHighlightLocation) {
       this.targetHighlightLocation = state.targetHighlightLocation;
-      console.log(
+      debugLog(
         '[KanbanView] setState: Used targetHighlightLocation from persisted state:',
         this.targetHighlightLocation
       );
     }
 
     if (!this.targetHighlightLocation) {
-      console.log(
+      debugLog(
         '[KanbanView] setState: No specific highlight determined or persisted. targetHighlightLocation remains null.'
       );
     }
 
     const previousFilePath = this.file?.path;
 
-    console.log(
+    debugLog(
       '[KanbanView] setState: Calling super.setState. Current this.targetHighlightLocation:',
       this.targetHighlightLocation,
       'Current this.currentSearchMatch:',
@@ -583,7 +585,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       targetHighlightLocation: this.targetHighlightLocation,
     };
     await super.setState(stateForSuper, result);
-    console.log('[KanbanView] setState: super.setState completed.');
+    debugLog('[KanbanView] setState: super.setState completed.');
 
     const incomingFilePath = state?.file;
 
@@ -597,7 +599,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       fileHasEffectivelyChanged = true;
     }
 
-    console.log(
+    debugLog(
       `[KanbanView] setState: File change check: previous='${previousFilePath}', incoming='${incomingFilePath}', fileHasEffectivelyChanged=${fileHasEffectivelyChanged}`
     );
 
@@ -605,12 +607,12 @@ export class KanbanView extends TextFileView implements HoverParent {
 
     if (fileHasEffectivelyChanged || shouldProcessViewData) {
       if (this.file) {
-        console.log(
+        debugLog(
           `[KanbanView] setState: File effectively changed to ${this.file.path} or eState received. Resetting _isPendingInitialRender and _reactState. Will call setViewData.`
         );
         if (fileHasEffectivelyChanged) {
           this._reactHasRenderedOnceInThisInstance = false;
-          console.log(
+          debugLog(
             '[KanbanView] setState: File changed, so _reactHasRenderedOnceInThisInstance is reset to false for a clean render.'
           );
         }
@@ -620,7 +622,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         const fileContent = await this.app.vault.cachedRead(this.file);
         await this.setViewData(fileContent, true);
       } else {
-        console.log(
+        debugLog(
           '[KanbanView] setState: File effectively changed or eState processing, but this.file is not (or no longer) set. Clearing view.'
         );
         if (fileHasEffectivelyChanged) {
@@ -631,12 +633,12 @@ export class KanbanView extends TextFileView implements HoverParent {
         this._reactState = {};
       }
     } else if (this.file && this.targetHighlightLocation) {
-      console.log(
+      debugLog(
         '[KanbanView] setState: File did NOT change, but targetHighlightLocation is set. Calling setReactState for highlight.'
       );
       this.setReactState({ targetHighlight: this.targetHighlightLocation, forceRerender: true });
     } else {
-      console.log(
+      debugLog(
         '[KanbanView] setState: No specific action taken to call setViewData or setReactState after super.setState. This may be normal if no relevant state changed.'
       );
     }
@@ -924,7 +926,7 @@ export class KanbanView extends TextFileView implements HoverParent {
   }
 
   async setReactState(newState?: any) {
-    console.log('[KanbanView] setReactState called with:', newState);
+    debugLog('[KanbanView] setReactState called with:', newState);
     let stateManager = this.plugin.stateManagers.get(this.file);
 
     if (!stateManager && this.file && this.data) {
@@ -935,7 +937,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         await this.plugin.addView(this, this.data, this.isPrimary);
         stateManager = this.plugin.stateManagers.get(this.file);
         if (stateManager) {
-          console.log(
+          debugLog(
             `[KanbanView] setReactState: StateManager re-established for ${this.file.path} after plugin.addView.`
           );
         } else {
@@ -990,26 +992,26 @@ export class KanbanView extends TextFileView implements HoverParent {
 
       const renderBoardCallback = (currentBoardState: Board | null, isPrimaryView: boolean) => {
         if (!this.contentEl || (this.leaf as any).detached) {
-          console.log(
+          debugLog(
             '[KanbanView] setReactState (renderBoardCallback): Content element not available or leaf detached. Skipping render.'
           );
           this._isPendingInitialRender = false;
           return;
         }
 
-        console.log(
+        debugLog(
           '[KanbanView] renderBoardCallback: Value received from this.getBoard(): ',
           currentBoardState ? `Board object with ID: ${currentBoardState.id}` : 'null'
         );
 
         if (this.contentEl) {
           const unmounted = unmountComponentAtNode(this.contentEl);
-          console.log(
+          debugLog(
             `[KanbanView] setReactState (renderBoardCallback): Attempted unmount. Was component unmounted? ${unmounted}. contentEl children after unmount: ${this.contentEl.children.length}`
           );
           // Aggressive cleanup if unmount fails or leaves children
           if (!unmounted || this.contentEl.children.length > 0) {
-            console.log(
+            debugLog(
               `[KanbanView] setReactState (renderBoardCallback): Unmount returned ${unmounted} or children still exist. Clearing innerHTML.`
             );
             this.contentEl.innerHTML = '';
@@ -1048,13 +1050,13 @@ export class KanbanView extends TextFileView implements HoverParent {
             ),
             this.contentEl
           );
-          console.log(
+          debugLog(
             '[KanbanView] setReactState (renderBoardCallback): React component rendered/updated.'
           );
           this._isPendingInitialRender = false;
 
           if (this.targetHighlightLocation) {
-            console.log(
+            debugLog(
               '[KanbanView] setReactState (renderBoardCallback): Scheduling applyHighlight after render with a short delay for target:',
               JSON.stringify(this.targetHighlightLocation)
             );
@@ -1076,12 +1078,12 @@ export class KanbanView extends TextFileView implements HoverParent {
                   );
                   targetHighlightLocationString = `UNSTRINGIFIABLE: ${Object.keys(this.targetHighlightLocation || {}).join(', ')}`;
                 }
-                console.log(
+                debugLog(
                   `[KanbanView] setReactState (renderBoardCallback setTimeout attempt ${attempt + 1}): Checking conditions before applyHighlight. Target: ${targetHighlightLocationString}, HasFocus: ${hasFocus}, ViewStillActive: ${viewStillActive}`
                 );
 
                 if (this.targetHighlightLocation && viewStillActive) {
-                  console.log(
+                  debugLog(
                     `[KanbanView] setReactState (renderBoardCallback setTimeout attempt ${attempt + 1}): Conditions met. Calling applyHighlight.`
                   );
 
@@ -1094,19 +1096,19 @@ export class KanbanView extends TextFileView implements HoverParent {
                     );
 
                     if (testElement) {
-                      console.log(
+                      debugLog(
                         `[KanbanView] setReactState: Element found on attempt ${attempt + 1}, proceeding with highlight.`
                       );
                       this.applyHighlight();
                       return; // Success, don't retry
                     } else if (attempt < maxAttempts - 1) {
-                      console.log(
+                      debugLog(
                         `[KanbanView] setReactState: Element not found on attempt ${attempt + 1}, will retry...`
                       );
                       tryHighlight(attempt + 1, maxAttempts);
                       return; // Retry
                     } else {
-                      console.log(
+                      debugLog(
                         `[KanbanView] setReactState: Element not found after ${maxAttempts} attempts, calling applyHighlight anyway for debugging.`
                       );
                       this.applyHighlight();
@@ -1118,11 +1120,11 @@ export class KanbanView extends TextFileView implements HoverParent {
                   }
                 } else if (this.targetHighlightLocation) {
                   if (!viewStillActive)
-                    console.log(
+                    debugLog(
                       `[KanbanView] setReactState (renderBoardCallback setTimeout attempt ${attempt + 1}): Aborted applyHighlight because view is no longer active or contentEl is missing.`
                     );
                 } else {
-                  console.log(
+                  debugLog(
                     `[KanbanView] setReactState (renderBoardCallback setTimeout attempt ${attempt + 1}): Aborted applyHighlight because targetHighlightLocation is now null.`
                   );
                 }
@@ -1186,7 +1188,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       );
       targetHighlightLocationString = `UNSTRINGIFIABLE: ${Object.keys(this.targetHighlightLocation || {}).join(', ')}`;
     }
-    console.log(
+    debugLog(
       `[KanbanView] applyHighlight: Called. Current targetHighlightLocation: ${targetHighlightLocationString}`
     );
 
@@ -1195,7 +1197,7 @@ export class KanbanView extends TextFileView implements HoverParent {
     });
 
     if (!this.targetHighlightLocation) {
-      console.log('[KanbanView] applyHighlight: No targetHighlightLocation. Aborting.');
+      debugLog('[KanbanView] applyHighlight: No targetHighlightLocation. Aborting.');
       return;
     }
 
@@ -1215,12 +1217,12 @@ export class KanbanView extends TextFileView implements HoverParent {
     // 1. Handle global search result from targetHighlightLocation.match
     if (this.targetHighlightLocation.match && !blockIdToSearch && !cardTitleForSearch) {
       const matchData = this.targetHighlightLocation.match;
-      console.log('[KanbanView] applyHighlight: Processing global search match:', matchData);
+      debugLog('[KanbanView] applyHighlight: Processing global search match:', matchData);
 
       // Attempt to get blockId from matchData.subpath if it exists
       if (matchData.subpath && matchData.subpath.startsWith('#^')) {
         blockIdToSearch = matchData.subpath.substring(2); // Remove #^
-        console.log(
+        debugLog(
           `[KanbanView] applyHighlight: Extracted blockId '${blockIdToSearch}' from matchData.subpath.`
         );
         cardTitleForSearch = undefined; // Prioritize blockId from subpath
@@ -1233,7 +1235,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         // Use character offsets from the search match to find the correct card
         const matchStartOffset = matchData.matches[0][0] as number;
         const matchEndOffset = matchData.matches[0][1] as number;
-        console.log(
+        debugLog(
           `[KanbanView] applyHighlight: Using match offsets: start=${matchStartOffset}, end=${matchEndOffset}`
         );
 
@@ -1264,7 +1266,7 @@ export class KanbanView extends TextFileView implements HoverParent {
           blockIdToSearch = foundItemViaOffset.data.blockId || foundItemViaOffset.id; // Use Item.data.blockId or Item.id
           cardTitleForSearch = undefined;
           listNameForSearch = undefined;
-          console.log(
+          debugLog(
             `[KanbanView] applyHighlight: Found card from global search via OFFSET. ID/BlockID to use: '${blockIdToSearch}' for card title: '${foundItemViaOffset.data.titleRaw}'`
           );
         } else {
@@ -1276,7 +1278,7 @@ export class KanbanView extends TextFileView implements HoverParent {
             const content = matchData.content as string;
             const firstMatchOffsets = matchData.matches[0] as [number, number];
             const matchedText = content.substring(firstMatchOffsets[0], firstMatchOffsets[1]);
-            console.log(
+            debugLog(
               `[KanbanView] applyHighlight: FALLBACK - Extracted matchedText from global search: '${matchedText}'`
             );
 
@@ -1302,7 +1304,7 @@ export class KanbanView extends TextFileView implements HoverParent {
               blockIdToSearch = foundCard.data.blockId || foundCard.id;
               cardTitleForSearch = undefined;
               listNameForSearch = undefined;
-              console.log(
+              debugLog(
                 `[KanbanView] applyHighlight: FALLBACK - Found card from global search via matchedText. ID/BlockID: '${blockIdToSearch}' from card title: '${foundCard.data.titleRaw}'`
               );
             } else {
@@ -1323,7 +1325,7 @@ export class KanbanView extends TextFileView implements HoverParent {
     // 2. Attempt to find by blockId (either from direct nav or resolved from global search)
     if (blockIdToSearch) {
       const normalizedBlockId = blockIdToSearch.replace(/^[#^]+/, '');
-      console.log(
+      debugLog(
         `[KanbanView] applyHighlight: Searching for card with blockId: '${normalizedBlockId}'`
       );
 
@@ -1331,12 +1333,12 @@ export class KanbanView extends TextFileView implements HoverParent {
       let targetCardInternalId: string | null = null;
 
       if (board) {
-        console.log(
+        debugLog(
           `[KanbanView] applyHighlight: Searching through ${board.children.length} lanes for blockId '${normalizedBlockId}'`
         );
 
         for (const lane of board.children) {
-          console.log(
+          debugLog(
             `[KanbanView] applyHighlight: Checking lane '${lane.data.title}' with ${lane.children.length} cards`
           );
 
@@ -1345,13 +1347,13 @@ export class KanbanView extends TextFileView implements HoverParent {
             const itemBlockId = item.data.blockId;
             const itemId = item.id;
 
-            console.log(
+            debugLog(
               `[KanbanView] applyHighlight: Card '${item.data.title}' - itemId: '${itemId}', blockId: '${itemBlockId}'`
             );
 
             if (itemBlockId === normalizedBlockId || itemBlockId === `^${normalizedBlockId}`) {
               targetCardInternalId = itemId;
-              console.log(
+              debugLog(
                 `[KanbanView] applyHighlight: Found matching card! Internal ID: '${targetCardInternalId}', blockId: '${itemBlockId}'`
               );
               break;
@@ -1360,7 +1362,7 @@ export class KanbanView extends TextFileView implements HoverParent {
             // Also check if the blockId appears in the card's raw content
             if (item.data.titleRaw && item.data.titleRaw.includes(`^${normalizedBlockId}`)) {
               targetCardInternalId = itemId;
-              console.log(
+              debugLog(
                 `[KanbanView] applyHighlight: Found matching card by titleRaw content! Internal ID: '${targetCardInternalId}'`
               );
               break;
@@ -1372,7 +1374,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       }
 
       if (targetCardInternalId) {
-        console.log(
+        debugLog(
           `[KanbanView] applyHighlight: Looking for DOM element with data-id: '${targetCardInternalId}'`
         );
 
@@ -1382,7 +1384,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         ) as HTMLElement;
 
         if (parentItemElement) {
-          console.log(
+          debugLog(
             '[KanbanView] applyHighlight: Found parent item element by internal ID:',
             parentItemElement
           );
@@ -1392,33 +1394,33 @@ export class KanbanView extends TextFileView implements HoverParent {
             ) as HTMLElement) || parentItemElement;
 
           if (targetItemElement) {
-            console.log(
+            debugLog(
               '[KanbanView] applyHighlight: Found content wrapper for blockId:',
               targetItemElement
             );
           } else {
-            console.log(
+            debugLog(
               '[KanbanView] applyHighlight: Parent item found, but .kanban-plugin__item-content-wrapper not found. Using parent.'
             );
             targetItemElement = parentItemElement;
           }
         } else {
-          console.log(
+          debugLog(
             `[KanbanView] applyHighlight: DOM element with data-id '${targetCardInternalId}' not found`
           );
         }
       } else {
-        console.log(
+        debugLog(
           `[KanbanView] applyHighlight: No card found with blockId '${normalizedBlockId}' in board data`
         );
 
         // Debug: Log all available cards and their blockIds
         if (board) {
-          console.log('[KanbanView] applyHighlight: Available cards in board:');
+          debugLog('[KanbanView] applyHighlight: Available cards in board:');
           for (const lane of board.children) {
-            console.log(`  Lane '${lane.data.title}':`);
+            debugLog(`  Lane '${lane.data.title}':`);
             for (const item of lane.children) {
-              console.log(
+              debugLog(
                 `    - Card '${item.data.title}' (ID: ${item.id}, blockId: ${item.data.blockId})`
               );
             }
@@ -1429,19 +1431,19 @@ export class KanbanView extends TextFileView implements HoverParent {
 
     // 3. If not found by blockId, and cardTitleForSearch/listNameForSearch are available (from direct nav)
     if (!targetItemElement && cardTitleForSearch && listNameForSearch) {
-      console.log(
+      debugLog(
         `[KanbanView] applyHighlight: Attempting title/list lookup. Title: '${cardTitleForSearch}', List: '${listNameForSearch}'`
       );
       const targetLane = board.children.find(
         (lane) => lane.data.title.toLowerCase() === listNameForSearch?.toLowerCase()
       );
       if (targetLane) {
-        console.log(
+        debugLog(
           `[KanbanView] applyHighlight: Found target lane by title: ${targetLane.data.title}. It has ${targetLane.children.length} items.`
         );
         for (const item of targetLane.children) {
           const currentItemTitle = item.data.title;
-          console.log(
+          debugLog(
             `[KanbanView] applyHighlight: Item ID ${item.id} in lane, Title from data: "'${currentItemTitle}'", Target Title: "'${cardTitleForSearch}'"`
           );
           // Use includes for partial match, as cardTitle might be a snippet
@@ -1455,12 +1457,12 @@ export class KanbanView extends TextFileView implements HoverParent {
                 (parentItemElement.querySelector(
                   'div.kanban-plugin__item-content-wrapper'
                 ) as HTMLElement) || parentItemElement;
-              console.log(
+              debugLog(
                 '[KanbanView] applyHighlight: Found item by title/list in lane (DOM element):',
                 targetItemElement
               );
             } else {
-              console.log(
+              debugLog(
                 `[KanbanView] applyHighlight: Matched item data by title/list (ID: ${item.id}), but its DOM element with data-id '${itemDomId}' not found.`
               );
             }
@@ -1468,16 +1470,16 @@ export class KanbanView extends TextFileView implements HoverParent {
           }
         }
       } else {
-        console.log(`[KanbanView] applyHighlight: Lane '${listNameForSearch}' not found.`);
+        debugLog(`[KanbanView] applyHighlight: Lane '${listNameForSearch}' not found.`);
       }
-      console.log(
+      debugLog(
         `[KanbanView] applyHighlight: Result of title/list lookup for item '${cardTitleForSearch}' in list '${listNameForSearch}':`,
         targetItemElement
       );
     }
 
     if (targetItemElement) {
-      console.log(
+      debugLog(
         '[KanbanView] applyHighlight: Applying .search-result-highlight to:',
         targetItemElement
       );
@@ -1487,14 +1489,14 @@ export class KanbanView extends TextFileView implements HoverParent {
         targetItemElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 50);
     } else {
-      console.log(
+      debugLog(
         `[KanbanView] applyHighlight: No target item element found for highlighting. target: ${JSON.stringify(this.targetHighlightLocation)}. No ID could be determined (direct, subpath, or offset). Title/list search for title: '${this.targetHighlightLocation.cardTitle}' in list: '${this.targetHighlightLocation.listName}' also failed or was not applicable.`
       );
     }
   }
 
   clearActiveSearchHighlight() {
-    console.log(
+    debugLog(
       '[KanbanView] clearActiveSearchHighlight (for BORDER) called. Current this.targetHighlightLocation:',
       this.targetHighlightLocation
     );
@@ -1503,11 +1505,11 @@ export class KanbanView extends TextFileView implements HoverParent {
       this.contentEl.querySelectorAll('.search-result-highlight').forEach((el) => {
         el.removeClass('search-result-highlight');
       });
-      console.log(
+      debugLog(
         '[KanbanView] clearActiveSearchHighlight: Cleared BORDER highlight and DOM class.'
       );
     } else {
-      console.log('[KanbanView] clearActiveSearchHighlight: No active BORDER highlight to clear.');
+      debugLog('[KanbanView] clearActiveSearchHighlight: No active BORDER highlight to clear.');
     }
   }
 
@@ -1534,24 +1536,24 @@ export class KanbanView extends TextFileView implements HoverParent {
 
     // Also clear any global search match stored
     if (this.currentSearchMatch) {
-      console.log(
+      debugLog(
         '[KanbanView] handleBoardClickToClearHighlight: Clearing currentSearchMatch for global search highlight.',
         this.currentSearchMatch
       );
       this.currentSearchMatch = null;
       this.setReactState({}); // Trigger a re-render to remove any search-specific UI elements
     } else {
-      // console.log('[KanbanView] handleBoardClickToClearHighlight: No currentSearchMatch to clear for global search highlight.');
+      // debugLog('[KanbanView] handleBoardClickToClearHighlight: No currentSearchMatch to clear for global search highlight.');
     }
 
     // Handle card edit saving/cancellation if the setting is enabled
     if (this.plugin.settings.clickOutsideCardToSaveEdit) {
-      console.log(
+      debugLog(
         '[KanbanView] handleBoardClickToClearHighlight: Emitting "saveAllCardEdits" (setting enabled)'
       );
       this.emitter.emit('saveAllCardEdits');
     } else {
-      console.log(
+      debugLog(
         '[KanbanView] handleBoardClickToClearHighlight: Emitting "cancelAllCardEdits" (setting disabled)'
       );
       this.emitter.emit('cancelAllCardEdits');
@@ -1560,11 +1562,11 @@ export class KanbanView extends TextFileView implements HoverParent {
 
   handleDrop(dragEntity: any, dropEntity: any) {
     // Enhanced logging for drag and drop entities
-    console.log(
+    debugLog(
       '[KanbanView] handleDrop RAW DRAG ENTITY (top-level props):',
       Object.keys(dragEntity).join(', ')
     );
-    console.log(
+    debugLog(
       '[KanbanView] handleDrop RAW DROP ENTITY (top-level props):',
       Object.keys(dropEntity).join(', ')
     );
@@ -1575,18 +1577,18 @@ export class KanbanView extends TextFileView implements HoverParent {
     // Create copies for logging, excluding the circular 'win' property
     const dragDataForLog = { ...dragData };
     delete dragDataForLog.win;
-    // console.log('[KanbanView] handleDrop DRAG ENTITY DATA:', JSON.stringify(dragDataForLog, null, 2));
+    // debugLog('[KanbanView] handleDrop DRAG ENTITY DATA:', JSON.stringify(dragDataForLog, null, 2));
 
     const dropDataForLog = { ...dropData };
     delete dropDataForLog.win;
-    // console.log('[KanbanView] handleDrop DROP ENTITY DATA:', JSON.stringify(dropDataForLog, null, 2));
+    // debugLog('[KanbanView] handleDrop DROP ENTITY DATA:', JSON.stringify(dropDataForLog, null, 2));
 
     const board = this.getBoard();
     if (!board) {
       console.error('[KanbanView] handleDrop: Could not get board data.');
       return;
     }
-    console.log(`[KanbanView] handleDrop: Board ID: ${board.id}, File: ${this.file?.path}`);
+    debugLog(`[KanbanView] handleDrop: Board ID: ${board.id}, File: ${this.file?.path}`);
     let newBoard: Board;
 
     // Card to Lane/List Drag (or reorder within lane)
@@ -1607,32 +1609,32 @@ export class KanbanView extends TextFileView implements HoverParent {
           typeof dropData.index === 'number'
             ? dropData.index
             : board.children.find((lane) => lane.id === targetLaneId)?.children.length || 0;
-        console.log('[KanbanView] handleDrop (Card To Lane): Drop target is a LANE.', {
+        debugLog('[KanbanView] handleDrop (Card To Lane): Drop target is a LANE.', {
           targetLaneId,
           targetVisualIndex,
         });
       } else {
         // dropData.type === 'placeholder'
         try {
-          console.log(
+          debugLog(
             '[KanbanView] handleDrop (Card To Placeholder): Raw dropEntity.getPath() output:',
             JSON.stringify(dropEntity.getPath())
           );
         } catch (e) {
           console.error('[KanbanView] ERROR stringifying dropEntity.getPath():', e.message);
-          console.log(
+          debugLog(
             '[KanbanView] dropEntity.getPath() raw object (if available):',
             dropEntity.getPath()
           );
         }
         try {
-          console.log(
+          debugLog(
             '[KanbanView] handleDrop (Card To Placeholder): Full dropData for placeholder:',
             JSON.stringify(dropDataForLog, null, 2)
           );
         } catch (e) {
           console.error('[KanbanView] ERROR stringifying dropDataForLog (placeholder):', e.message);
-          console.log(
+          debugLog(
             '[KanbanView] dropDataForLog (placeholder) keys:',
             Object.keys(dropDataForLog)
           );
@@ -1652,7 +1654,7 @@ export class KanbanView extends TextFileView implements HoverParent {
                   : placeholderPath.length > 1
                     ? placeholderPath[1]
                     : potentialTargetLane.children.length;
-              console.log(
+              debugLog(
                 '[KanbanView] handleDrop (Card To Placeholder): Determined target lane from path.',
                 { targetLaneId, targetVisualIndex, targetLaneBoardIndex, placeholderPath }
               );
@@ -1688,7 +1690,7 @@ export class KanbanView extends TextFileView implements HoverParent {
               '[KanbanView] ERROR stringifying dropDataForLog in CRITICAL block:',
               e_crit.message
             );
-            console.log(
+            debugLog(
               '[KanbanView] dropDataForLog (CRITICAL block) keys:',
               Object.keys(dropDataForLog)
             );
@@ -1697,7 +1699,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         }
       }
 
-      console.log(
+      debugLog(
         '[KanbanView] handleDrop (Card To Lane/Placeholder): Extracted IDs and Indices:',
         // Removed JSON.stringify here for now to avoid potential errors on the main log object if complex values exist.
         {
@@ -1740,11 +1742,11 @@ export class KanbanView extends TextFileView implements HoverParent {
             '[KanbanView] ERROR stringifying data in Missing Critical IDs block:',
             e_ids.message
           );
-          console.log(
+          debugLog(
             '[KanbanView] dragDataForLog (Missing IDs) keys:',
             Object.keys(dragDataForLog)
           );
-          console.log(
+          debugLog(
             '[KanbanView] dropDataForLog (Missing IDs) keys:',
             Object.keys(dropDataForLog)
           );
@@ -1772,7 +1774,7 @@ export class KanbanView extends TextFileView implements HoverParent {
             '[KanbanView] ERROR stringifying source/target lane details in handleDrop:',
             e_stl.message
           );
-          console.log(
+          debugLog(
             '[KanbanView] source/target lane details object keys (handleDrop):',
             Object.keys({ sourceLaneId, targetLaneId, sourceLaneIndex, targetLaneIndex })
           );
@@ -1790,13 +1792,13 @@ export class KanbanView extends TextFileView implements HoverParent {
       }
 
       // const cardToMoveDetails = board.children[sourceLaneIndex]?.children[originalCardIndex];
-      // console.log('[KanbanView] handleDrop: Processed data for card drag/drop decision:', JSON.stringify({ cardId, sourceLaneId, originalCardIndex, targetLaneId, targetVisualIndex, cardToMoveId: cardToMoveDetails?.id, cardToMoveTitle: cardToMoveDetails?.data?.titleRaw, targetLaneExists: !!board.children[targetLaneIndex] }, null, 2));
+      // debugLog('[KanbanView] handleDrop: Processed data for card drag/drop decision:', JSON.stringify({ cardId, sourceLaneId, originalCardIndex, targetLaneId, targetVisualIndex, cardToMoveId: cardToMoveDetails?.id, cardToMoveTitle: cardToMoveDetails?.data?.titleRaw, targetLaneExists: !!board.children[targetLaneIndex] }, null, 2));
       // ^^^^ THIS LINE IS COMMENTED OUT TO PREVENT CIRCULAR STRINGIFY ERROR
 
       // IMMUTABILITY HELPER LOGIC (simplified for card move)
       if (sourceLaneId === targetLaneId) {
         // Reordering within the same lane
-        console.log(
+        debugLog(
           `[KanbanView] handleDrop: Reordering card ${cardId} in lane ${sourceLaneId} from index ${originalCardIndex} to ${targetVisualIndex}`
         );
         // Ensure targetVisualIndex is valid for splice
@@ -1822,7 +1824,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         });
       } else {
         // Moving card to a different lane
-        console.log(
+        debugLog(
           `[KanbanView] handleDrop: Moving card ${cardId} from lane ${sourceLaneId} (idx ${sourceLaneIndex}, card original idx ${originalCardIndex}) to lane ${targetLaneId} (idx ${targetLaneIndex}) at targetVisualIndex ${targetVisualIndex}`
         );
         // Ensure targetVisualIndex is valid for splice in target lane
@@ -1863,7 +1865,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       const oldLaneIndex = board.children.findIndex((lane) => lane.id === draggedLaneId);
       const newLaneTargetIndex = board.children.findIndex((lane) => lane.id === targetLaneId);
 
-      console.log(
+      debugLog(
         `[KanbanView] handleDrop (Lane): Reordering lane ${draggedLaneId} (old index ${oldLaneIndex}) to target lane ${targetLaneId} (target index ${newLaneTargetIndex})`
       );
 
@@ -1892,7 +1894,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       }
 
       if (oldLaneIndex === effectiveNewLaneIndex) {
-        console.log('[KanbanView] handleDrop (Lane): No effective change in order.');
+        debugLog('[KanbanView] handleDrop (Lane): No effective change in order.');
         return; // No change
       }
 
@@ -1933,7 +1935,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       const targetLaneId = dropData.parentLaneId; // Lane of the card being dropped onto
       const targetCardIndexInTargetLane = dropData.originalIndex; // Index of the card being dropped onto, in its lane
 
-      console.log('[KanbanView] handleDrop (Card To Card): Processing drag.', {
+      debugLog('[KanbanView] handleDrop (Card To Card): Processing drag.', {
         draggedCardId,
         sourceLaneId,
         originalCardIndexInSourceLane,
@@ -2008,7 +2010,7 @@ export class KanbanView extends TextFileView implements HoverParent {
 
       if (sourceLaneId === targetLaneId) {
         // Reordering within the same lane, dropping onto another card
-        console.log(
+        debugLog(
           `[KanbanView] handleDrop (Card To Card): Reordering card ${draggedCardId} in lane ${sourceLaneId} from index ${originalCardIndexInSourceLane} to before target card ${targetCardId} at index ${targetCardIndexInTargetLane}`
         );
 
@@ -2022,7 +2024,7 @@ export class KanbanView extends TextFileView implements HoverParent {
           // If X is at index i, and Y is at index i+1. targetCardIndexInTargetLane is i+1. insertionIndexInTargetLane becomes i+1.
           // If originalCardIndexInSourceLane (i) < insertionIndexInTargetLane (i+1), then adjustedInsertionIndex becomes i+1 -1 = i.
           // So it's removed from i and inserted at i. This is a no-op.
-          console.log('[KanbanView] handleDrop (Card to Card): No effective change in order.');
+          debugLog('[KanbanView] handleDrop (Card to Card): No effective change in order.');
           return;
         }
 
@@ -2047,7 +2049,7 @@ export class KanbanView extends TextFileView implements HoverParent {
         });
       } else {
         // Moving card to a different lane, dropping onto a card in that lane
-        console.log(
+        debugLog(
           `[KanbanView] handleDrop (Card To Card): Moving card ${draggedCardId} from lane ${sourceLaneId} to lane ${targetLaneId}, to be placed before target card ${targetCardId} at its index ${targetCardIndexInTargetLane}`
         );
         // insertionIndexInTargetLane is already targetCardIndexInTargetLane, which is where it should be placed before.

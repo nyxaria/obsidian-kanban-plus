@@ -7,6 +7,7 @@ import { defaultSort } from 'src/helpers/util';
 import { t } from 'src/lang/helpers';
 
 import { escapeRegExpStr } from '../components/helpers';
+import { debugLog } from '../helpers/debugLogger';
 
 export const frontmatterKey = 'kanban-plugin';
 
@@ -301,7 +302,7 @@ export function extractInlineMetadata(line: string, settings: KanbanSettings) {
         metadata.date = parsedDate;
         metadata.dateStr = datePart.trim();
         newString = newString.replace(dateMatch[0], ' ').trim();
-        console.log(`[extractInlineMetadata] Extracted date: ${metadata.dateStr}`);
+        debugLog(`[extractInlineMetadata] Extracted date: ${metadata.dateStr}`);
         if (timePart) {
           // Basic time parsing, assuming HH:mm or similar, let moment handle it
           const parsedTime = moment(timePart.trim(), ['HH:mm', 'H:mm', 'HHmm', 'Hmm'], true);
@@ -309,7 +310,7 @@ export function extractInlineMetadata(line: string, settings: KanbanSettings) {
             metadata.time = parsedTime;
             metadata.timeStr = timePart.trim();
             // The time part was already removed with dateMatch[0]
-            console.log(`[extractInlineMetadata] Extracted time (with date): ${metadata.timeStr}`);
+            debugLog(`[extractInlineMetadata] Extracted time (with date): ${metadata.timeStr}`);
           }
         }
       }
@@ -328,7 +329,7 @@ export function extractInlineMetadata(line: string, settings: KanbanSettings) {
           metadata.time = parsedTime;
           metadata.timeStr = timeOnlyPart.trim();
           newString = newString.replace(timeOnlyMatch[0], ' ').trim();
-          console.log(`[extractInlineMetadata] Extracted standalone time: ${metadata.timeStr}`);
+          debugLog(`[extractInlineMetadata] Extracted standalone time: ${metadata.timeStr}`);
           break; // Assume only one standalone time specifier per card for now
         }
       }
@@ -345,7 +346,7 @@ export function extractInlineMetadata(line: string, settings: KanbanSettings) {
     if (['high', 'medium', 'low'].includes(priorityValue)) {
       metadata.priority = priorityValue;
       newString = newString.replace(priorityRegEx, ' ').trim();
-      console.log(`[extractInlineMetadata] Extracted priority: ${metadata.priority}`);
+      debugLog(`[extractInlineMetadata] Extracted priority: ${metadata.priority}`);
     }
   }
 
@@ -357,7 +358,7 @@ export function extractInlineMetadata(line: string, settings: KanbanSettings) {
       metadata.tags?.push(match[1]); // match[1] is the full tag e.g. #tagname
     });
     newString = newString.replace(tagRegEx, ' ').trim();
-    console.log(`[extractInlineMetadata] Extracted tags: ${JSON.stringify(metadata.tags)}`);
+    debugLog(`[extractInlineMetadata] Extracted tags: ${JSON.stringify(metadata.tags)}`);
   }
 
   // 4. Extract Assigned Members
@@ -368,7 +369,7 @@ export function extractInlineMetadata(line: string, settings: KanbanSettings) {
       metadata.assignedMembers?.push(match[2]); // match[2] is the member name without @@
     });
     newString = newString.replace(assignedMemberRegEx, ' ').trim();
-    console.log(
+    debugLog(
       `[extractInlineMetadata] Extracted members: ${JSON.stringify(metadata.assignedMembers)}`
     );
   }
@@ -404,7 +405,7 @@ export function extractInlineMetadata(line: string, settings: KanbanSettings) {
       newString = newString.replace(fieldStr, ' ');
     });
     newString = newString.trim();
-    console.log(
+    debugLog(
       `[extractInlineMetadata] Extracted inline fields: ${JSON.stringify(metadata.inlineMetadata)}`
     );
   }

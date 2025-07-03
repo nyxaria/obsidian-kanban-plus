@@ -3,6 +3,7 @@ import { createElement } from 'preact';
 import { render, unmountComponentAtNode } from 'preact/compat';
 
 import { TimelineViewComponent } from './components/Timeline/TimelineViewComponent';
+import { debugLog } from './helpers/debugLogger';
 import KanbanPlugin from './main';
 
 export const TIMELINE_VIEW_TYPE = 'timeline-view';
@@ -46,7 +47,7 @@ export class TimelineView extends ItemView {
 
   // ADDED: Method to handle file/folder renames (basic, may need more logic if scan paths are configurable)
   async handleRename(file: TAbstractFile, oldPath: string) {
-    console.log(`[TimelineView] handleRename: File '${oldPath}' renamed to '${file.path}'`);
+    debugLog(`[TimelineView] handleRename: File '${oldPath}' renamed to '${file.path}'`);
     // If the timeline view depends on specific paths that might change, handle them here.
     // For now, a simple refresh might be enough if it rescans everything.
     this.viewEvents.trigger('refresh-data'); // Assuming TimelineViewComponent listens to this

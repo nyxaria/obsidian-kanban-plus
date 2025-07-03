@@ -32,6 +32,7 @@ import { Board, Item, Lane } from './components/types';
 import { DndContext } from './dnd/components/DndContext';
 import { getParentWindow } from './dnd/util/getWindow';
 import { hasFrontmatterKeyRaw } from './helpers';
+import { debugLog } from './helpers/debugLogger';
 import { PromiseQueue } from './helpers/util';
 import { t } from './lang/helpers';
 import KanbanPlugin from './main';
@@ -212,7 +213,7 @@ export class MemberView extends ItemView implements HoverParent {
       this.app.workspace.on('active-leaf-change', (leaf) => {
         if (leaf === this.leaf && this.selectedMember) {
           // This view just became active - refresh the cards
-          console.log('[MemberView] View became active, refreshing cards');
+          debugLog('[MemberView] View became active, refreshing cards');
           this.scanMemberCards();
         }
       })
@@ -229,10 +230,10 @@ export class MemberView extends ItemView implements HoverParent {
           this.contentEl.isConnected &&
           !(this.leaf as any).detached
         ) {
-          console.log('[MemberView] Initial render - contentEl ready');
+          debugLog('[MemberView] Initial render - contentEl ready');
           this.setReactState({});
         } else {
-          console.log('[MemberView] Initial render - contentEl not ready, retrying...');
+          debugLog('[MemberView] Initial render - contentEl not ready, retrying...');
           // Retry after a longer delay
           setTimeout(() => {
             if (
@@ -242,7 +243,7 @@ export class MemberView extends ItemView implements HoverParent {
               this.contentEl.isConnected &&
               !(this.leaf as any).detached
             ) {
-              console.log('[MemberView] Retry render - contentEl ready');
+              debugLog('[MemberView] Retry render - contentEl ready');
               this.setReactState({});
             } else {
               console.warn('[MemberView] Failed to initialize after retry');
@@ -320,12 +321,12 @@ export class MemberView extends ItemView implements HoverParent {
     if (this.contentEl && this.contentEl.isConnected) {
       this.setReactState({});
     } else {
-      console.log('[MemberView] setState called but contentEl not ready, waiting...');
+      debugLog('[MemberView] setState called but contentEl not ready, waiting...');
       // Wait for contentEl to be ready
       requestAnimationFrame(() => {
         setTimeout(() => {
           if (this.contentEl && this.contentEl.isConnected && !(this.leaf as any).detached) {
-            console.log('[MemberView] setState delayed render - contentEl ready');
+            debugLog('[MemberView] setState delayed render - contentEl ready');
             this.setReactState({});
           }
         }, 100);
@@ -412,7 +413,7 @@ export class MemberView extends ItemView implements HoverParent {
   async scanMemberCards() {
     // Check if view is properly initialized
     if (!this.app || !this.plugin || (this.leaf as any).detached) {
-      console.log('[MemberView] View not properly initialized, skipping scan');
+      debugLog('[MemberView] View not properly initialized, skipping scan');
       return;
     }
 
@@ -665,7 +666,7 @@ export class MemberView extends ItemView implements HoverParent {
       // Check if it's a task
       const isTask = listItemNode.checked !== null;
       if (!isTask) {
-        console.log('[MemberView] Not a task, skipping');
+        debugLog('[MemberView] Not a task, skipping');
         return null;
       }
 
@@ -693,11 +694,11 @@ export class MemberView extends ItemView implements HoverParent {
       }
 
       if (!titleRaw) {
-        console.log('[MemberView] No titleRaw extracted, skipping');
+        debugLog('[MemberView] No titleRaw extracted, skipping');
         return null;
       }
 
-      console.log('[MemberView] parseListItemToMemberCard: Processing item:', {
+      debugLog('[MemberView] parseListItemToMemberCard: Processing item:', {
         titleRaw,
         filePath: file.path,
         laneTitle,
@@ -709,7 +710,7 @@ export class MemberView extends ItemView implements HoverParent {
       const blockIdMatch = titleRaw.match(/\^([a-zA-Z0-9]+)/);
       const blockId = blockIdMatch ? blockIdMatch[1] : undefined;
 
-      console.log('[MemberView] Block ID extraction debug:', {
+      debugLog('[MemberView] Block ID extraction debug:', {
         titleRaw: titleRaw,
         blockIdMatch: blockIdMatch,
         extractedBlockId: blockId,
@@ -718,17 +719,17 @@ export class MemberView extends ItemView implements HoverParent {
 
       // PROMINENT DEBUG: Show blockId extraction result
       if (blockId) {
-        console.log(
+        debugLog(
           `🔍 [MemberView] BLOCK ID FOUND: "${blockId}" in card: "${titleRaw.substring(0, 50)}..."`
         );
       } else {
-        console.log(`❌ [MemberView] NO BLOCK ID FOUND in card: "${titleRaw.substring(0, 50)}..."`);
+        debugLog(`❌ [MemberView] NO BLOCK ID FOUND in card: "${titleRaw.substring(0, 50)}..."`);
       }
 
       // Extract assigned members from the entire item tree (including nested items)
       const assignedMembers = this.extractMembersFromItemTree(listItemNode);
 
-      console.log('[MemberView] Extracted members:', {
+      debugLog('[MemberView] Extracted members:', {
         assignedMembers,
         selectedMember: this.selectedMember,
         matches: assignedMembers.includes(this.selectedMember),
@@ -826,7 +827,7 @@ export class MemberView extends ItemView implements HoverParent {
         timeStr,
       };
 
-      console.log('[MemberView] Created member card:', {
+      debugLog('[MemberView] Created member card:', {
         id: result.id,
         title: result.title,
         titleRaw: result.titleRaw,
@@ -929,7 +930,7 @@ export class MemberView extends ItemView implements HoverParent {
       // Add parentLaneId to item data for drag and drop tracking
       (item.data as any).parentLaneId = card.checked ? 'done' : card.hasDoing ? 'doing' : 'backlog';
 
-      console.log('[MemberView] Created item with metadata:', {
+      debugLog('[MemberView] Created item with metadata:', {
         itemId: item.id,
         title: item.data.title,
         hasMetadata: !!item.data.metadata,
@@ -999,14 +1000,14 @@ export class MemberView extends ItemView implements HoverParent {
     };
 
     // Debug: Validate all items in the board have proper metadata
-    console.log('[MemberView] Board validation:', {
+    debugLog('[MemberView] Board validation:', {
       boardId: board.id,
       laneCount: board.children.length,
       totalItems: board.children.reduce((sum, lane) => sum + lane.children.length, 0),
     });
 
     board.children.forEach((lane, laneIndex) => {
-      console.log(
+      debugLog(
         `[MemberView] Lane ${laneIndex} (${lane.data?.title}): ${lane.children.length} items`
       );
       lane.children.forEach((item, itemIndex) => {
@@ -1037,7 +1038,7 @@ export class MemberView extends ItemView implements HoverParent {
   async setReactState(newState?: any) {
     // Prevent multiple simultaneous renders
     if (this._isRendering) {
-      console.log('[MemberView] Render already in progress, skipping');
+      debugLog('[MemberView] Render already in progress, skipping');
       return;
     }
 
@@ -1060,9 +1061,7 @@ export class MemberView extends ItemView implements HoverParent {
       try {
         // Check if component is still mounted and valid
         if (!this.contentEl || (this.leaf as any).detached || !this.contentEl.isConnected) {
-          console.log(
-            '[MemberView] Content element not available, detached, or not connected to DOM'
-          );
+          debugLog('[MemberView] Content element not available, detached, or not connected to DOM');
           return;
         }
 
@@ -1089,7 +1088,7 @@ export class MemberView extends ItemView implements HoverParent {
 
         // Final check before render
         if (!this.contentEl.isConnected) {
-          console.log('[MemberView] ContentEl disconnected before render, aborting');
+          debugLog('[MemberView] ContentEl disconnected before render, aborting');
           return;
         }
 
@@ -1148,7 +1147,7 @@ export class MemberView extends ItemView implements HoverParent {
 
   async handleDrop(dragEntity: any, dropEntity: any) {
     // Handle drag and drop for member board
-    console.log(
+    debugLog(
       '[MemberView] handleDrop: CALLED - dragEntity:',
       dragEntity,
       'dropEntity:',
@@ -1158,16 +1157,13 @@ export class MemberView extends ItemView implements HoverParent {
     const dragData = dragEntity.getData();
     const dropData = dropEntity.getData();
 
-    console.log('[MemberView] handleDrop: Full dragData:', dragData);
-    console.log('[MemberView] handleDrop: Full dropData:', dropData);
-    console.log('[MemberView] handleDrop: dropData.type:', dropData?.type);
-    console.log('[MemberView] handleDrop: dropData.id:', dropData?.id);
-    console.log('[MemberView] handleDrop: dropData.memberBoardLane:', dropData?.memberBoardLane);
-    console.log(
-      '[MemberView] handleDrop: dropData.memberBoardLaneId:',
-      dropData?.memberBoardLaneId
-    );
-    console.log('[MemberView] handleDrop: dropEntity type and methods:', {
+    debugLog('[MemberView] handleDrop: Full dragData:', dragData);
+    debugLog('[MemberView] handleDrop: Full dropData:', dropData);
+    debugLog('[MemberView] handleDrop: dropData.type:', dropData?.type);
+    debugLog('[MemberView] handleDrop: dropData.id:', dropData?.id);
+    debugLog('[MemberView] handleDrop: dropData.memberBoardLane:', dropData?.memberBoardLane);
+    debugLog('[MemberView] handleDrop: dropData.memberBoardLaneId:', dropData?.memberBoardLaneId);
+    debugLog('[MemberView] handleDrop: dropEntity type and methods:', {
       entityType: typeof dropEntity,
       hasGetPath: typeof dropEntity.getPath === 'function',
       hasGetData: typeof dropEntity.getData === 'function',
@@ -1181,7 +1177,7 @@ export class MemberView extends ItemView implements HoverParent {
       const itemId = dragData.id;
 
       // Debug: log the full drop data to understand the structure
-      console.log('[MemberView] handleDrop: Full dropData:', dropData);
+      debugLog('[MemberView] handleDrop: Full dropData:', dropData);
 
       let targetLaneId;
 
@@ -1193,7 +1189,7 @@ export class MemberView extends ItemView implements HoverParent {
         // Direct lane drop - use the lane ID if it's a member board lane
         if (MEMBER_BOARD_LANES.includes(dropData.id)) {
           targetLaneId = dropData.id;
-          console.log(
+          debugLog(
             '[MemberView] handleDrop: Drop target is MEMBER BOARD LANE with ID:',
             targetLaneId
           );
@@ -1207,7 +1203,7 @@ export class MemberView extends ItemView implements HoverParent {
       } else if (dropData.type === 'placeholder') {
         // For placeholder, we need to find the parent lane ID from the entity path
         const path = dropEntity.getPath();
-        console.log('[MemberView] handleDrop: Drop entity path:', path);
+        debugLog('[MemberView] handleDrop: Drop entity path:', path);
 
         if (path && path.length > 0) {
           // CRITICAL: The path should reference the member board structure
@@ -1216,7 +1212,7 @@ export class MemberView extends ItemView implements HoverParent {
           // Validate that the lane index is within member board bounds
           if (laneIndex >= 0 && laneIndex < MEMBER_BOARD_LANES.length) {
             targetLaneId = MEMBER_BOARD_LANES[laneIndex];
-            console.log(
+            debugLog(
               '[MemberView] handleDrop: Resolved MEMBER BOARD lane from path - index:',
               laneIndex,
               'lane:',
@@ -1241,7 +1237,7 @@ export class MemberView extends ItemView implements HoverParent {
       } else if (dropData.type === 'item') {
         // Dropping onto an existing item - determine lane from entity path or item data
         const path = dropEntity.getPath();
-        console.log('[MemberView] handleDrop: Drop target is ITEM, entity path:', path);
+        debugLog('[MemberView] handleDrop: Drop target is ITEM, entity path:', path);
 
         // Try to get lane from entity path first (most reliable)
         if (path && path.length > 0) {
@@ -1250,7 +1246,7 @@ export class MemberView extends ItemView implements HoverParent {
           // Validate that the lane index is within member board bounds
           if (laneIndex >= 0 && laneIndex < MEMBER_BOARD_LANES.length) {
             targetLaneId = MEMBER_BOARD_LANES[laneIndex];
-            console.log(
+            debugLog(
               '[MemberView] handleDrop: Resolved MEMBER BOARD lane from item path - index:',
               laneIndex,
               'lane:',
@@ -1269,7 +1265,7 @@ export class MemberView extends ItemView implements HoverParent {
         } else if (dropData.parentLaneId && MEMBER_BOARD_LANES.includes(dropData.parentLaneId)) {
           // Fallback to parentLaneId from item data (only if it's a member board lane)
           targetLaneId = dropData.parentLaneId;
-          console.log(
+          debugLog(
             '[MemberView] handleDrop: Using member board parentLaneId from item data:',
             targetLaneId
           );
@@ -1285,7 +1281,7 @@ export class MemberView extends ItemView implements HoverParent {
           } else {
             targetLaneId = 'backlog';
           }
-          console.log(
+          debugLog(
             '[MemberView] handleDrop: Determined member board lane from item properties:',
             targetLaneId,
             'checked:',
@@ -1317,10 +1313,7 @@ export class MemberView extends ItemView implements HoverParent {
         return;
       }
 
-      console.log(
-        '[MemberView] handleDrop: Final MEMBER BOARD target lane determined:',
-        targetLaneId
-      );
+      debugLog('[MemberView] handleDrop: Final MEMBER BOARD target lane determined:', targetLaneId);
 
       // Find the member card that was dragged
       const memberCard = this.memberCards.find((card) => card.id === itemId);
@@ -1329,18 +1322,18 @@ export class MemberView extends ItemView implements HoverParent {
         return;
       }
 
-      console.log('[MemberView] handleDrop: Moving item', itemId, 'to lane', targetLaneId);
+      debugLog('[MemberView] handleDrop: Moving item', itemId, 'to lane', targetLaneId);
 
       try {
         // Use KanbanView-style approach: update via StateManager instead of manual file manipulation
         await this.updateCardViaStateManager(memberCard, targetLaneId);
 
-        console.log('[MemberView] handleDrop: Successfully updated card via StateManager');
+        debugLog('[MemberView] handleDrop: Successfully updated card via StateManager');
       } catch (error) {
         console.error('[MemberView] Error updating card via StateManager:', error);
 
         // Fallback to manual file update if StateManager approach fails
-        console.log('[MemberView] Falling back to manual file update...');
+        debugLog('[MemberView] Falling back to manual file update...');
         try {
           // 1. Optimistically update the card in memory first for immediate visual feedback
           const originalCard = { ...memberCard };
@@ -1355,7 +1348,7 @@ export class MemberView extends ItemView implements HoverParent {
           // 4. Refresh from file to get the actual state (this will correct any optimistic errors)
           await this.scanMemberCards();
 
-          console.log('[MemberView] handleDrop: Successfully updated card via fallback method');
+          debugLog('[MemberView] handleDrop: Successfully updated card via fallback method');
         } catch (fallbackError) {
           console.error('[MemberView] Error in fallback update:', fallbackError);
 
@@ -1380,7 +1373,7 @@ export class MemberView extends ItemView implements HoverParent {
     // Get or create StateManager for the file
     let stateManager = this.plugin.stateManagers.get(sourceFile);
     if (!stateManager) {
-      console.log(`[MemberView] Creating on-demand StateManager for ${sourceFile.path}`);
+      debugLog(`[MemberView] Creating on-demand StateManager for ${sourceFile.path}`);
 
       // Create a temporary mock view for StateManager initialization
       const mockView = {
@@ -1411,7 +1404,7 @@ export class MemberView extends ItemView implements HoverParent {
       const fileContent = await this.app.vault.cachedRead(sourceFile);
       await stateManager.registerView(mockView, fileContent, true);
 
-      console.log(
+      debugLog(
         `[MemberView] Created StateManager for ${sourceFile.path}, state ID: ${stateManager.state?.id}`
       );
     }
@@ -1426,7 +1419,7 @@ export class MemberView extends ItemView implements HoverParent {
     let sourceLaneIndex = -1;
     let cardIndex = -1;
 
-    console.log('[MemberView] updateCardViaStateManager: Searching for card in board structure', {
+    debugLog('[MemberView] updateCardViaStateManager: Searching for card in board structure', {
       searchingFor: {
         memberCardId: memberCard.id,
         memberCardTitle: memberCard.title,
@@ -1447,14 +1440,14 @@ export class MemberView extends ItemView implements HoverParent {
 
     for (let laneIdx = 0; laneIdx < board.children.length; laneIdx++) {
       const lane = board.children[laneIdx];
-      console.log(
+      debugLog(
         `[MemberView] updateCardViaStateManager: Checking lane ${laneIdx} (${lane.data?.title}) with ${lane.children.length} items`
       );
 
       for (let itemIdx = 0; itemIdx < lane.children.length; itemIdx++) {
         const item = lane.children[itemIdx];
 
-        console.log(`[MemberView] updateCardViaStateManager: Checking item ${itemIdx}`, {
+        debugLog(`[MemberView] updateCardViaStateManager: Checking item ${itemIdx}`, {
           itemId: item.id,
           itemTitle: item.data?.title,
           itemTitleRaw: item.data?.titleRaw,
@@ -1469,7 +1462,7 @@ export class MemberView extends ItemView implements HoverParent {
 
         // Skip items without data
         if (!item.data) {
-          console.log(`[MemberView] updateCardViaStateManager: Skipping item ${itemIdx} - no data`);
+          debugLog(`[MemberView] updateCardViaStateManager: Skipping item ${itemIdx} - no data`);
           continue;
         }
 
@@ -1539,7 +1532,7 @@ export class MemberView extends ItemView implements HoverParent {
           foundCard = item;
           sourceLaneIndex = laneIdx;
           cardIndex = itemIdx;
-          console.log(`[MemberView] updateCardViaStateManager: FOUND MATCHING CARD!`, {
+          debugLog(`[MemberView] updateCardViaStateManager: FOUND MATCHING CARD!`, {
             matchedBy: matchReason,
             foundCard: {
               id: foundCard.id,
@@ -1564,7 +1557,7 @@ export class MemberView extends ItemView implements HoverParent {
       throw new Error(`Card not found in board structure: ${memberCard.title}`);
     }
 
-    console.log('[MemberView] updateCardViaStateManager: Found card in board structure', {
+    debugLog('[MemberView] updateCardViaStateManager: Found card in board structure', {
       cardTitle: foundCard.data?.title,
       sourceLaneIndex,
       cardIndex,
@@ -1666,7 +1659,7 @@ export class MemberView extends ItemView implements HoverParent {
 
         // TRIGGER AUTO-MOVE AUTOMATION: If auto-move-done-to-lane is enabled, move to Done lane
         if (this.plugin.settings['auto-move-done-to-lane']) {
-          console.log(
+          debugLog(
             '[MemberView] updateCardViaStateManager: Auto-move-done-to-lane is enabled, will move card to Done lane in source board'
           );
           // The StateManager will automatically handle moving the card to the Done lane
@@ -1718,7 +1711,7 @@ export class MemberView extends ItemView implements HoverParent {
       // If the card was moved to 'done' and auto-move setting is enabled,
       // trigger the auto-move automation explicitly
       if (targetLaneId === 'done' && this.plugin.settings['auto-move-done-to-lane']) {
-        console.log(
+        debugLog(
           '[MemberView] updateCardViaStateManager: Card moved to done lane with auto-move enabled - triggering automation'
         );
 
@@ -1778,7 +1771,7 @@ export class MemberView extends ItemView implements HoverParent {
     // Convert 1-indexed line number to 0-indexed array index
     const lineIndex = (memberCard.sourceStartLine || 1) - 1;
 
-    console.log('[MemberView] updateCardForLane debug:', {
+    debugLog('[MemberView] updateCardForLane debug:', {
       cardId: memberCard.id,
       cardTitle: memberCard.title,
       sourceFile: memberCard.sourceBoardPath,
@@ -1859,7 +1852,7 @@ export class MemberView extends ItemView implements HoverParent {
 
         // TRIGGER AUTO-MOVE AUTOMATION: If auto-move-done-to-lane is enabled
         if (this.plugin.settings['auto-move-done-to-lane']) {
-          console.log(
+          debugLog(
             '[MemberView] updateCardForLane: Auto-move-done-to-lane is enabled, will trigger automation after file save'
           );
           // After saving the file, we need to let the StateManager handle the auto-move
@@ -1874,7 +1867,7 @@ export class MemberView extends ItemView implements HoverParent {
 
     // Only update if the line actually changed
     if (updatedLine === originalLine) {
-      console.log('[MemberView] No changes needed for line');
+      debugLog('[MemberView] No changes needed for line');
       return;
     }
 
@@ -1885,7 +1878,7 @@ export class MemberView extends ItemView implements HoverParent {
     // Save the file
     await this.app.vault.modify(file, updatedContent);
 
-    console.log('[MemberView] Updated line:', {
+    debugLog('[MemberView] Updated line:', {
       original: originalLine,
       updated: updatedLine,
       file: memberCard.sourceBoardPath,
@@ -1895,7 +1888,7 @@ export class MemberView extends ItemView implements HoverParent {
 
     // Wait for file system and cache to process the changes
     // Similar to how KanbanWorkspaceView handles it
-    console.log(
+    debugLog(
       '[MemberView] updateCardForLane: Waiting for file system and cache to process changes...'
     );
     await new Promise((resolve) => setTimeout(resolve, 200));

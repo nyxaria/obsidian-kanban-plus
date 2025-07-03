@@ -1,3 +1,4 @@
+import { debugLog } from '../../helpers/debugLogger';
 import classcat from 'classcat';
 import {
   JSX,
@@ -97,14 +98,14 @@ const ItemInner = memo(function ItemInner({
     const currentEditStateAtEffectStart = editState;
     if (prevCancelEditCounterRef.current !== cancelEditCounter) {
       if (isEditingActive(currentEditStateAtEffectStart)) {
-        console.log(
+        debugLog(
           `[ItemInner item ${item.id}] cancelEditCounter changed to ${cancelEditCounter}. Was ${prevCancelEditCounterRef.current}. Condition isEditingActive(${JSON.stringify(currentEditStateAtEffectStart)}) is TRUE. Setting editState from`,
           currentEditStateAtEffectStart,
           '-> complete'
         );
         setEditState(EditingProcessState.Complete);
       } else {
-        console.log(
+        debugLog(
           `[ItemInner item ${item.id}] cancelEditCounter changed to ${cancelEditCounter}. Was ${prevCancelEditCounterRef.current}. Condition isEditingActive(${JSON.stringify(currentEditStateAtEffectStart)}) is FALSE. Not setting to complete. Current editState remains:`,
           currentEditStateAtEffectStart
         );
@@ -180,7 +181,7 @@ const ItemInner = memo(function ItemInner({
 
   const onDoubleClickCallback: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
     (e) => {
-      console.log('[ItemInner] onDoubleClick triggered', {
+      debugLog('[ItemInner] onDoubleClick triggered', {
         isStatic,
         editable: stateManager.getSetting('editable'),
       });

@@ -1,3 +1,4 @@
+import { debugLog } from '../helpers/debugLogger';
 import classcat from 'classcat';
 import { moment } from 'obsidian';
 import {
@@ -182,7 +183,7 @@ const MemberItemInner = memo(function MemberItemInner({
 
   const onDoubleClickCallback: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
     (e) => {
-      console.log('[MemberItemInner] onDoubleClick triggered', {
+      debugLog('[MemberItemInner] onDoubleClick triggered', {
         isStatic,
         editable: stateManager.getSetting('editable'),
       });

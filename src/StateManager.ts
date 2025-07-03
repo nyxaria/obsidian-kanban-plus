@@ -11,6 +11,7 @@ import {
   getDefaultTimeFormat,
 } from './components/helpers';
 import { Board, BoardTemplate, Item, ItemData, Lane } from './components/types';
+import { debugLog } from './helpers/debugLogger';
 import { ListFormat } from './parsers/List';
 import { BaseFormat, frontmatterKey, shouldRefreshBoard } from './parsers/common';
 import { getTaskStatusDone } from './parsers/helpers/inlineMetadata';
@@ -44,7 +45,7 @@ export class StateManager {
     this.getGlobalSettings = getGlobalSettings;
     this.parser = new ListFormat(this);
 
-    // console.log(
+    // debugLog(
     //   `[StateManager] Constructor completed for ${this.file?.path}. Initial parsing deferred to plugin.addView.`
     // );
   }
@@ -68,14 +69,14 @@ export class StateManager {
     // If state is not initialized, we MUST parse data or create a new board,
     // regardless of the incoming shouldParseData flag.
     if (!this.state || shouldParseData) {
-      console.log(
+      debugLog(
         `[StateManager] registerView: Initializing/Re-initializing board. Has existing state: ${!!this
           .state}, shouldParseData: ${shouldParseData}`
       );
       await this.newBoard(view, data);
     } else {
       // This branch is taken if this.state exists AND shouldParseData is false.
-      console.log(
+      debugLog(
         `[StateManager] registerView: Using existing board state for prerender. Board ID: ${this.state?.id}`
       );
       // this.state is guaranteed to be non-null here.
@@ -192,7 +193,7 @@ export class StateManager {
       const oldSettings = this.state?.data.settings;
       const incomingState = typeof state === 'function' ? state(this.state) : state;
 
-      console.log(
+      debugLog(
         `[StateManager] setState: Preparing to set state for file ID: ${this.file?.path}. Incoming board ID: ${incomingState?.id}`
       );
 
@@ -217,7 +218,7 @@ export class StateManager {
         this.state = incomingState;
         this.compileSettings();
       }
-      console.log(
+      debugLog(
         `[StateManager] setState: State has been set. Current this.state.id: ${this.state?.id}, for SM file: ${this.file?.path}`
       );
 
@@ -230,7 +231,7 @@ export class StateManager {
         this.saveToDisk();
       }
 
-      console.log(
+      debugLog(
         '[StateManager] setState: About to notify stateReceivers. Number of receivers:',
         this.stateReceivers.length,
         'New state ID:',
@@ -483,7 +484,7 @@ export class StateManager {
     }
 
     try {
-      console.log(
+      debugLog(
         '[StateManager] setError: Notifying stateReceivers about error state. Number of receivers:',
         this.stateReceivers.length
       );
@@ -611,21 +612,21 @@ export class StateManager {
     });
 
     this.setState(updatedBoard); // shouldSave defaults to true
-    console.log(
+    debugLog(
       `[StateManager] setLaneBackgroundColor: Color set for lane ${laneId} to ${color}. State updated.`
     );
   }
 
   // Helper function to handle auto-moving done cards
   private handleAutoMoveDoneCard(board: Board, itemId: string, isChecked: boolean): Board {
-    console.log(
+    debugLog(
       `[StateManager] handleAutoMoveDoneCard: Called for item ${itemId}, isChecked: ${isChecked}`
     );
     const autoMoveEnabled = this.getSetting('auto-move-done-to-lane');
-    console.log(`[StateManager] handleAutoMoveDoneCard: autoMoveEnabled is ${autoMoveEnabled}`);
+    debugLog(`[StateManager] handleAutoMoveDoneCard: autoMoveEnabled is ${autoMoveEnabled}`);
 
     if (!autoMoveEnabled || !isChecked) {
-      console.log(
+      debugLog(
         '[StateManager] handleAutoMoveDoneCard: Auto-move not enabled or item not checked. Returning original board.'
       );
       return board; // No move needed
@@ -655,13 +656,13 @@ export class StateManager {
       );
       return board; // Item not found, should not happen if called after item update
     }
-    console.log(
+    debugLog(
       `[StateManager] handleAutoMoveDoneCard: Found item '${itemToMove.data.titleRaw}' in lane '${board.children[sourceLaneIndex].data.title}'`
     );
 
     let doneLaneIndex = board.children.findIndex((lane) => lane.data.title === DONE_LANE_NAME);
     let newBoard = board;
-    console.log(`[StateManager] handleAutoMoveDoneCard: Initial Done lane index: ${doneLaneIndex}`);
+    debugLog(`[StateManager] handleAutoMoveDoneCard: Initial Done lane index: ${doneLaneIndex}`);
 
     // If "Done" lane doesn't exist, create it
     if (doneLaneIndex === -1) {
@@ -681,7 +682,7 @@ export class StateManager {
         children: { $push: [newLane] },
       });
       doneLaneIndex = newBoard.children.length - 1; // New lane is at the end
-      console.log(
+      debugLog(
         `[StateManager] handleAutoMoveDoneCard: "Done" lane created at index ${doneLaneIndex}`
       );
     }
@@ -694,13 +695,13 @@ export class StateManager {
       // Item is already in the Done lane, potentially reorder to the end if behavior is desired
       // For now, if it's already in Done, we do nothing further to prevent loops or needless shuffles.
       // If it was just marked done and was already in Done, it just stays.
-      console.log(
+      debugLog(
         `[StateManager] handleAutoMoveDoneCard: Item ${itemId} is already in the "Done" lane. No move performed.`
       );
       return newBoard;
     }
 
-    console.log(
+    debugLog(
       `[StateManager] handleAutoMoveDoneCard: Attempting to move item ${itemId} from lane ${sourceLaneIndex} to lane ${doneLaneIndex}`
     );
     newBoard = update(newBoard, {
@@ -718,7 +719,7 @@ export class StateManager {
   }
 
   updateItem(itemId: string, data: Partial<ItemData>, lanes: Lane[], pos?: number) {
-    console.log(
+    debugLog(
       `[StateManager] updateItem: Called for itemId: ${itemId}, full data payload:`,
       JSON.stringify(data)
     );

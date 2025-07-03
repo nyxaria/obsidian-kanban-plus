@@ -2,6 +2,7 @@ import { App, TFile, moment } from 'obsidian';
 
 import { KanbanSettings } from './Settings';
 import { TimelineCardData } from './components/types';
+import { debugLog } from './helpers/debugLogger';
 
 // Assuming TimelineCardData is in types
 
@@ -114,7 +115,7 @@ export async function updateCardDatesInMarkdown(
 
       if (itemLineIndex !== -1) {
         itemLineText = lines[itemLineIndex];
-        console.log(
+        debugLog(
           `[markdownUpdater] Found line by smart title match: "${itemLineText}" (Base searched: "${baseTitleToSearch}")`
         );
       }

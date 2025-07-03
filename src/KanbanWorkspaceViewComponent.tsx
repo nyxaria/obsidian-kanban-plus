@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 
 import { KanbanWorkspaceView } from './KanbanWorkspaceView';
 import { SavedWorkspaceView } from './Settings';
+import { debugLog } from './helpers/debugLogger';
 import KanbanPlugin from './main';
 
 // Assuming KanbanWorkspaceView is exported from a file named KanbanWorkspaceView.ts or .tsx
@@ -42,7 +43,7 @@ const KanbanWorkspaceViewComponent = (props: KanbanWorkspaceViewComponentProps) 
       value={selectedViewId || ''}
       onChange={async (e) => {
         const newId = (e.target as HTMLSelectElement).value;
-        console.log(`[KanbanWorkspaceViewComponent] Dropdown onChange: newId selected: ${newId}`);
+        debugLog(`[KanbanWorkspaceViewComponent] Dropdown onChange: newId selected: ${newId}`);
         setSelectedViewId(newId); // Update child's own state first
 
         // Find the selected view object to get its name
@@ -50,7 +51,7 @@ const KanbanWorkspaceViewComponent = (props: KanbanWorkspaceViewComponentProps) 
           (v: SavedWorkspaceView) => v.id === newId
         );
         const viewName = selectedViewObject ? selectedViewObject.name : null;
-        console.log(
+        debugLog(
           `[KanbanWorkspaceViewComponent] Dropdown onChange: viewName determined: ${viewName} for newId: ${newId}`
         );
 

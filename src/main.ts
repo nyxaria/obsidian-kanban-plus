@@ -36,6 +36,7 @@ import { ReminderModal } from './components/ReminderModal';
 import { Item, ItemData } from './components/types';
 import { getParentWindow } from './dnd/util/getWindow';
 import { hasFrontmatterKey } from './helpers';
+import { debugLog, setDebugLoggerPlugin } from './helpers/debugLogger';
 import { t } from './lang/helpers';
 import { ListFormat } from './parsers/List';
 import { basicFrontmatter, frontmatterKey } from './parsers/common';
@@ -101,13 +102,13 @@ export default class KanbanPlugin extends Plugin {
 
   // Placeholder for onDbChange
   public onDbChange(file: TFile, ...args: any[]) {
-    console.log(`[KanbanPlugin] onDbChange called for file: ${file?.path}`, args);
+    debugLog(`[KanbanPlugin] onDbChange called for file: ${file?.path}`, args);
     // Actual database change logic will go here
   }
 
   // Placeholder for onwardsNavigate
   public onwardsNavigate(path: string, payload: any) {
-    console.log('[KanbanPlugin] onwardsNavigate called with path:', path, 'payload:', payload);
+    debugLog('[KanbanPlugin] onwardsNavigate called with path:', path, 'payload:', payload);
     // Actual navigation logic will go here
     // For example, using app.workspace.openLinkText or similar
   }
@@ -333,6 +334,9 @@ export default class KanbanPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
 
+    // Initialize debug logger with plugin instance
+    setDebugLoggerPlugin(this);
+
     this.MarkdownEditor = getEditorClass(this.app);
 
     // Intercept URL actions directly by listening to the console or app events
@@ -350,13 +354,13 @@ export default class KanbanPlugin extends Plugin {
           args[1].hash
         ) {
           const action = args[1];
-          console.log('[Kanban Main] Intercepted URL action from console:', action);
+          debugLog('[Kanban Main] Intercepted URL action from console:', action);
 
           if (action.hash && action.hash.includes('%5E')) {
             const hashMatch = action.hash.match(/%5E([a-zA-Z0-9]+)/);
             if (hashMatch && hashMatch[1]) {
               const blockId = hashMatch[1];
-              console.log('[Kanban Main] Storing blockId from intercepted URL action:', blockId);
+              debugLog('[Kanban Main] Storing blockId from intercepted URL action:', blockId);
               // Store on the app for later retrieval
               (this.app as any)._kanbanPendingBlockId = blockId;
               // Clear it after a short delay to prevent stale data
@@ -401,13 +405,13 @@ export default class KanbanPlugin extends Plugin {
       around(this.app as any, {
         openWithDefaultApp(next: any) {
           return function (path: string) {
-            console.log('[Kanban Main] openWithDefaultApp called with path:', path);
+            debugLog('[Kanban Main] openWithDefaultApp called with path:', path);
             // Check if this is an obsidian:// URL with a hash
             if (path && path.includes('#%5E')) {
               const hashMatch = path.match(/#%5E([a-zA-Z0-9]+)/);
               if (hashMatch && hashMatch[1]) {
                 const blockId = hashMatch[1];
-                console.log('[Kanban Main] Storing blockId from URL path:', blockId);
+                debugLog('[Kanban Main] Storing blockId from URL path:', blockId);
                 // Store on the app for later retrieval
                 (this.app as any)._kanbanPendingBlockId = blockId;
                 // Clear it after a short delay to prevent stale data
@@ -428,18 +432,18 @@ export default class KanbanPlugin extends Plugin {
 
     urlHandlerMethods.forEach((methodName) => {
       if (typeof (this.app as any)[methodName] === 'function') {
-        console.log(`[Kanban Main] Found URL handler method: ${methodName}`);
+        debugLog(`[Kanban Main] Found URL handler method: ${methodName}`);
         this.register(
           around(this.app as any, {
             [methodName](next: any) {
               return function (action: any) {
-                console.log(`[Kanban Main] ${methodName} called with action:`, action);
+                debugLog(`[Kanban Main] ${methodName} called with action:`, action);
                 // Check if this action has a hash with blockId
                 if (action && action.hash && action.hash.includes('%5E')) {
                   const hashMatch = action.hash.match(/%5E([a-zA-Z0-9]+)/);
                   if (hashMatch && hashMatch[1]) {
                     const blockId = hashMatch[1];
-                    console.log(`[Kanban Main] Storing blockId from ${methodName} hash:`, blockId);
+                    debugLog(`[Kanban Main] Storing blockId from ${methodName} hash:`, blockId);
                     // Store on the app for later retrieval
                     (this.app as any)._kanbanPendingBlockId = blockId;
                     // Clear it after a short delay to prevent stale data
@@ -466,7 +470,7 @@ export default class KanbanPlugin extends Plugin {
             newLeaf?: boolean,
             openViewState?: any
           ) {
-            console.log('[Kanban Main] openLinkText called with:', {
+            debugLog('[Kanban Main] openLinkText called with:', {
               linktext,
               sourcePath,
               newLeaf,
@@ -478,7 +482,7 @@ export default class KanbanPlugin extends Plugin {
               const hashMatch = linktext.match(/#\^([a-zA-Z0-9]+)/);
               if (hashMatch && hashMatch[1]) {
                 const blockId = hashMatch[1];
-                console.log('[Kanban Main] Storing blockId from openLinkText:', blockId);
+                debugLog('[Kanban Main] Storing blockId from openLinkText:', blockId);
                 // Store on the app for later retrieval
                 (this.app as any)._kanbanPendingBlockId = blockId;
                 // Clear it after a short delay to prevent stale data
@@ -542,7 +546,7 @@ export default class KanbanPlugin extends Plugin {
         await new Promise((resolve) => setTimeout(resolve, 50));
         const activeLeaf = this.app.workspace.activeLeaf;
         if (!activeLeaf || !activeLeaf.view) {
-          // console.log("[Kanban Main] 'file-open': No active leaf or active leaf has no view.");
+          // debugLog("[Kanban Main] 'file-open': No active leaf or active leaf has no view.");
           return;
         }
         if (!(activeLeaf.view instanceof KanbanView)) {
@@ -714,7 +718,7 @@ export default class KanbanPlugin extends Plugin {
     let isNewStateManager = false;
 
     if (!stateManager) {
-      console.log(`[KanbanPlugin] addView: Creating new StateManager for ${file.path}`);
+      debugLog(`[KanbanPlugin] addView: Creating new StateManager for ${file.path}`);
       stateManager = new StateManager(
         this.app,
         view, // Pass the view for file context
@@ -727,22 +731,22 @@ export default class KanbanPlugin extends Plugin {
       // The new SM constructor (once fixed) won't call registerView.
       // So, we call it here explicitly and await it.
     } else {
-      console.log(`[KanbanPlugin] addView: Using existing StateManager for ${file.path}`);
+      debugLog(`[KanbanPlugin] addView: Using existing StateManager for ${file.path}`);
     }
 
     // Always call and await registerView here to ensure state is ready.
     // For a new SM, this is its first parsing. For an existing one, it re-registers/re-parses if needed.
     if (stateManager) {
       try {
-        console.log(
+        debugLog(
           `[KanbanPlugin] addView: Calling await stateManager.registerView for ${file.path}. shouldParseData: ${shouldParseData}`
         );
         await stateManager.registerView(view, data, shouldParseData);
-        console.log(
+        debugLog(
           `[KanbanPlugin] addView: stateManager.registerView completed for ${file.path}. StateManager state ID: ${stateManager.state?.id}`
         );
         // Log the state directly from the stateManager instance here
-        console.log(
+        debugLog(
           `[KanbanPlugin] addView: After registerView, stateManager for ${file.path} has state ID: `,
           stateManager.state ? stateManager.state.id : 'null or undefined'
         );
@@ -767,7 +771,7 @@ export default class KanbanPlugin extends Plugin {
     // Now, stateManager.state should be populated (or be an error state) by the awaited registerView.
     // THIS IS THE CALL WE ARE INTERESTED IN:
     // if (view._isPendingInitialRender && stateManager.state) {
-    //   console.log(
+    //   debugLog(
     //     `[KanbanPlugin] addView: View ${view.id} was pending initial render and SM state is now available. Triggering setReactState.`
     //   );
     //   view.setReactState({}); // <--- Potential source of premature render
@@ -910,13 +914,13 @@ export default class KanbanPlugin extends Plugin {
       this.app.workspace.on('editor-menu', (menu, editor, view) => {
         // Only add the menu item for markdown views that are NOT kanban boards
         if (view instanceof MarkdownView && view.file && !hasFrontmatterKey(view.file)) {
-          console.log('[Kanban Plugin] Adding Insert linked kanbans to editor context menu');
+          debugLog('[Kanban Plugin] Adding Insert linked kanbans to editor context menu');
           menu.addItem((item) => {
             item
               .setTitle('Insert linked kanbans')
               .setIcon('lucide-kanban-square')
               .onClick(() => {
-                console.log('[Kanban Plugin] Insert linked kanbans clicked from editor menu');
+                debugLog('[Kanban Plugin] Insert linked kanbans clicked from editor menu');
                 // Check if the feature is enabled
                 if (this.settings['enable-kanban-code-blocks'] === false) {
                   new Notice('Kanban code blocks are disabled in settings');
@@ -1426,7 +1430,7 @@ export default class KanbanPlugin extends Plugin {
 
         setViewState: (originalMethod: any) => {
           return async function (viewState: ViewState, navState?: any) {
-            console.log(
+            debugLog(
               '[Kanban Main] setViewState MONKEYPATCH ENTRY. Incoming ViewState (JSON):',
               JSON.stringify(viewState, null, 2),
               'Incoming navState:',
@@ -1437,11 +1441,11 @@ export default class KanbanPlugin extends Plugin {
 
             // Check for blockId from URL hash first
             const windowHash = window.location.hash;
-            console.log('[Kanban Main] setViewState: Window location hash:', windowHash);
+            debugLog('[Kanban Main] setViewState: Window location hash:', windowHash);
             if (windowHash && windowHash.startsWith('#^')) {
               const blockId = windowHash.substring(2); // Remove #^
               eStateForHighlighting = { blockId };
-              console.log(
+              debugLog(
                 '[Kanban Main] setViewState: Determined eState from window.location.hash (blockId):',
                 eStateForHighlighting
               );
@@ -1451,7 +1455,7 @@ export default class KanbanPlugin extends Plugin {
             if (!eStateForHighlighting && (self.app as any)._kanbanPendingBlockId) {
               const blockId = (self.app as any)._kanbanPendingBlockId;
               eStateForHighlighting = { blockId };
-              console.log(
+              debugLog(
                 '[Kanban Main] setViewState: Determined eState from pending blockId:',
                 eStateForHighlighting
               );
@@ -1463,19 +1467,19 @@ export default class KanbanPlugin extends Plugin {
             if (!eStateForHighlighting) {
               if (viewState.state?.eState) {
                 eStateForHighlighting = viewState.state.eState;
-                console.log(
+                debugLog(
                   '[Kanban Main] setViewState: Found eState directly in viewState.state.eState:',
                   JSON.stringify(eStateForHighlighting, null, 2)
                 );
               } else if ((viewState as any).eState) {
                 eStateForHighlighting = (viewState as any).eState;
-                console.log(
+                debugLog(
                   '[Kanban Main] setViewState: Found eState at viewState.eState (top-level):',
                   JSON.stringify(eStateForHighlighting, null, 2)
                 );
               } else if (navState) {
                 eStateForHighlighting = navState;
-                console.log(
+                debugLog(
                   '[Kanban Main] setViewState: Using eState from explicit navState argument:',
                   JSON.stringify(eStateForHighlighting, null, 2)
                 );
@@ -1487,7 +1491,7 @@ export default class KanbanPlugin extends Plugin {
               viewState.type === 'markdown' &&
               viewState.state?.file
             ) {
-              // console.log(
+              // debugLog(
               //   '[Kanban Main] setViewState: eState (with blockId) not found directly, trying global search query for file:',
               //   viewState.state.file
               // );
@@ -1511,7 +1515,7 @@ export default class KanbanPlugin extends Plugin {
                     typeof potentialQuery === 'string' &&
                     potentialQuery.trim() !== ''
                   ) {
-                    // console.log(
+                    // debugLog(
                     //   '[Kanban Main] setViewState: Found potentialQuery from global search:',
                     //   potentialQuery
                     // );
@@ -1534,27 +1538,27 @@ export default class KanbanPlugin extends Plugin {
                           blockId: blockIdFromQuery,
                           sourceQuery: potentialQuery,
                         };
-                        // console.log(
+                        // debugLog(
                         //   `[Kanban Main] setViewState: Constructed eState from global search query. BlockId: ${blockIdFromQuery}, Target File: ${targetFileName}`
                         // );
                       } else {
-                        // console.log(
+                        // debugLog(
                         //   `[Kanban Main] setViewState: Query contains blockId ${blockIdFromQuery}, but target filename "${targetFileNameNoExt}" not detected in query "${potentialQuery}".`
                         // );
                       }
                     } else {
-                      // console.log(
+                      // debugLog(
                       //   '[Kanban Main] setViewState: Global search query did not contain a #^blockId pattern:',
                       //   potentialQuery
                       // );
                     }
                   } else {
-                    // console.log(
+                    // debugLog(
                     //   '[Kanban Main] setViewState: No usable potentialQuery found in global search instance.'
                     // );
                   }
                 } else {
-                  // console.log(
+                  // debugLog(
                   //   '[Kanban Main] setViewState: Global search plugin instance not found when trying to get query.'
                   // );
                 }
@@ -1566,11 +1570,11 @@ export default class KanbanPlugin extends Plugin {
               }
             }
             if (!eStateForHighlighting?.blockId) {
-              // console.log(
+              // debugLog(
               //   '[Kanban Main] setViewState: No blockId found for highlighting after all checks.'
               // );
             } else {
-              // console.log(
+              // debugLog(
               //   '[Kanban Main] setViewState: eStateForHighlighting that will be used (JSON):'
               //   JSON.stringify(eStateForHighlighting, null, 2)
               // );
@@ -1934,9 +1938,9 @@ export default class KanbanPlugin extends Plugin {
 
   // --- BEGIN ADDED METHOD for Due Date Reminders ---
   async processDueDateReminders() {
-    console.log('[KanbanPlugin] processDueDateReminders called');
+    debugLog('[KanbanPlugin] processDueDateReminders called');
     if (!this.settings.enableDueDateEmailReminders) {
-      console.log('[KanbanPlugin] Due date email reminders are disabled in settings.');
+      debugLog('[KanbanPlugin] Due date email reminders are disabled in settings.');
       return;
     }
 
@@ -1955,13 +1959,13 @@ export default class KanbanPlugin extends Plugin {
       const timeSinceLastRun = now - lastRun;
       const hoursSinceLastRun = (timeSinceLastRun / (1000 * 60 * 60)).toFixed(1);
       const daysConfigured = frequencyDays;
-      console.log(
+      debugLog(
         `[KanbanPlugin] Due date reminders run too recently (${hoursSinceLastRun} hours ago). Configured frequency: ${daysConfigured} day(s). Skipping.`
       );
       return;
     }
 
-    console.log('[KanbanPlugin] Processing due date reminders...');
+    debugLog('[KanbanPlugin] Processing due date reminders...');
 
     // Structure to hold tasks grouped by email
     // { "email@example.com": [{ title: "Task 1", board: "Board A" }, { title: "Task 2", board: "Board B" }] }
@@ -1994,7 +1998,7 @@ export default class KanbanPlugin extends Plugin {
       }
     }
 
-    console.log(`[KanbanPlugin] Found ${kanbanBoards.length} potential Kanban boards to scan.`);
+    debugLog(`[KanbanPlugin] Found ${kanbanBoards.length} potential Kanban boards to scan.`);
 
     for (const boardFile of kanbanBoards) {
       try {
@@ -2063,7 +2067,7 @@ export default class KanbanPlugin extends Plugin {
                   ) {
                     const assignedMembers = cardItemData.assignedMembers || [];
                     if (assignedMembers.length > 0) {
-                      console.log(
+                      debugLog(
                         `[KanbanPlugin] Task "${cardItemData.title}" in board "${boardFile.basename}" is due soon: ${dueDate.format('YYYY-MM-DD')}`
                       );
                       for (const memberName of assignedMembers) {
@@ -2097,16 +2101,14 @@ export default class KanbanPlugin extends Plugin {
     }
 
     if (Object.keys(tasksByEmail).length > 0) {
-      console.log('[KanbanPlugin] Tasks due soon found:', tasksByEmail);
+      debugLog('[KanbanPlugin] Tasks due soon found:', tasksByEmail);
 
       if (
         this.settings.enableAutomaticEmailSending &&
         this.settings.automaticEmailSenderAddress &&
         this.settings.automaticEmailAppPassword
       ) {
-        console.log(
-          '[KanbanPlugin] Automatic email sending is enabled. Attempting to send emails.'
-        );
+        debugLog('[KanbanPlugin] Automatic email sending is enabled. Attempting to send emails.');
         const sender = this.settings.automaticEmailSenderAddress;
         const appPass = this.settings.automaticEmailAppPassword;
         const timeframeDays = this.settings.dueDateReminderTimeframeDays ?? 1;
@@ -2194,7 +2196,7 @@ export default class KanbanPlugin extends Plugin {
             )
               .then((success) => {
                 if (success) {
-                  console.log(`[KanbanPlugin] Email reminder sent successfully to ${emailAddress}`);
+                  debugLog(`[KanbanPlugin] Email reminder sent successfully to ${emailAddress}`);
                   new Notification('Kanban Plugin', {
                     body: `${userTasks.length} Kanban task reminders sent to ${emailAddress}.`,
                     silent: true,
@@ -2232,13 +2234,13 @@ export default class KanbanPlugin extends Plugin {
         reminderModal.open();
       }
     } else {
-      console.log('[KanbanPlugin] No tasks due soon for members with emails configured.');
+      debugLog('[KanbanPlugin] No tasks due soon for members with emails configured.');
     }
 
     // Update the last run timestamp
     this.settings.dueDateReminderLastRun = now;
     await this.saveSettings();
-    console.log('[KanbanPlugin] Due date reminders processing finished.');
+    debugLog('[KanbanPlugin] Due date reminders processing finished.');
   }
   // --- END ADDED METHOD for Due Date Reminders ---
 
@@ -2483,7 +2485,7 @@ export default class KanbanPlugin extends Plugin {
                     insertedText.includes('```kanban') ||
                     deletedLength > 20 // Increased threshold for large deletions
                   ) {
-                    console.log(
+                    debugLog(
                       '[Kanban] Rebuild triggered by:',
                       insertedText.includes('```kanban')
                         ? '```kanban detected'
@@ -2502,7 +2504,7 @@ export default class KanbanPlugin extends Plugin {
                     const contextText = doc.sliceString(contextStart, contextEnd);
 
                     if (contextText.endsWith('```kanba') && insertedText === 'n') {
-                      console.log('[Kanban] Rebuild triggered by: completing ```kanban');
+                      debugLog('[Kanban] Rebuild triggered by: completing ```kanban');
                       changesAffectKanbanBlocks = true;
                       return;
                     }
@@ -2526,7 +2528,7 @@ export default class KanbanPlugin extends Plugin {
                 oldSelection.from !== newSelection.from || oldSelection.to !== newSelection.to;
 
               if (cursorChanged || selectionChanged) {
-                console.log(
+                debugLog(
                   '[Kanban] Selection changed - cursor:',
                   cursorChanged,
                   'selection:',
@@ -2593,7 +2595,7 @@ export default class KanbanPlugin extends Plugin {
 
                       const lastState = pluginInstance.lastCursorInBlockState.get(blockId);
 
-                      console.log(
+                      debugLog(
                         '[Kanban] Block',
                         blockId,
                         '- hidden state:',
@@ -2607,7 +2609,7 @@ export default class KanbanPlugin extends Plugin {
                       );
 
                       if (lastState !== newBlockHidden) {
-                        console.log(
+                        debugLog(
                           '[Kanban] Rebuild triggered by: block visibility state change for block',
                           blockId,
                           'from',
@@ -2631,7 +2633,7 @@ export default class KanbanPlugin extends Plugin {
             // Viewport changes will be handled by document changes and cursor movement instead
 
             if (shouldRebuild) {
-              console.log('[Kanban] Rebuilding decorations');
+              debugLog('[Kanban] Rebuilding decorations');
               pluginInstance.decorations = this.buildGlobalKanbanDecorations(update.view);
             }
           },
@@ -2792,7 +2794,7 @@ export default class KanbanPlugin extends Plugin {
                   ignoreEvent(event: Event) {
                     const target = event.target as HTMLElement;
 
-                    console.log('[Kanban Widget 1] ignoreEvent called:', {
+                    debugLog('[Kanban Widget 1] ignoreEvent called:', {
                       eventType: event.type,
                       targetTag: target?.tagName,
                       targetClass: target?.className,
@@ -2808,12 +2810,12 @@ export default class KanbanPlugin extends Plugin {
                     if (!target || typeof target.closest !== 'function') {
                       // For events without a proper HTML element target, ignore selection-related events that could cause cursor movement
                       if (event.type === 'selectionchange') {
-                        console.log(
+                        debugLog(
                           '[Kanban Widget 1] Ignoring selectionchange event without proper target'
                         );
                         return true;
                       }
-                      console.log(
+                      debugLog(
                         '[Kanban Widget 1] Allowing event without proper target:',
                         event.type
                       );
@@ -2830,7 +2832,7 @@ export default class KanbanPlugin extends Plugin {
                     const isInteractive = interactiveElement && !isCodeMirrorElement;
 
                     if (interactiveElement && isCodeMirrorElement) {
-                      console.log(
+                      debugLog(
                         '[Kanban Widget 1] Blocking CodeMirror element that would be interactive:',
                         interactiveElement.tagName,
                         interactiveElement.className
@@ -2838,7 +2840,7 @@ export default class KanbanPlugin extends Plugin {
                     }
 
                     if (isInteractive) {
-                      console.log(
+                      debugLog(
                         '[Kanban Widget 1] Allowing interactive element:',
                         interactiveElement.tagName,
                         interactiveElement.className
@@ -2849,11 +2851,11 @@ export default class KanbanPlugin extends Plugin {
                     // Check if this is a card click - but we need to prevent cursor movement
                     const isCardClick = target.closest('.kanban-plugin__linked-card-item');
                     if (isCardClick) {
-                      console.log('[Kanban Widget 1] Card click detected:', isCardClick.className);
+                      debugLog('[Kanban Widget 1] Card click detected:', isCardClick.className);
                       // For card clicks, we want to handle the click but prevent cursor movement
                       // So we allow the click event but block mouse/pointer events that cause cursor movement
                       if (event.type === 'click') {
-                        console.log('[Kanban Widget 1] Allowing card click event');
+                        debugLog('[Kanban Widget 1] Allowing card click event');
                         return false; // Allow click to be processed
                       } else if (
                         event.type === 'mousedown' ||
@@ -2861,7 +2863,7 @@ export default class KanbanPlugin extends Plugin {
                         event.type === 'mouseup' ||
                         event.type === 'pointerup'
                       ) {
-                        console.log(
+                        debugLog(
                           '[Kanban Widget 1] Blocking card mouse/pointer event to prevent cursor movement:',
                           event.type
                         );
@@ -2881,7 +2883,7 @@ export default class KanbanPlugin extends Plugin {
                       event.type === 'mouseout' ||
                       event.type === 'mousemove'
                     ) {
-                      console.log(
+                      debugLog(
                         '[Kanban Widget 1] Ignoring mouse event to prevent cursor movement:',
                         event.type
                       );
@@ -2894,14 +2896,14 @@ export default class KanbanPlugin extends Plugin {
                       event.type.startsWith('pointer') ||
                       event.type.includes('click')
                     ) {
-                      console.log(
+                      debugLog(
                         '[Kanban Widget 1] Ignoring unhandled mouse/pointer event:',
                         event.type
                       );
                       return true; // Ignore any mouse/pointer events we might have missed
                     }
 
-                    console.log('[Kanban Widget 1] Allowing other event:', event.type);
+                    debugLog('[Kanban Widget 1] Allowing other event:', event.type);
                     // Allow other events (like keyboard events) to pass through
                     return false;
                   }
@@ -3123,7 +3125,7 @@ export default class KanbanPlugin extends Plugin {
       const from = match.index;
       const to = match.index + fullMatch.length;
 
-      console.log('[KanbanCardEmbed] Found link:', {
+      debugLog('[KanbanCardEmbed] Found link:', {
         fullMatch,
         filePath,
         blockId,
@@ -3155,11 +3157,11 @@ export default class KanbanPlugin extends Plugin {
         // Check if the target file is a Kanban board
         const file = this.app.metadataCache.getFirstLinkpathDest(filePath, currentFilePath);
         if (!file || !hasFrontmatterKey(file)) {
-          console.log('[KanbanCardEmbed] Skipping - not a kanban board:', filePath);
+          debugLog('[KanbanCardEmbed] Skipping - not a kanban board:', filePath);
           continue;
         }
 
-        console.log('[KanbanCardEmbed] Creating decoration for:', {
+        debugLog('[KanbanCardEmbed] Creating decoration for:', {
           fullMatch,
           filePath: file.path,
           blockId,
@@ -3337,9 +3339,9 @@ async function attemptSmtpEmailSend(
   textBody: string,
   htmlBody?: string
 ): Promise<boolean> {
-  console.log('[KanbanPlugin] Attempting to send email via SMTP...');
-  console.log(`To: ${recipientEmail}`);
-  console.log(`Subject: ${subject}`);
+  debugLog('[KanbanPlugin] Attempting to send email via SMTP...');
+  debugLog(`To: ${recipientEmail}`);
+  debugLog(`Subject: ${subject}`);
 
   // STEP 1: (User Task) Install and set up Nodemailer or a similar SMTP library.
   // For example, if using Nodemailer, you would uncomment the following lines
@@ -3385,7 +3387,7 @@ async function attemptSmtpEmailSend(
     }
 
     const info = await transporter.sendMail(mailOptions);
-    console.log('[KanbanPlugin] Email sent successfully via SMTP. Message ID:', info.messageId); // Changed log message
+    debugLog('[KanbanPlugin] Email sent successfully via SMTP. Message ID:', info.messageId); // Changed log message
     return true; // Indicate success
   } catch (error) {
     console.error('[KanbanPlugin] Error sending email via SMTP:', error);
@@ -3399,13 +3401,13 @@ async function attemptSmtpEmailSend(
   /* 
   console.warn('[KanbanPlugin] ACTUAL EMAIL SENDING NOT IMPLEMENTED. ' +
                'The SmtpEmailSend function needs to be completed with a real SMTP library like Nodemailer.');
-  console.log('--- SIMULATED EMAIL (NOT SENT) ---');
-  console.log(`From: ${senderAddress}`);
-  console.log(`To: ${recipientEmail}`);
-  console.log(`Subject: ${subject}`);
-  console.log('Text Body:\n', textBody);
-  if (htmlBody) console.log('HTML Body:\n', htmlBody);
-  console.log('--- END SIMULATED EMAIL ---');
+  debugLog('--- SIMULATED EMAIL (NOT SENT) ---');
+  debugLog(`From: ${senderAddress}`);
+  debugLog(`To: ${recipientEmail}`);
+  debugLog(`Subject: ${subject}`);
+  debugLog('Text Body:\n', textBody);
+  if (htmlBody) debugLog('HTML Body:\n', htmlBody);
+  debugLog('--- END SIMULATED EMAIL ---');
   return false; // Indicate failure as no email was actually sent
   */
 }

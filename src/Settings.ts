@@ -160,6 +160,7 @@ export interface KanbanSettings {
   'hide-linked-cards-when-only-done'?: boolean; // Hide linked cards display when only done cards exist
   'use-kanban-board-background-colors'?: boolean; // Use kanban board background colors in embeds
   'member-view-lane-width'?: number; // Width of lanes in member view
+  'print-debug'?: boolean; // Enable debug logging
 }
 
 export interface KanbanViewSettings {
@@ -265,6 +266,7 @@ export const settingKeyLookup: Set<keyof KanbanSettings> = new Set([
   'hide-linked-cards-when-only-done',
   'use-kanban-board-background-colors',
   'member-view-lane-width',
+  'print-debug',
 ]);
 
 export type SettingRetriever = <K extends keyof KanbanSettings>(
@@ -2678,6 +2680,21 @@ export class KanbanSettingsTab extends PluginSettingTab {
     // --- End Automatic Email Sending Settings ---
 
     this.renderHiddenSettings(containerEl);
+
+    // Debug section - moved to bottom of all settings
+    containerEl.createEl('h3', { text: 'Debug' });
+
+    new Setting(containerEl)
+      .setName('Print debug')
+      .setDesc(
+        'When enabled, debug information will be printed to the developer console. Error and warning messages will always be shown.'
+      )
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings['print-debug'] || false).onChange(async (value) => {
+          this.plugin.settings['print-debug'] = value;
+          await this.plugin.saveSettings();
+        });
+      });
   }
 
   renderTeamMembersSetting(containerEl: HTMLElement) {
@@ -3037,6 +3054,7 @@ export const DEFAULT_SETTINGS: KanbanSettings = {
   'hide-linked-cards-when-only-done': false,
   'use-kanban-board-background-colors': true,
   'member-view-lane-width': 350,
+  'print-debug': false,
 };
 
 export const kanbanBoardProcessor = (settings: KanbanSettings) => {

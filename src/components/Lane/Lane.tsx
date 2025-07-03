@@ -1,3 +1,4 @@
+import { debugLog } from '../../helpers/debugLogger';
 import animateScrollTo from 'animated-scroll-to';
 import classcat from 'classcat';
 import update from 'immutability-helper';
@@ -84,7 +85,7 @@ function DraggableLaneRaw({
 
   const toggleIsCollapsed = useCallback(() => {
     setTimeout(() => {
-      console.log(
+      debugLog(
         '[LaneComponent] toggleIsCollapsed: Calling stateManager.setState via setTimeout for laneIndex:',
         laneIndex
       );

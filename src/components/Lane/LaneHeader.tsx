@@ -6,6 +6,7 @@ import { useNestedEntityPath } from 'src/dnd/components/Droppable';
 import { t } from 'src/lang/helpers';
 import { parseLaneTitle } from 'src/parsers/helpers/parser';
 
+import { debugLog } from '../../helpers/debugLogger';
 import { getDropAction } from '../Editor/helpers';
 import { GripIcon } from '../Icon/GripIcon';
 import { Icon } from '../Icon/Icon';
@@ -46,7 +47,7 @@ function LaneButtons({
         <a
           onClick={() => {
             setTimeout(() => {
-              console.log(
+              debugLog(
                 '[LaneHeader] [LaneButtons] Close button onClick: Calling setEditState via setTimeout'
               );
               setEditState(EditingProcessState.cancel);
@@ -65,7 +66,7 @@ function LaneButtons({
               className={`${c('lane-settings-button')} clickable-icon`}
               onClick={() => {
                 setTimeout(() => {
-                  console.log(
+                  debugLog(
                     '[LaneHeader] [LaneButtons] Add a card onClick: Calling setIsItemInputVisible via setTimeout'
                   );
                   setIsItemInputVisible({ x: 0, y: 0 });
@@ -85,7 +86,7 @@ function LaneButtons({
             className={`${c('lane-settings-button')} clickable-icon`}
             onClick={(e) => {
               setTimeout(() => {
-                console.log(
+                debugLog(
                   '[LaneHeader] [LaneButtons] More options onClick: Showing settingsMenu via setTimeout'
                 );
                 settingsMenu.showAtMouseEvent(e);
@@ -167,7 +168,7 @@ export const LaneHeader = memo(function LaneHeader({
   const onDoubleClick = useCallback(
     (e: MouseEvent) => {
       setTimeout(() => {
-        console.log(
+        debugLog(
           '[LaneHeader] onDoubleClick: Calling setEditState via setTimeout. isCollapsed:',
           isCollapsed
         );
