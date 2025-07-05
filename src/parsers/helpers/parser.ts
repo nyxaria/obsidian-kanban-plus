@@ -52,7 +52,11 @@ export function addBlockId(str: string, item: Item) {
 export function removeBlockId(str: string) {
   const lines = str.split(/(?:\r\n|\n)/g);
 
-  lines[0] = lines[0].replace(/\s+\^([a-zA-Z0-9-]+)$/, '');
+  // Check all lines for block IDs, not just the first one
+  // This handles multi-line cards where the block ID might be on the last line
+  for (let i = 0; i < lines.length; i++) {
+    lines[i] = lines[i].replace(/\s+\^([a-zA-Z0-9-]+)$/, '');
+  }
 
   return lines.join('\n');
 }
