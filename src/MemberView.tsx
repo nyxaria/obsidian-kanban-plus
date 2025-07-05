@@ -1294,11 +1294,199 @@ export class MemberView extends ItemView implements HoverParent {
       return;
     }
 
-    const memberCard = dragEntity.data as MemberCard;
-    const targetLaneId = dropEntity.id;
+    // Get the actual data from the drag and drop entities
+    const dragData = dragEntity.getData();
+    const dropData = dropEntity.getData();
+
+    if (!dragData || !dropData) {
+      debugLog('[MemberView] handleDrop: Invalid drag or drop data');
+      return;
+    }
+
+    debugLog('[MemberView] handleDrop called with data:', {
+      dragData,
+      dropData,
+    });
+
+    // Find the member card by ID from our memberCards array
+    const memberCard = this.memberCards.find((card) => card.id === dragData.id);
+
+    // Get target lane ID from drop data
+    let targetLaneId: string;
+
+    // If dropping on a lane directly, use the lane ID
+    if (dropData.type === 'lane') {
+      targetLaneId = dropData.id;
+    }
+    // If dropping on an item, use the item's lane ID
+    else if (dropData.memberBoardLaneId) {
+      targetLaneId = dropData.memberBoardLaneId;
+    }
+    // Fallback to parentLaneId if available
+    else if (dropData.parentLaneId) {
+      targetLaneId = dropData.parentLaneId;
+    }
+    // Handle dropping on placeholder (empty drop zones)
+    else if (dropData.type === 'placeholder') {
+      // For placeholders, check the entity path to determine which lane we're in
+      const dropPath = dropEntity.getPath();
+      debugLog('[MemberView] handleDrop: Placeholder drop path:', dropPath);
+
+      // The path should contain the lane index, use it to map to lane ID
+      if (dropPath && dropPath.length > 0) {
+        const laneIndex = dropPath[0]; // First element should be lane index
+        const board = this.createMemberBoard();
+        if (laneIndex >= 0 && laneIndex < board.children.length) {
+          targetLaneId = board.children[laneIndex].id;
+          debugLog('[MemberView] handleDrop: Found placeholder lane via path:', {
+            laneIndex,
+            targetLaneId,
+            path: dropPath,
+          });
+        }
+      }
+
+      // Fallback: try to determine from drop entity scope or context
+      if (!targetLaneId) {
+        debugLog(
+          '[MemberView] handleDrop: Could not determine lane from path, checking entity data'
+        );
+
+        // Try to find the lane by examining the entity's parent hierarchy
+        // The placeholder should be a child of a Droppable that has lane data
+        let currentEntity = dropEntity;
+        let attempts = 0;
+        const maxAttempts = 5;
+
+        while (currentEntity && attempts < maxAttempts) {
+          attempts++;
+
+          // Check if this entity has lane data
+          const entityData = currentEntity.getData();
+          if (entityData && entityData.type === 'lane') {
+            targetLaneId = entityData.id;
+            debugLog('[MemberView] handleDrop: Found lane via entity hierarchy:', {
+              attempts,
+              targetLaneId,
+              entityData,
+            });
+            break;
+          }
+
+          // Try to get the parent entity
+          if (typeof currentEntity.getParent === 'function') {
+            currentEntity = currentEntity.getParent();
+          } else {
+            break;
+          }
+        }
+
+        // If still no lane found, try to use the entity's scopeId or context
+        if (!targetLaneId) {
+          // Check if scopeId contains lane information
+          if (dropEntity.scopeId && typeof dropEntity.scopeId === 'string') {
+            const scopeId = dropEntity.scopeId;
+            debugLog('[MemberView] handleDrop: Checking scopeId for lane info:', scopeId);
+
+            // Check if scopeId contains lane names
+            if (scopeId.includes('backlog')) {
+              targetLaneId = 'backlog';
+            } else if (scopeId.includes('doing')) {
+              targetLaneId = 'doing';
+            } else if (scopeId.includes('done')) {
+              targetLaneId = 'done';
+            }
+
+            if (targetLaneId) {
+              debugLog('[MemberView] handleDrop: Found lane via scopeId:', {
+                scopeId,
+                targetLaneId,
+              });
+            }
+          }
+        }
+
+        // Last resort: use DOM navigation to find the lane
+        if (!targetLaneId) {
+          try {
+            // Try to find the lane by walking up the DOM tree
+            const placeholderElement =
+              dropEntity.elementRef?.current || dropEntity.measureRef?.current;
+            if (placeholderElement) {
+              let currentElement = placeholderElement.parentElement;
+              let domAttempts = 0;
+              const maxDomAttempts = 10;
+
+              while (currentElement && domAttempts < maxDomAttempts) {
+                domAttempts++;
+
+                // First priority: Look for data-lane-id attribute (our new approach)
+                if (currentElement.hasAttribute('data-lane-id')) {
+                  const laneId = currentElement.getAttribute('data-lane-id');
+                  if (laneId && ['backlog', 'doing', 'done'].includes(laneId)) {
+                    targetLaneId = laneId;
+                    debugLog('[MemberView] handleDrop: Found lane via data-lane-id:', {
+                      domAttempts,
+                      targetLaneId,
+                      laneId,
+                    });
+                    break;
+                  }
+                }
+
+                // Second priority: Look for a droppable element with lane data
+                if (currentElement.hasAttribute('data-droppable-id')) {
+                  const droppableId = currentElement.getAttribute('data-droppable-id');
+                  if (droppableId && ['backlog', 'doing', 'done'].includes(droppableId)) {
+                    targetLaneId = droppableId;
+                    debugLog('[MemberView] handleDrop: Found lane via data-droppable-id:', {
+                      domAttempts,
+                      targetLaneId,
+                      droppableId,
+                    });
+                    break;
+                  }
+                }
+
+                currentElement = currentElement.parentElement;
+              }
+            }
+          } catch (domError) {
+            debugLog('[MemberView] handleDrop: DOM navigation error:', domError);
+          }
+        }
+
+        // As a last resort, examine all available data
+        if (!targetLaneId) {
+          debugLog('[MemberView] handleDrop: Full drop entity debug:', {
+            entityId: dropEntity.entityId,
+            scopeId: dropEntity.scopeId,
+            dropData: dropData,
+            hasGetPath: typeof dropEntity.getPath === 'function',
+            path: dropEntity.getPath(),
+            hasGetParent: typeof dropEntity.getParent === 'function',
+            hasElementRef: !!dropEntity.elementRef,
+            hasMeasureRef: !!dropEntity.measureRef,
+          });
+
+          // Default to backlog if we can't determine
+          targetLaneId = 'backlog';
+          debugLog('[MemberView] handleDrop: Defaulting placeholder to backlog lane');
+        }
+      }
+    } else {
+      debugLog('[MemberView] handleDrop: Could not determine target lane ID');
+      return;
+    }
 
     if (!memberCard || !targetLaneId) {
-      debugLog('[MemberView] handleDrop: Invalid member card or target lane');
+      debugLog('[MemberView] handleDrop: Invalid member card or target lane', {
+        hasMemberCard: !!memberCard,
+        memberCardId: dragData.id,
+        targetLaneId,
+        dragData,
+        dropData,
+      });
       return;
     }
 
@@ -1339,8 +1527,9 @@ export class MemberView extends ItemView implements HoverParent {
       }
     }
 
-    // Refresh the card data after successful update
-    await this.refreshSingleCard(memberCard);
+    // Trigger React re-render to show the optimistic updates without doing a full scan
+    debugLog('[MemberView] Triggering React re-render to show drag and drop changes');
+    this.setReactState({ lastDragDropUpdate: Date.now() });
   }
 
   // New method: Update card via StateManager (KanbanView approach)
@@ -1351,372 +1540,385 @@ export class MemberView extends ItemView implements HoverParent {
       throw new Error(`Could not find source file: ${memberCard.sourceBoardPath}`);
     }
 
-    // Get or create StateManager for the file
-    let stateManager = this.plugin.stateManagers.get(sourceFile);
-    if (!stateManager) {
-      debugLog(`[MemberView] Creating on-demand StateManager for ${sourceFile.path}`);
+    // Track that we're updating this file to prevent file change detection from triggering a refresh
+    this.trackFileUpdate(sourceFile.path);
 
-      try {
-        // Create a temporary mock view for StateManager initialization
-        const mockView = {
-          file: sourceFile,
-          app: this.app,
-          plugin: this.plugin,
-          data: '',
-          getWindow: () => this.getWindow(),
-          prerender: async () => {}, // No-op for mock view
-          populateViewState: () => {}, // No-op for mock view
-          initHeaderButtons: () => {}, // No-op for mock view
-          validatePreviewCache: () => {}, // No-op for mock view
-          requestSaveToDisk: async (data: string) => {
-            // Save the file directly using the vault API
-            await this.app.vault.modify(sourceFile, data);
-          },
-          showNotice: (message: string) => {
-            // Show notice using the main plugin's notice system
-            console.warn(`[MemberView] StateManager Notice: ${message}`);
-          },
-          // Add other required view properties/methods
-          viewSettings: {},
-          getViewState: () => ({}),
-          setViewState: () => {},
-        } as any;
+    try {
+      // Get or create StateManager for the file
+      let stateManager = this.plugin.stateManagers.get(sourceFile);
+      if (!stateManager) {
+        debugLog(`[MemberView] Creating on-demand StateManager for ${sourceFile.path}`);
 
-        // Create StateManager
-        stateManager = new StateManager(
-          this.app,
-          mockView,
-          () => this.plugin.stateManagers.delete(sourceFile),
-          () => this.plugin.settings
-        );
-
-        this.plugin.stateManagers.set(sourceFile, stateManager);
-
-        // Initialize the StateManager with file data
-        const fileContent = await this.app.vault.cachedRead(sourceFile);
-        await stateManager.registerView(mockView, fileContent, true);
-
-        debugLog(
-          `[MemberView] Created StateManager for ${sourceFile.path}, state ID: ${stateManager.state?.id}`
-        );
-      } catch (error) {
-        console.error(`[MemberView] Error creating StateManager for ${sourceFile.path}:`, error);
-        // Remove the failed StateManager from the cache
-        this.plugin.stateManagers.delete(sourceFile);
-        throw new Error(`Failed to create StateManager for ${sourceFile.path}: ${error.message}`);
-      }
-    }
-
-    const board = stateManager.state;
-    if (!board) {
-      throw new Error(`No board state found for file: ${memberCard.sourceBoardPath}`);
-    }
-
-    // Find the card in the board structure
-    let foundCard: any = null;
-    let sourceLaneIndex = -1;
-    let cardIndex = -1;
-
-    debugLog('[MemberView] updateCardViaStateManager: Searching for card in board structure', {
-      searchingFor: {
-        memberCardId: memberCard.id,
-        memberCardTitle: memberCard.title,
-        memberCardTitleRaw: memberCard.titleRaw,
-        memberCardBlockId: memberCard.blockId,
-      },
-      boardStructure: {
-        boardId: board.id,
-        laneCount: board.children.length,
-        lanes: board.children.map((lane, idx) => ({
-          laneIndex: idx,
-          laneId: lane.id,
-          laneTitle: lane.data?.title,
-          itemCount: lane.children.length,
-        })),
-      },
-    });
-
-    for (let laneIdx = 0; laneIdx < board.children.length; laneIdx++) {
-      const lane = board.children[laneIdx];
-      debugLog(
-        `[MemberView] updateCardViaStateManager: Checking lane ${laneIdx} (${lane.data?.title}) with ${lane.children.length} items`
-      );
-
-      for (let itemIdx = 0; itemIdx < lane.children.length; itemIdx++) {
-        const item = lane.children[itemIdx];
-
-        debugLog(`[MemberView] updateCardViaStateManager: Checking item ${itemIdx}`, {
-          itemId: item.id,
-          itemTitle: item.data?.title,
-          itemTitleRaw: item.data?.titleRaw,
-          itemBlockId: item.data?.blockId,
-          memberCardMatches: {
-            idMatch: item.id === memberCard.id,
-            titleMatch: item.data?.title === memberCard.title,
-            titleRawMatch: item.data?.titleRaw === memberCard.titleRaw,
-            blockIdMatch: memberCard.blockId && item.data?.blockId === memberCard.blockId,
-          },
-        });
-
-        // Skip items without data
-        if (!item.data) {
-          debugLog(`[MemberView] updateCardViaStateManager: Skipping item ${itemIdx} - no data`);
-          continue;
-        }
-
-        // Match by blockId or title - improved matching logic
-        let isMatch = false;
-        let matchReason = '';
-
-        // Priority 1: Match by blockId (most reliable)
-        if (memberCard.blockId && item.data?.blockId) {
-          // Handle blockId with or without ^ prefix
-          const memberBlockId = memberCard.blockId.replace(/^\^/, '');
-          const itemBlockId = item.data.blockId.replace(/^\^/, '');
-          if (memberBlockId === itemBlockId) {
-            isMatch = true;
-            matchReason = 'blockId';
-          }
-        }
-
-        // Priority 2: Match by title (cleaned)
-        if (!isMatch && memberCard.title && item.data?.title) {
-          // Clean both titles for comparison (remove extra whitespace, newlines)
-          const cleanMemberTitle = memberCard.title.trim().replace(/\s+/g, ' ');
-          const cleanItemTitle = item.data.title.trim().replace(/\s+/g, ' ');
-          if (cleanMemberTitle === cleanItemTitle) {
-            isMatch = true;
-            matchReason = 'title';
-          }
-        }
-
-        // Priority 3: Match by titleRaw content (more flexible)
-        if (!isMatch && memberCard.titleRaw && item.data?.titleRaw) {
-          try {
-            // Extract the main content before tags/assignments for comparison
-            const extractMainContent = (titleRaw: string) => {
-              // Remove tags, assignments, dates, priorities, and block IDs
-              return titleRaw
-                .replace(/\s*@@\w+/g, '') // Remove member assignments
-                .replace(/\s*#\w+/g, '') // Remove tags
-                .replace(/\s*!\w+/g, '') // Remove priorities
-                .replace(/\s*@\{[^}]+\}/g, '') // Remove dates
-                .replace(/\s*@start\{[^}]+\}/g, '') // Remove start dates
-                .replace(/\s*@end\{[^}]+\}/g, '') // Remove end dates
-                .replace(/\s*\^[a-zA-Z0-9]+/g, '') // Remove block IDs
-                .trim()
-                .replace(/\s+/g, ' '); // Normalize whitespace
-            };
-
-            const memberMainContent = extractMainContent(memberCard.titleRaw);
-            const itemMainContent = extractMainContent(item.data.titleRaw);
-
-            if (memberMainContent === itemMainContent && memberMainContent.length > 0) {
-              isMatch = true;
-              matchReason = 'titleRaw-content';
-            }
-          } catch (error) {
-            console.error('[MemberView] Error in titleRaw content matching:', error);
-          }
-        }
-
-        // Priority 4: Fallback to ID match (least reliable due to generation differences)
-        if (!isMatch && memberCard.id === item.id) {
-          isMatch = true;
-          matchReason = 'id';
-        }
-
-        if (isMatch) {
-          foundCard = item;
-          sourceLaneIndex = laneIdx;
-          cardIndex = itemIdx;
-          debugLog(`[MemberView] updateCardViaStateManager: FOUND MATCHING CARD!`, {
-            matchedBy: matchReason,
-            foundCard: {
-              id: foundCard.id,
-              title: foundCard.data?.title,
-              titleRaw: foundCard.data?.titleRaw,
-              blockId: foundCard.data?.blockId,
+        try {
+          // Create a temporary mock view for StateManager initialization
+          const mockView = {
+            file: sourceFile,
+            app: this.app,
+            plugin: this.plugin,
+            data: '',
+            getWindow: () => this.getWindow(),
+            prerender: async () => {}, // No-op for mock view
+            populateViewState: () => {}, // No-op for mock view
+            initHeaderButtons: () => {}, // No-op for mock view
+            validatePreviewCache: () => {}, // No-op for mock view
+            requestSaveToDisk: async (data: string) => {
+              // Save the file directly using the vault API
+              await this.app.vault.modify(sourceFile, data);
             },
-            memberCard: {
-              id: memberCard.id,
-              title: memberCard.title,
-              titleRaw: memberCard.titleRaw,
-              blockId: memberCard.blockId,
+            showNotice: (message: string) => {
+              // Show notice using the main plugin's notice system
+              console.warn(`[MemberView] StateManager Notice: ${message}`);
             },
-          });
-          break;
-        }
-      }
-      if (foundCard) break;
-    }
+            // Add other required view properties/methods
+            viewSettings: {},
+            getViewState: () => ({}),
+            setViewState: () => {},
+          } as any;
 
-    if (!foundCard || sourceLaneIndex === -1 || cardIndex === -1) {
-      throw new Error(`Card not found in board structure: ${memberCard.title}`);
-    }
-
-    debugLog('[MemberView] updateCardViaStateManager: Found card in board structure', {
-      cardTitle: foundCard.data?.title,
-      sourceLaneIndex,
-      cardIndex,
-      targetLaneId,
-    });
-
-    // Ensure foundCard.data exists
-    if (!foundCard.data) {
-      throw new Error(`Found card has no data: ${foundCard.id}`);
-    }
-
-    // Update the card's data based on target lane
-    const updatedCardData = { ...foundCard.data };
-
-    switch (targetLaneId) {
-      case 'doing':
-        // Uncheck if currently checked (moving from done to doing)
-        if (updatedCardData.checked) {
-          updatedCardData.checked = false;
-          updatedCardData.checkChar = ' ';
-
-          // Update titleRaw: change [x] back to [ ]
-          updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/^(\s*-\s*)\[x\]/, '$1[ ]');
-        }
-
-        // Add "doing" tag if not present
-        if (
-          !updatedCardData.metadata?.tags?.includes('doing') &&
-          !updatedCardData.metadata?.tags?.includes('#doing')
-        ) {
-          updatedCardData.metadata = updatedCardData.metadata || {};
-          updatedCardData.metadata.tags = updatedCardData.metadata.tags || [];
-          updatedCardData.metadata.tags.push('#doing');
-
-          // Update titleRaw to include the tag (preserve formatting)
-          if (!updatedCardData.titleRaw.includes('#doing')) {
-            // Insert #doing before any existing block ID, preserving newlines and formatting
-            const blockIdMatch = updatedCardData.titleRaw.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/s);
-            if (blockIdMatch) {
-              const mainContent = blockIdMatch[1];
-              const blockId = blockIdMatch[2] || '';
-              updatedCardData.titleRaw = `${mainContent} #doing${blockId}`;
-            } else {
-              updatedCardData.titleRaw = `${updatedCardData.titleRaw} #doing`;
-            }
-          }
-        }
-        break;
-
-      case 'backlog':
-        // Uncheck if currently checked (moving from done to backlog)
-        if (updatedCardData.checked) {
-          updatedCardData.checked = false;
-          updatedCardData.checkChar = ' ';
-
-          // Update titleRaw: change [x] back to [ ]
-          updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/^(\s*-\s*)\[x\]/, '$1[ ]');
-        }
-
-        // Remove "doing" tag if present
-        if (
-          updatedCardData.metadata?.tags?.includes('doing') ||
-          updatedCardData.metadata?.tags?.includes('#doing')
-        ) {
-          updatedCardData.metadata.tags = updatedCardData.metadata.tags.filter(
-            (tag: string) => tag !== 'doing' && tag !== '#doing'
+          // Create StateManager
+          stateManager = new StateManager(
+            this.app,
+            mockView,
+            () => this.plugin.stateManagers.delete(sourceFile),
+            () => this.plugin.settings
           );
 
-          // Update titleRaw to remove the tag (preserve formatting)
+          this.plugin.stateManagers.set(sourceFile, stateManager);
+
+          // Initialize the StateManager with file data
+          const fileContent = await this.app.vault.cachedRead(sourceFile);
+          await stateManager.registerView(mockView, fileContent, true);
+
+          debugLog(
+            `[MemberView] Created StateManager for ${sourceFile.path}, state ID: ${stateManager.state?.id}`
+          );
+        } catch (error) {
+          console.error(`[MemberView] Error creating StateManager for ${sourceFile.path}:`, error);
+          // Remove the failed StateManager from the cache
+          this.plugin.stateManagers.delete(sourceFile);
+          throw new Error(`Failed to create StateManager for ${sourceFile.path}: ${error.message}`);
+        }
+      }
+
+      const board = stateManager.state;
+      if (!board) {
+        throw new Error(`No board state found for file: ${memberCard.sourceBoardPath}`);
+      }
+
+      // Find the card in the board structure
+      let foundCard: any = null;
+      let sourceLaneIndex = -1;
+      let cardIndex = -1;
+
+      debugLog('[MemberView] updateCardViaStateManager: Searching for card in board structure', {
+        searchingFor: {
+          memberCardId: memberCard.id,
+          memberCardTitle: memberCard.title,
+          memberCardTitleRaw: memberCard.titleRaw,
+          memberCardBlockId: memberCard.blockId,
+        },
+        boardStructure: {
+          boardId: board.id,
+          laneCount: board.children.length,
+          lanes: board.children.map((lane, idx) => ({
+            laneIndex: idx,
+            laneId: lane.id,
+            laneTitle: lane.data?.title,
+            itemCount: lane.children.length,
+          })),
+        },
+      });
+
+      for (let laneIdx = 0; laneIdx < board.children.length; laneIdx++) {
+        const lane = board.children[laneIdx];
+        debugLog(
+          `[MemberView] updateCardViaStateManager: Checking lane ${laneIdx} (${lane.data?.title}) with ${lane.children.length} items`
+        );
+
+        for (let itemIdx = 0; itemIdx < lane.children.length; itemIdx++) {
+          const item = lane.children[itemIdx];
+
+          debugLog(`[MemberView] updateCardViaStateManager: Checking item ${itemIdx}`, {
+            itemId: item.id,
+            itemTitle: item.data?.title,
+            itemTitleRaw: item.data?.titleRaw,
+            itemBlockId: item.data?.blockId,
+            memberCardMatches: {
+              idMatch: item.id === memberCard.id,
+              titleMatch: item.data?.title === memberCard.title,
+              titleRawMatch: item.data?.titleRaw === memberCard.titleRaw,
+              blockIdMatch: memberCard.blockId && item.data?.blockId === memberCard.blockId,
+            },
+          });
+
+          // Skip items without data
+          if (!item.data) {
+            debugLog(`[MemberView] updateCardViaStateManager: Skipping item ${itemIdx} - no data`);
+            continue;
+          }
+
+          // Match by blockId or title - improved matching logic
+          let isMatch = false;
+          let matchReason = '';
+
+          // Priority 1: Match by blockId (most reliable)
+          if (memberCard.blockId && item.data?.blockId) {
+            // Handle blockId with or without ^ prefix
+            const memberBlockId = memberCard.blockId.replace(/^\^/, '');
+            const itemBlockId = item.data.blockId.replace(/^\^/, '');
+            if (memberBlockId === itemBlockId) {
+              isMatch = true;
+              matchReason = 'blockId';
+            }
+          }
+
+          // Priority 2: Match by title (cleaned)
+          if (!isMatch && memberCard.title && item.data?.title) {
+            // Clean both titles for comparison (remove extra whitespace, newlines)
+            const cleanMemberTitle = memberCard.title.trim().replace(/\s+/g, ' ');
+            const cleanItemTitle = item.data.title.trim().replace(/\s+/g, ' ');
+            if (cleanMemberTitle === cleanItemTitle) {
+              isMatch = true;
+              matchReason = 'title';
+            }
+          }
+
+          // Priority 3: Match by titleRaw content (more flexible)
+          if (!isMatch && memberCard.titleRaw && item.data?.titleRaw) {
+            try {
+              // Extract the main content before tags/assignments for comparison
+              const extractMainContent = (titleRaw: string) => {
+                // Remove tags, assignments, dates, priorities, and block IDs
+                return titleRaw
+                  .replace(/\s*@@\w+/g, '') // Remove member assignments
+                  .replace(/\s*#\w+/g, '') // Remove tags
+                  .replace(/\s*!\w+/g, '') // Remove priorities
+                  .replace(/\s*@\{[^}]+\}/g, '') // Remove dates
+                  .replace(/\s*@start\{[^}]+\}/g, '') // Remove start dates
+                  .replace(/\s*@end\{[^}]+\}/g, '') // Remove end dates
+                  .replace(/\s*\^[a-zA-Z0-9]+/g, '') // Remove block IDs
+                  .trim()
+                  .replace(/\s+/g, ' '); // Normalize whitespace
+              };
+
+              const memberMainContent = extractMainContent(memberCard.titleRaw);
+              const itemMainContent = extractMainContent(item.data.titleRaw);
+
+              if (memberMainContent === itemMainContent && memberMainContent.length > 0) {
+                isMatch = true;
+                matchReason = 'titleRaw-content';
+              }
+            } catch (error) {
+              console.error('[MemberView] Error in titleRaw content matching:', error);
+            }
+          }
+
+          // Priority 4: Fallback to ID match (least reliable due to generation differences)
+          if (!isMatch && memberCard.id === item.id) {
+            isMatch = true;
+            matchReason = 'id';
+          }
+
+          if (isMatch) {
+            foundCard = item;
+            sourceLaneIndex = laneIdx;
+            cardIndex = itemIdx;
+            debugLog(`[MemberView] updateCardViaStateManager: FOUND MATCHING CARD!`, {
+              matchedBy: matchReason,
+              foundCard: {
+                id: foundCard.id,
+                title: foundCard.data?.title,
+                titleRaw: foundCard.data?.titleRaw,
+                blockId: foundCard.data?.blockId,
+              },
+              memberCard: {
+                id: memberCard.id,
+                title: memberCard.title,
+                titleRaw: memberCard.titleRaw,
+                blockId: memberCard.blockId,
+              },
+            });
+            break;
+          }
+        }
+        if (foundCard) break;
+      }
+
+      if (!foundCard || sourceLaneIndex === -1 || cardIndex === -1) {
+        throw new Error(`Card not found in board structure: ${memberCard.title}`);
+      }
+
+      debugLog('[MemberView] updateCardViaStateManager: Found card in board structure', {
+        cardTitle: foundCard.data?.title,
+        sourceLaneIndex,
+        cardIndex,
+        targetLaneId,
+      });
+
+      // Ensure foundCard.data exists
+      if (!foundCard.data) {
+        throw new Error(`Found card has no data: ${foundCard.id}`);
+      }
+
+      // Update the card's data based on target lane
+      const updatedCardData = { ...foundCard.data };
+
+      switch (targetLaneId) {
+        case 'doing':
+          // Uncheck if currently checked (moving from done to doing)
+          if (updatedCardData.checked) {
+            updatedCardData.checked = false;
+            updatedCardData.checkChar = ' ';
+
+            // Update titleRaw: change [x] back to [ ]
+            updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/^(\s*-\s*)\[x\]/, '$1[ ]');
+          }
+
+          // Add "doing" tag if not present
+          if (
+            !updatedCardData.metadata?.tags?.includes('doing') &&
+            !updatedCardData.metadata?.tags?.includes('#doing')
+          ) {
+            updatedCardData.metadata = updatedCardData.metadata || {};
+            updatedCardData.metadata.tags = updatedCardData.metadata.tags || [];
+            updatedCardData.metadata.tags.push('#doing');
+
+            // Update titleRaw to include the tag (preserve formatting)
+            if (!updatedCardData.titleRaw.includes('#doing')) {
+              // Insert #doing before any existing block ID, preserving newlines and formatting
+              const blockIdMatch = updatedCardData.titleRaw.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/s);
+              if (blockIdMatch) {
+                const mainContent = blockIdMatch[1];
+                const blockId = blockIdMatch[2] || '';
+                updatedCardData.titleRaw = `${mainContent} #doing${blockId}`;
+              } else {
+                updatedCardData.titleRaw = `${updatedCardData.titleRaw} #doing`;
+              }
+            }
+          }
+          break;
+
+        case 'backlog':
+          // Uncheck if currently checked (moving from done to backlog)
+          if (updatedCardData.checked) {
+            updatedCardData.checked = false;
+            updatedCardData.checkChar = ' ';
+
+            // Update titleRaw: change [x] back to [ ]
+            updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/^(\s*-\s*)\[x\]/, '$1[ ]');
+          }
+
+          // Remove "doing" tag if present
+          if (
+            updatedCardData.metadata?.tags?.includes('doing') ||
+            updatedCardData.metadata?.tags?.includes('#doing')
+          ) {
+            updatedCardData.metadata.tags = updatedCardData.metadata.tags.filter(
+              (tag: string) => tag !== 'doing' && tag !== '#doing'
+            );
+
+            // Update titleRaw to remove the tag (preserve formatting)
+            updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/\s*#doing\b/g, '');
+            // Only clean up excessive spaces, but preserve newlines
+            updatedCardData.titleRaw = updatedCardData.titleRaw
+              .replace(/[ \t]+/g, ' ')
+              .replace(/[ \t]+$/gm, '');
+          }
+          break;
+
+        case 'done':
+          // Mark as done and remove "doing" tag
+          updatedCardData.checked = true;
+          updatedCardData.checkChar = 'x';
+
+          if (
+            updatedCardData.metadata?.tags?.includes('doing') ||
+            updatedCardData.metadata?.tags?.includes('#doing')
+          ) {
+            updatedCardData.metadata.tags = updatedCardData.metadata.tags.filter(
+              (tag: string) => tag !== 'doing' && tag !== '#doing'
+            );
+          }
+
+          // Update titleRaw: change checkbox and remove doing tag (preserve formatting)
+          updatedCardData.titleRaw = updatedCardData.titleRaw.replace(
+            /^(\s*-\s*)\[[x ]\]/,
+            '$1[x]'
+          );
           updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/\s*#doing\b/g, '');
           // Only clean up excessive spaces, but preserve newlines
           updatedCardData.titleRaw = updatedCardData.titleRaw
             .replace(/[ \t]+/g, ' ')
             .replace(/[ \t]+$/gm, '');
-        }
-        break;
 
-      case 'done':
-        // Mark as done and remove "doing" tag
-        updatedCardData.checked = true;
-        updatedCardData.checkChar = 'x';
+          // TRIGGER AUTO-MOVE AUTOMATION: If auto-move-done-to-lane is enabled, move to Done lane
+          if (this.plugin.settings['auto-move-done-to-lane']) {
+            debugLog(
+              '[MemberView] updateCardViaStateManager: Auto-move-done-to-lane is enabled, will move card to Done lane in source board'
+            );
+            // The StateManager will automatically handle moving the card to the Done lane
+            // when we call setState with the checked=true item
+          }
+          break;
 
-        if (
-          updatedCardData.metadata?.tags?.includes('doing') ||
-          updatedCardData.metadata?.tags?.includes('#doing')
-        ) {
-          updatedCardData.metadata.tags = updatedCardData.metadata.tags.filter(
-            (tag: string) => tag !== 'doing' && tag !== '#doing'
-          );
-        }
+        default:
+          throw new Error(`Unknown target lane: ${targetLaneId}`);
+      }
 
-        // Update titleRaw: change checkbox and remove doing tag (preserve formatting)
-        updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/^(\s*-\s*)\[[x ]\]/, '$1[x]');
-        updatedCardData.titleRaw = updatedCardData.titleRaw.replace(/\s*#doing\b/g, '');
-        // Only clean up excessive spaces, but preserve newlines
-        updatedCardData.titleRaw = updatedCardData.titleRaw
-          .replace(/[ \t]+/g, ' ')
-          .replace(/[ \t]+$/gm, '');
+      // Create updated card
+      const updatedCard = {
+        ...foundCard,
+        data: updatedCardData,
+      };
 
-        // TRIGGER AUTO-MOVE AUTOMATION: If auto-move-done-to-lane is enabled, move to Done lane
-        if (this.plugin.settings['auto-move-done-to-lane']) {
-          debugLog(
-            '[MemberView] updateCardViaStateManager: Auto-move-done-to-lane is enabled, will move card to Done lane in source board'
-          );
-          // The StateManager will automatically handle moving the card to the Done lane
-          // when we call setState with the checked=true item
-        }
-        break;
-
-      default:
-        throw new Error(`Unknown target lane: ${targetLaneId}`);
-    }
-
-    // Create updated card
-    const updatedCard = {
-      ...foundCard,
-      data: updatedCardData,
-    };
-
-    // Update the board using immutability-helper (same as KanbanView)
-    const updatedBoard = update(board, {
-      children: {
-        [sourceLaneIndex]: {
-          children: {
-            [cardIndex]: {
-              $set: updatedCard,
+      // Update the board using immutability-helper (same as KanbanView)
+      const updatedBoard = update(board, {
+        children: {
+          [sourceLaneIndex]: {
+            children: {
+              [cardIndex]: {
+                $set: updatedCard,
+              },
             },
           },
         },
-      },
-    });
+      });
 
-    // Just save via StateManager (file update only, no UI update needed here)
-    // The UI has already been optimistically updated by the caller
-    stateManager.setState(updatedBoard, true);
+      // Just save via StateManager (file update only, no UI update needed here)
+      // The UI has already been optimistically updated by the caller
+      stateManager.setState(updatedBoard, true);
 
-    // If the card was moved to 'done' and auto-move setting is enabled,
-    // trigger the auto-move automation explicitly
-    if (targetLaneId === 'done' && this.plugin.settings['auto-move-done-to-lane']) {
-      debugLog(
-        '[MemberView] updateCardViaStateManager: Card moved to done lane with auto-move enabled - triggering automation'
-      );
+      // If the card was moved to 'done' and auto-move setting is enabled,
+      // trigger the auto-move automation explicitly
+      if (targetLaneId === 'done' && this.plugin.settings['auto-move-done-to-lane']) {
+        debugLog(
+          '[MemberView] updateCardViaStateManager: Card moved to done lane with auto-move enabled - triggering automation'
+        );
 
-      // Use updateItem to trigger the handleAutoMoveDoneCard automation
-      // Find the item in the updated board and call updateItem on it
-      const lanes = updatedBoard.children;
-      let itemForAutomation = null;
+        // Use updateItem to trigger the handleAutoMoveDoneCard automation
+        // Find the item in the updated board and call updateItem on it
+        const lanes = updatedBoard.children;
+        let itemForAutomation = null;
 
-      // Find the item across all lanes
-      for (const lane of lanes) {
-        const item = lane.children.find((item: any) => item.id === foundCard.id);
-        if (item) {
-          itemForAutomation = item;
-          break;
+        // Find the item across all lanes
+        for (const lane of lanes) {
+          const item = lane.children.find((item: any) => item.id === foundCard.id);
+          if (item) {
+            itemForAutomation = item;
+            break;
+          }
+        }
+
+        if (itemForAutomation) {
+          stateManager.updateItem(itemForAutomation.id, { checked: true }, lanes);
         }
       }
-
-      if (itemForAutomation) {
-        stateManager.updateItem(itemForAutomation.id, { checked: true }, lanes);
-      }
+    } catch (error) {
+      // If there's an error, clear the file tracking immediately
+      this.clearFileUpdateTracking(sourceFile.path);
+      throw error;
     }
+    // File tracking will be automatically cleared by the timeout set in trackFileUpdate()
   }
 
   // Helper method to optimistically update card in memory
