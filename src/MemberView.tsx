@@ -85,8 +85,14 @@ export class MemberView extends ItemView implements HoverParent {
   private memberCards: MemberCard[] = [];
   private isLoading: boolean = false;
   private error: string | null = null;
-  private scanRootPath: string = ''; // Added scan root path state
-  private hasInitialScan: boolean = false; // Track if we've done initial scan
+  private scanRootPath: string = '';
+  private hasInitialScan = false;
+  // Track files that are currently being updated to prevent refresh loops
+  private pendingFileUpdates: Set<string> = new Set();
+  // Track member cards that are being updated optimistically
+  private pendingMemberUpdates: Set<string> = new Set();
+  // Track file update timeouts to prevent refresh loops
+  private fileUpdateTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
   // Debug flag - set to false for production to reduce console noise
   private debugDragDrop: boolean = false;
@@ -172,10 +178,9 @@ export class MemberView extends ItemView implements HoverParent {
   registerFileChangeEvents() {
     // Create a debounced function to handle file changes
     const debouncedFileChange = debounce(
-      (file: TFile) => {
+      async (file: TFile) => {
         if (this.shouldRefreshOnFileChange(file)) {
-          debugLog('[MemberView] File change detected, refreshing cards:', file.path);
-          this.scanMemberCards();
+          await this.scanMemberCards();
         }
       },
       1000, // 1 second debounce
@@ -228,40 +233,50 @@ export class MemberView extends ItemView implements HoverParent {
     );
   }
 
-  shouldRefreshOnFileChange(file: TFile): boolean {
-    // Only refresh if we have a selected member and the view is active
-    if (!this.selectedMember || (this.leaf as any).detached) {
+  private shouldRefreshOnFileChange(file: TFile): boolean {
+    // Only refresh if selected member exists and view is not detached
+    if (!this.selectedMember || this.containerEl.closest('body') === null) {
+      debugLog('[MemberView] Skipping refresh: no selected member or view detached');
       return false;
     }
 
-    // Only refresh if this view is currently active (visible to the user)
-    if (this.app.workspace.activeLeaf !== this.leaf) {
-      debugLog('[MemberView] View is not active, skipping refresh for file:', file.path);
+    // Only refresh if the view is currently active (visible to user)
+    if (!this.app.workspace.getActiveViewOfType(MemberView)) {
+      debugLog('[MemberView] Skipping refresh: view not active');
       return false;
     }
 
-    // Check if file is a markdown file
+    // Don't refresh if we're currently making file changes ourselves
+    if (this.pendingFileUpdates.has(file.path)) {
+      debugLog('[MemberView] Skipping refresh: file is being updated by this view');
+      return false;
+    }
+
+    // Only refresh for markdown files
     if (file.extension !== 'md') {
       return false;
     }
 
-    // Check if file is in the scan root path (if specified)
-    if (this.scanRootPath && this.scanRootPath.trim() !== '') {
-      const isInScanPath =
-        file.path.startsWith(this.scanRootPath + '/') || file.parent?.path === this.scanRootPath;
-      if (!isInScanPath) {
-        return false;
-      }
+    // Check if file is within our scan root path
+    const filePath = file.path;
+    const scanRoot = this.scanRootPath;
+
+    if (scanRoot && !filePath.startsWith(scanRoot)) {
+      return false;
     }
 
-    // Check if file has kanban frontmatter (synchronously check cache first)
+    // Check if file has kanban frontmatter
     const cache = this.app.metadataCache.getFileCache(file);
-    if (cache?.frontmatter && cache.frontmatter['kanban-plugin']) {
-      return true;
+    if (!cache?.frontmatter) {
+      return false;
     }
 
-    // If we can't determine from cache, assume it might be relevant
-    // (This is a fallback to prevent missing updates)
+    const frontmatter = cache.frontmatter;
+    if (!(frontmatter.kanban || frontmatter['kanban-plugin'])) {
+      return false;
+    }
+
+    debugLog('[MemberView] File change detected, refreshing cards:', file.path);
     return true;
   }
 
@@ -382,6 +397,13 @@ export class MemberView extends ItemView implements HoverParent {
       win.clearTimeout(this._initialRenderTimeoutId);
       this._initialRenderTimeoutId = null;
     }
+
+    // Clean up all file update timeouts
+    for (const [filePath, timeout] of this.fileUpdateTimeouts) {
+      clearTimeout(timeout);
+    }
+    this.fileUpdateTimeouts.clear();
+    this.pendingFileUpdates.clear();
 
     // Reset rendering state
     this._isRendering = false;
@@ -606,12 +628,14 @@ export class MemberView extends ItemView implements HoverParent {
       this.memberCards = allCards;
       this.isLoading = false;
       this.hasInitialScan = true; // Mark as scanned successfully
+
       this.setReactState({});
     } catch (e) {
       console.error('[MemberView] Error scanning member cards:', e);
       this.error = `Error scanning cards: ${e.message}`;
       this.isLoading = false;
       this.hasInitialScan = true; // Mark as scanned even if there was an error
+
       this.setReactState({});
     }
   }
@@ -803,33 +827,33 @@ export class MemberView extends ItemView implements HoverParent {
         return null;
       }
 
-      debugLog('[MemberView] parseListItemToMemberCard: Processing item:', {
-        titleRaw,
-        filePath: file.path,
-        laneTitle,
-        depth,
-        selectedMember: this.selectedMember,
-      });
+      // debugLog('[MemberView] parseListItemToMemberCard: Processing item:', {
+      //   titleRaw,
+      //   filePath: file.path,
+      //   laneTitle,
+      //   depth,
+      //   selectedMember: this.selectedMember,
+      // });
 
       // Extract block ID - look for ^blockId anywhere in the content
       const blockIdMatch = titleRaw.match(/\^([a-zA-Z0-9]+)/);
       const blockId = blockIdMatch ? blockIdMatch[1] : undefined;
 
-      debugLog('[MemberView] Block ID extraction debug:', {
-        titleRaw: titleRaw,
-        blockIdMatch: blockIdMatch,
-        extractedBlockId: blockId,
-        regexPattern: '/\\^([a-zA-Z0-9]+)/',
-      });
+      // debugLog('[MemberView] Block ID extraction debug:', {
+      //   titleRaw: titleRaw,
+      //   blockIdMatch: blockIdMatch,
+      //   extractedBlockId: blockId,
+      //   regexPattern: '/\\^([a-zA-Z0-9]+)/',
+      // });
 
-      // PROMINENT DEBUG: Show blockId extraction result
-      if (blockId) {
-        debugLog(
-          `🔍 [MemberView] BLOCK ID FOUND: "${blockId}" in card: "${titleRaw.substring(0, 50)}..."`
-        );
-      } else {
-        debugLog(`❌ [MemberView] NO BLOCK ID FOUND in card: "${titleRaw.substring(0, 50)}..."`);
-      }
+      // // PROMINENT DEBUG: Show blockId extraction result
+      // if (blockId) {
+      //   debugLog(
+      //     `🔍 [MemberView] BLOCK ID FOUND: "${blockId}" in card: "${titleRaw.substring(0, 50)}..."`
+      //   );
+      // } else {
+      //   debugLog(`❌ [MemberView] NO BLOCK ID FOUND in card: "${titleRaw.substring(0, 50)}..."`);
+      // }
 
       // Extract assigned members from the entire item tree (including nested items)
       const assignedMembers = this.extractMembersFromItemTree(listItemNode);
@@ -932,19 +956,19 @@ export class MemberView extends ItemView implements HoverParent {
         timeStr,
       };
 
-      debugLog('[MemberView] Created member card:', {
-        id: result.id,
-        title: result.title,
-        titleRaw: result.titleRaw,
-        blockId: result.blockId,
-        assignedMembers: result.assignedMembers,
-        tags: result.tags,
-        dateStr: result.dateStr,
-        timeStr: result.timeStr,
-        checked: result.checked,
-        hasDoing: result.hasDoing,
-        willBeIncluded: assignedMembers.includes(this.selectedMember),
-      });
+      // debugLog('[MemberView] Created member card:', {
+      //   id: result.id,
+      //   title: result.title,
+      //   titleRaw: result.titleRaw,
+      //   blockId: result.blockId,
+      //   assignedMembers: result.assignedMembers,
+      //   tags: result.tags,
+      //   dateStr: result.dateStr,
+      //   timeStr: result.timeStr,
+      //   checked: result.checked,
+      //   hasDoing: result.hasDoing,
+      //   willBeIncluded: assignedMembers.includes(this.selectedMember),
+      // });
 
       return result;
     } catch (e) {
@@ -1035,20 +1059,20 @@ export class MemberView extends ItemView implements HoverParent {
       // Add parentLaneId to item data for drag and drop tracking
       (item.data as any).parentLaneId = card.checked ? 'done' : card.hasDoing ? 'doing' : 'backlog';
 
-      debugLog('[MemberView] Created item with metadata:', {
-        itemId: item.id,
-        title: item.data.title,
-        hasMetadata: !!item.data.metadata,
-        tags: item.data.metadata.tags,
-        priority: item.data.metadata.priority,
-        dateStr: item.data.metadata.dateStr,
-        timeStr: item.data.metadata.timeStr,
-        hasDate: !!item.data.metadata.date,
-        hasTime: !!item.data.metadata.time,
-        checked: card.checked,
-        hasDoing: card.hasDoing,
-        determinedLane: card.checked ? 'done' : card.hasDoing ? 'doing' : 'backlog',
-      });
+      // debugLog('[MemberView] Created item with metadata:', {
+      //   itemId: item.id,
+      //   title: item.data.title,
+      //   hasMetadata: !!item.data.metadata,
+      //   tags: item.data.metadata.tags,
+      //   priority: item.data.metadata.priority,
+      //   dateStr: item.data.metadata.dateStr,
+      //   timeStr: item.data.metadata.timeStr,
+      //   hasDate: !!item.data.metadata.date,
+      //   hasTime: !!item.data.metadata.time,
+      //   checked: card.checked,
+      //   hasDoing: card.hasDoing,
+      //   determinedLane: card.checked ? 'done' : card.hasDoing ? 'doing' : 'backlog',
+      // });
 
       if (card.checked) {
         doneCards.push(item);
@@ -1223,6 +1247,8 @@ export class MemberView extends ItemView implements HoverParent {
               }
             },
             onRefresh: () => this.scanMemberCards(),
+            updateMemberAssignment: (cardId: string, member: string, isAssigning: boolean) =>
+              this.updateMemberAssignment(cardId, member, isAssigning),
             reactState: this._reactState,
             setReactState: (s: any) => this.setReactState(s),
             emitter: this.emitter,
@@ -1253,220 +1279,58 @@ export class MemberView extends ItemView implements HoverParent {
   }
 
   async handleDrop(dragEntity: any, dropEntity: any) {
-    // Handle drag and drop for member board
-    debugLog(
-      '[MemberView] handleDrop: CALLED - dragEntity:',
-      dragEntity,
-      'dropEntity:',
-      dropEntity
-    );
+    if (!dragEntity || !dropEntity) {
+      debugLog('[MemberView] handleDrop: Invalid drag or drop entity');
+      return;
+    }
 
-    const dragData = dragEntity.getData();
-    const dropData = dropEntity.getData();
+    const memberCard = dragEntity.data as MemberCard;
+    const targetLaneId = dropEntity.id;
 
-    debugLog('[MemberView] handleDrop: Full dragData:', dragData);
-    debugLog('[MemberView] handleDrop: Full dropData:', dropData);
-    debugLog('[MemberView] handleDrop: dropData.type:', dropData?.type);
-    debugLog('[MemberView] handleDrop: dropData.id:', dropData?.id);
-    debugLog('[MemberView] handleDrop: dropData.memberBoardLane:', dropData?.memberBoardLane);
-    debugLog('[MemberView] handleDrop: dropData.memberBoardLaneId:', dropData?.memberBoardLaneId);
-    debugLog('[MemberView] handleDrop: dropEntity type and methods:', {
-      entityType: typeof dropEntity,
-      hasGetPath: typeof dropEntity.getPath === 'function',
-      hasGetData: typeof dropEntity.getData === 'function',
-      dropEntityKeys: Object.keys(dropEntity),
+    if (!memberCard || !targetLaneId) {
+      debugLog('[MemberView] handleDrop: Invalid member card or target lane');
+      return;
+    }
+
+    debugLog('[MemberView] handleDrop called', {
+      memberCard: {
+        id: memberCard.id,
+        title: memberCard.title,
+        sourceBoardPath: memberCard.sourceBoardPath,
+        blockId: memberCard.blockId,
+      },
+      targetLaneId,
     });
 
-    if (
-      dragData?.type === 'item' &&
-      (dropData?.type === 'lane' || dropData?.type === 'placeholder' || dropData?.type === 'item')
-    ) {
-      const itemId = dragData.id;
+    // Update the card in memory immediately for responsive UI
+    this.updateCardInMemory(memberCard, targetLaneId);
 
-      // Debug: log the full drop data to understand the structure
-      debugLog('[MemberView] handleDrop: Full dropData:', dropData);
-
-      let targetLaneId;
-
-      // CRITICAL FIX: Force member board lane mapping regardless of source
-      // The member board always has exactly 3 lanes in this order: [backlog, doing, done]
-      const MEMBER_BOARD_LANES = ['backlog', 'doing', 'done'];
-
-      if (dropData.type === 'lane') {
-        // Direct lane drop - use the lane ID if it's a member board lane
-        if (MEMBER_BOARD_LANES.includes(dropData.id)) {
-          targetLaneId = dropData.id;
-          debugLog(
-            '[MemberView] handleDrop: Drop target is MEMBER BOARD LANE with ID:',
-            targetLaneId
-          );
-        } else {
-          console.error(
-            '[MemberView] handleDrop: Drop target is not a member board lane:',
-            dropData.id
-          );
-          return;
-        }
-      } else if (dropData.type === 'placeholder') {
-        // For placeholder, we need to find the parent lane ID from the entity path
-        const path = dropEntity.getPath();
-        debugLog('[MemberView] handleDrop: Drop entity path:', path);
-
-        if (path && path.length > 0) {
-          // CRITICAL: The path should reference the member board structure
-          const laneIndex = path[0];
-
-          // Validate that the lane index is within member board bounds
-          if (laneIndex >= 0 && laneIndex < MEMBER_BOARD_LANES.length) {
-            targetLaneId = MEMBER_BOARD_LANES[laneIndex];
-            debugLog(
-              '[MemberView] handleDrop: Resolved MEMBER BOARD lane from path - index:',
-              laneIndex,
-              'lane:',
-              targetLaneId,
-              'MEMBER_BOARD_LANES:',
-              MEMBER_BOARD_LANES,
-              'full path:',
-              path
-            );
-          } else {
-            console.error('[MemberView] handleDrop: Lane index out of member board bounds:', {
-              laneIndex,
-              memberBoardLaneCount: MEMBER_BOARD_LANES.length,
-              path,
-            });
-            return;
-          }
-        } else {
-          console.error('[MemberView] handleDrop: Invalid or empty path from dropEntity:', path);
-          return;
-        }
-      } else if (dropData.type === 'item') {
-        // Dropping onto an existing item - determine lane from entity path or item data
-        const path = dropEntity.getPath();
-        debugLog('[MemberView] handleDrop: Drop target is ITEM, entity path:', path);
-
-        // Try to get lane from entity path first (most reliable)
-        if (path && path.length > 0) {
-          const laneIndex = path[0];
-
-          // Validate that the lane index is within member board bounds
-          if (laneIndex >= 0 && laneIndex < MEMBER_BOARD_LANES.length) {
-            targetLaneId = MEMBER_BOARD_LANES[laneIndex];
-            debugLog(
-              '[MemberView] handleDrop: Resolved MEMBER BOARD lane from item path - index:',
-              laneIndex,
-              'lane:',
-              targetLaneId,
-              'MEMBER_BOARD_LANES:',
-              MEMBER_BOARD_LANES
-            );
-          } else {
-            console.error('[MemberView] handleDrop: Item lane index out of member board bounds:', {
-              laneIndex,
-              memberBoardLaneCount: MEMBER_BOARD_LANES.length,
-              path,
-            });
-            return;
-          }
-        } else if (dropData.parentLaneId && MEMBER_BOARD_LANES.includes(dropData.parentLaneId)) {
-          // Fallback to parentLaneId from item data (only if it's a member board lane)
-          targetLaneId = dropData.parentLaneId;
-          debugLog(
-            '[MemberView] handleDrop: Using member board parentLaneId from item data:',
-            targetLaneId
-          );
-        } else {
-          // Last resort: try to determine from item properties
-          if (dropData.checked) {
-            targetLaneId = 'done';
-          } else if (
-            dropData.metadata?.tags?.includes('doing') ||
-            dropData.metadata?.tags?.includes('#doing')
-          ) {
-            targetLaneId = 'doing';
-          } else {
-            targetLaneId = 'backlog';
-          }
-          debugLog(
-            '[MemberView] handleDrop: Determined member board lane from item properties:',
-            targetLaneId,
-            'checked:',
-            dropData.checked,
-            'tags:',
-            dropData.metadata?.tags
-          );
-        }
-      } else {
-        console.error(
-          '[MemberView] handleDrop: Unhandled drop type:',
-          dropData.type,
-          'dropData:',
-          dropData
-        );
-        return;
-      }
-
-      // Validate that we have a valid member board target lane
-      if (!targetLaneId || !MEMBER_BOARD_LANES.includes(targetLaneId)) {
-        console.error(
-          '[MemberView] handleDrop: Invalid or non-member-board target lane:',
-          targetLaneId,
-          'Valid member board lanes:',
-          MEMBER_BOARD_LANES,
-          'dropData:',
-          dropData
-        );
-        return;
-      }
-
-      debugLog('[MemberView] handleDrop: Final MEMBER BOARD target lane determined:', targetLaneId);
-
-      // Find the member card that was dragged
-      const memberCard = this.memberCards.find((card) => card.id === itemId);
-      if (!memberCard) {
-        console.error('[MemberView] Could not find member card for item:', itemId);
-        return;
-      }
-
-      debugLog('[MemberView] handleDrop: Moving item', itemId, 'to lane', targetLaneId);
-
+    // Try to update via StateManager first, fall back to direct file update if it fails
+    try {
+      await this.updateCardViaStateManager(memberCard, targetLaneId);
+      debugLog('[MemberView] Successfully updated card via StateManager');
+    } catch (stateManagerError) {
+      console.warn(
+        '[MemberView] StateManager update failed, trying direct file update:',
+        stateManagerError
+      );
       try {
-        // Use KanbanView-style approach: update via StateManager instead of manual file manipulation
-        await this.updateCardViaStateManager(memberCard, targetLaneId);
-
-        debugLog('[MemberView] handleDrop: Successfully updated card via StateManager');
-      } catch (error) {
-        console.error('[MemberView] Error updating card via StateManager:', error);
-
-        // Fallback to manual file update if StateManager approach fails
-        debugLog('[MemberView] Falling back to manual file update...');
-        try {
-          // 1. Optimistically update the card in memory first for immediate visual feedback
-          const originalCard = { ...memberCard };
-          this.updateCardInMemory(memberCard, targetLaneId);
-
-          // 2. Trigger immediate visual update with optimistic state
-          this.setReactState({ optimisticUpdate: true });
-
-          // 3. Update the file in the background
-          await this.updateCardForLane(originalCard, targetLaneId);
-
-          // 4. Refresh from file to get the actual state (this will correct any optimistic errors)
-          await this.scanMemberCards();
-
-          debugLog('[MemberView] handleDrop: Successfully updated card via fallback method');
-        } catch (fallbackError) {
-          console.error('[MemberView] Error in fallback update:', fallbackError);
-
-          // Revert optimistic changes on error
-          await this.scanMemberCards();
-
-          // Show error notification
-          new Notice(`Failed to update card: ${fallbackError.message}`);
-        }
+        await this.updateCardForLane(memberCard, targetLaneId);
+        debugLog('[MemberView] Successfully updated card via direct file update');
+      } catch (directUpdateError) {
+        console.error(
+          '[MemberView] Both StateManager and direct file update failed:',
+          directUpdateError
+        );
+        // Show error to user
+        this.error = `Failed to update card: ${directUpdateError.message}`;
+        this.setReactState({});
+        return;
       }
     }
+
+    // Refresh the card data after successful update
+    await this.refreshSingleCard(memberCard);
   }
 
   // New method: Update card via StateManager (KanbanView approach)
@@ -1482,38 +1346,55 @@ export class MemberView extends ItemView implements HoverParent {
     if (!stateManager) {
       debugLog(`[MemberView] Creating on-demand StateManager for ${sourceFile.path}`);
 
-      // Create a temporary mock view for StateManager initialization
-      const mockView = {
-        file: sourceFile,
-        getWindow: () => this.getWindow(),
-        prerender: async () => {}, // No-op for mock view
-        populateViewState: () => {}, // No-op for mock view
-        initHeaderButtons: () => {}, // No-op for mock view
-        validatePreviewCache: () => {}, // No-op for mock view
-        requestSaveToDisk: async (data: string) => {
-          // Save the file directly using the vault API
-          await this.app.vault.modify(sourceFile, data);
-        },
-        data: '', // Initialize with empty data, will be set by StateManager
-      } as any;
+      try {
+        // Create a temporary mock view for StateManager initialization
+        const mockView = {
+          file: sourceFile,
+          app: this.app,
+          plugin: this.plugin,
+          data: '',
+          getWindow: () => this.getWindow(),
+          prerender: async () => {}, // No-op for mock view
+          populateViewState: () => {}, // No-op for mock view
+          initHeaderButtons: () => {}, // No-op for mock view
+          validatePreviewCache: () => {}, // No-op for mock view
+          requestSaveToDisk: async (data: string) => {
+            // Save the file directly using the vault API
+            await this.app.vault.modify(sourceFile, data);
+          },
+          showNotice: (message: string) => {
+            // Show notice using the main plugin's notice system
+            console.warn(`[MemberView] StateManager Notice: ${message}`);
+          },
+          // Add other required view properties/methods
+          viewSettings: {},
+          getViewState: () => ({}),
+          setViewState: () => {},
+        } as any;
 
-      // Create StateManager
-      stateManager = new StateManager(
-        this.app,
-        mockView,
-        () => this.plugin.stateManagers.delete(sourceFile),
-        () => this.plugin.settings
-      );
+        // Create StateManager
+        stateManager = new StateManager(
+          this.app,
+          mockView,
+          () => this.plugin.stateManagers.delete(sourceFile),
+          () => this.plugin.settings
+        );
 
-      this.plugin.stateManagers.set(sourceFile, stateManager);
+        this.plugin.stateManagers.set(sourceFile, stateManager);
 
-      // Initialize the StateManager with file data
-      const fileContent = await this.app.vault.cachedRead(sourceFile);
-      await stateManager.registerView(mockView, fileContent, true);
+        // Initialize the StateManager with file data
+        const fileContent = await this.app.vault.cachedRead(sourceFile);
+        await stateManager.registerView(mockView, fileContent, true);
 
-      debugLog(
-        `[MemberView] Created StateManager for ${sourceFile.path}, state ID: ${stateManager.state?.id}`
-      );
+        debugLog(
+          `[MemberView] Created StateManager for ${sourceFile.path}, state ID: ${stateManager.state?.id}`
+        );
+      } catch (error) {
+        console.error(`[MemberView] Error creating StateManager for ${sourceFile.path}:`, error);
+        // Remove the failed StateManager from the cache
+        this.plugin.stateManagers.delete(sourceFile);
+        throw new Error(`Failed to create StateManager for ${sourceFile.path}: ${error.message}`);
+      }
     }
 
     const board = stateManager.state;
@@ -1797,50 +1678,35 @@ export class MemberView extends ItemView implements HoverParent {
       },
     });
 
-    // 1. IMMEDIATE: Update local member cards first for instant visual feedback
-    const updatedMemberCard = { ...memberCard };
-    this.updateCardInMemory(updatedMemberCard, targetLaneId);
+    // Just save via StateManager (file update only, no UI update needed here)
+    // The UI has already been optimistically updated by the caller
+    stateManager.setState(updatedBoard, true);
 
-    // Find and update the card in our memberCards array
-    const memberCardIndex = this.memberCards.findIndex((card) => card.id === memberCard.id);
-    if (memberCardIndex !== -1) {
-      this.memberCards[memberCardIndex] = updatedMemberCard;
-    }
+    // If the card was moved to 'done' and auto-move setting is enabled,
+    // trigger the auto-move automation explicitly
+    if (targetLaneId === 'done' && this.plugin.settings['auto-move-done-to-lane']) {
+      debugLog(
+        '[MemberView] updateCardViaStateManager: Card moved to done lane with auto-move enabled - triggering automation'
+      );
 
-    // 2. IMMEDIATE: Trigger visual update for instant UI response
-    this.setReactState({ optimisticUpdate: true });
+      // Use updateItem to trigger the handleAutoMoveDoneCard automation
+      // Find the item in the updated board and call updateItem on it
+      const lanes = updatedBoard.children;
+      let itemForAutomation = null;
 
-    // 3. BACKGROUND: Save via StateManager (this will automatically update the file)
-    // Use setTimeout to make this non-blocking for immediate UI response
-    setTimeout(() => {
-      stateManager.setState(updatedBoard, true);
-
-      // If the card was moved to 'done' and auto-move setting is enabled,
-      // trigger the auto-move automation explicitly
-      if (targetLaneId === 'done' && this.plugin.settings['auto-move-done-to-lane']) {
-        debugLog(
-          '[MemberView] updateCardViaStateManager: Card moved to done lane with auto-move enabled - triggering automation'
-        );
-
-        // Use updateItem to trigger the handleAutoMoveDoneCard automation
-        // Find the item in the updated board and call updateItem on it
-        const lanes = updatedBoard.children;
-        let itemForAutomation = null;
-
-        // Find the item across all lanes
-        for (const lane of lanes) {
-          const item = lane.children.find((item: any) => item.id === foundCard.id);
-          if (item) {
-            itemForAutomation = item;
-            break;
-          }
-        }
-
-        if (itemForAutomation) {
-          stateManager.updateItem(itemForAutomation.id, { checked: true }, lanes);
+      // Find the item across all lanes
+      for (const lane of lanes) {
+        const item = lane.children.find((item: any) => item.id === foundCard.id);
+        if (item) {
+          itemForAutomation = item;
+          break;
         }
       }
-    }, 0);
+
+      if (itemForAutomation) {
+        stateManager.updateItem(itemForAutomation.id, { checked: true }, lanes);
+      }
+    }
   }
 
   // Helper method to optimistically update card in memory
@@ -1863,6 +1729,92 @@ export class MemberView extends ItemView implements HoverParent {
         memberCard.hasDoing = false;
         memberCard.tags = memberCard.tags.filter((tag) => tag !== 'doing' && tag !== '#doing');
         break;
+    }
+  }
+
+  // Background file update without blocking UI
+  private async updateCardInBackgroundAsync(originalCard: MemberCard, targetLaneId: string) {
+    const filePath = originalCard.sourceBoardPath;
+
+    try {
+      debugLog('[MemberView] Starting background file update for card:', originalCard.id);
+
+      // Track that we're updating this file
+      this.pendingFileUpdates.add(filePath);
+
+      // Try StateManager approach first (more reliable)
+      try {
+        await this.updateCardViaStateManager(originalCard, targetLaneId);
+        debugLog('[MemberView] Background update via StateManager successful');
+        return;
+      } catch (stateManagerError) {
+        debugLog(
+          '[MemberView] StateManager update failed, trying direct file update:',
+          stateManagerError
+        );
+      }
+
+      // Fallback to direct file update
+      await this.updateCardForLane(originalCard, targetLaneId);
+      debugLog('[MemberView] Background update via direct file modification successful');
+    } catch (error) {
+      console.error('[MemberView] Background file update failed:', error);
+
+      // Revert the optimistic update by refreshing the specific card
+      await this.refreshSingleCard(originalCard);
+
+      // Show error notification
+      new Notice(`Failed to save changes for "${originalCard.title}": ${error.message}`);
+    } finally {
+      // Always remove from pending updates
+      this.pendingFileUpdates.delete(filePath);
+    }
+  }
+
+  // Refresh only a specific card instead of the whole board
+  private async refreshSingleCard(cardToRefresh: MemberCard) {
+    try {
+      debugLog('[MemberView] Refreshing single card:', cardToRefresh.id);
+
+      // Skip full refresh if this card is pending a member update
+      if (this.pendingMemberUpdates.has(cardToRefresh.id)) {
+        debugLog('[MemberView] Card has pending member update, skipping refresh');
+        return;
+      }
+
+      // Find the source file and re-parse just this card
+      const file = this.app.vault.getAbstractFileByPath(cardToRefresh.sourceBoardPath);
+      if (!file || !(file instanceof TFile)) {
+        console.error(
+          '[MemberView] Could not find source file for card refresh:',
+          cardToRefresh.sourceBoardPath
+        );
+        return;
+      }
+
+      // Skip full refresh if this file is being updated by member assignment
+      if (this.pendingFileUpdates.has(file.path)) {
+        debugLog('[MemberView] File has pending update, skipping refresh');
+        return;
+      }
+
+      const fileContent = await this.app.vault.cachedRead(file);
+
+      // Find the card index in our member cards array
+      const cardIndex = this.memberCards.findIndex((card) => card.id === cardToRefresh.id);
+      if (cardIndex === -1) {
+        debugLog('[MemberView] Card not found in memberCards array, doing full refresh');
+        await this.scanMemberCards();
+        return;
+      }
+
+      // For now, just refresh the whole board since parsing individual cards is complex
+      // In the future, this could be optimized to parse just the affected lines
+      await this.scanMemberCards();
+    } catch (error) {
+      console.error('[MemberView] Error refreshing single card:', error);
+      // Fall back to full refresh
+      await this.scanMemberCards();
     }
   }
 
@@ -1992,13 +1944,253 @@ export class MemberView extends ItemView implements HoverParent {
       line: memberCard.sourceStartLine,
       lineIndex: lineIndex,
     });
+  }
 
-    // Wait for file system and cache to process the changes
-    // Similar to how KanbanWorkspaceView handles it
-    debugLog(
-      '[MemberView] updateCardForLane: Waiting for file system and cache to process changes...'
-    );
-    await new Promise((resolve) => setTimeout(resolve, 200));
+  // Efficiently update a specific card without full board refresh
+  updateSpecificCard(
+    cardId: string,
+    updateFn: (card: MemberCard) => void,
+    shouldRender: boolean = true
+  ): boolean {
+    const cardIndex = this.memberCards.findIndex((card) => card.id === cardId);
+    if (cardIndex === -1) {
+      debugLog('[MemberView] Card not found for specific update:', cardId);
+      return false;
+    }
+
+    // Apply the update function to the card
+    updateFn(this.memberCards[cardIndex]);
+
+    // Only trigger a visual update if requested
+    if (shouldRender) {
+      this.setReactState({ cardUpdate: cardId, timestamp: Date.now() });
+    }
+
+    debugLog('[MemberView] Updated specific card:', cardId);
+    return true;
+  }
+
+  // Handle card property updates without full refresh
+  async updateCardProperty(cardId: string, property: string, value: any) {
+    debugLog('[MemberView] Updating card property:', { cardId, property, value });
+
+    // 1. Find the card
+    const card = this.memberCards.find((c) => c.id === cardId);
+    if (!card) {
+      console.error('[MemberView] Card not found for property update:', cardId);
+      return;
+    }
+
+    // 2. Store original value for potential revert
+    const originalValue = (card as any)[property];
+
+    // 3. Optimistically update the card property
+    const updateSuccess = this.updateSpecificCard(cardId, (c) => {
+      (c as any)[property] = value;
+    });
+
+    if (!updateSuccess) {
+      return;
+    }
+
+    // 4. Update the file in background
+    try {
+      await this.updateCardPropertyInFile(card, property, value);
+      debugLog('[MemberView] Card property update successful');
+    } catch (error) {
+      console.error('[MemberView] Failed to update card property in file:', error);
+
+      // Revert the optimistic update
+      this.updateSpecificCard(cardId, (c) => {
+        (c as any)[property] = originalValue;
+      });
+
+      new Notice(`Failed to update ${property}: ${error.message}`);
+    }
+  }
+
+  private async updateCardPropertyInFile(
+    card: MemberCard,
+    property: string,
+    value: any
+  ): Promise<void> {
+    const filePath = card.sourceBoardPath;
+
+    try {
+      // Track that we're updating this file
+      this.pendingFileUpdates.add(filePath);
+
+      // This is a placeholder for property-specific file updates
+      // Different properties (tags, priority, members, dates) would need different update logic
+      debugLog('[MemberView] Property file update not yet implemented for:', property);
+
+      // For now, fall back to the lane-based update system for status changes
+      if (property === 'checked' || property === 'hasDoing') {
+        let targetLaneId = 'backlog';
+        if (card.checked) {
+          targetLaneId = 'done';
+        } else if (card.hasDoing) {
+          targetLaneId = 'doing';
+        }
+
+        await this.updateCardForLane(card, targetLaneId);
+      }
+    } finally {
+      // Always remove from pending updates
+      this.pendingFileUpdates.delete(filePath);
+    }
+  }
+
+  // Optimistically update member assignment without triggering refresh
+  async updateMemberAssignment(cardId: string, member: string, isAssigning: boolean) {
+    debugLog('[MemberView] Updating member assignment:', { cardId, member, isAssigning });
+
+    // 1. Find the card
+    const card = this.memberCards.find((c) => c.id === cardId);
+    if (!card) {
+      console.error('[MemberView] Card not found for member update:', cardId);
+      return;
+    }
+
+    // 2. Store original value for potential revert
+    const originalMembers = [...(card.assignedMembers || [])];
+
+    // 3. Mark card as being updated
+    this.pendingMemberUpdates.add(cardId);
+
+    // 4. Optimistically update the card with ONE render
+    const updateSuccess = this.updateSpecificCard(
+      cardId,
+      (c) => {
+        if (isAssigning) {
+          // Add member if not already assigned
+          if (!c.assignedMembers?.includes(member)) {
+            c.assignedMembers = [...(c.assignedMembers || []), member];
+          }
+        } else {
+          // Remove member if assigned
+          c.assignedMembers = (c.assignedMembers || []).filter((m) => m !== member);
+        }
+      },
+      true
+    ); // Render once for optimistic update
+
+    if (!updateSuccess) {
+      this.pendingMemberUpdates.delete(cardId);
+      return;
+    }
+
+    // 5. Update the file in background WITHOUT triggering more renders
+    try {
+      await this.updateMemberInFileBackground(card, member, isAssigning);
+      debugLog('[MemberView] Member assignment update successful');
+      // NO additional render here - the optimistic update is already visible
+    } catch (error) {
+      console.error('[MemberView] Failed to update member in file:', error);
+
+      // Revert the optimistic update (this will render)
+      this.updateSpecificCard(
+        cardId,
+        (c) => {
+          c.assignedMembers = originalMembers;
+        },
+        true
+      );
+
+      new Notice(`Failed to update member assignment: ${error.message}`);
+    } finally {
+      this.pendingMemberUpdates.delete(cardId);
+    }
+  }
+
+  // Update member in file without triggering refresh
+  private async updateMemberInFileBackground(
+    memberCard: MemberCard,
+    member: string,
+    isAssigning: boolean
+  ) {
+    const file = this.app.vault.getAbstractFileByPath(memberCard.sourceBoardPath);
+    if (!file || !(file instanceof TFile)) {
+      throw new Error(`Could not find source file: ${memberCard.sourceBoardPath}`);
+    }
+
+    // Track that we're updating this file with a timeout
+    this.trackFileUpdate(file.path);
+
+    try {
+      const content = await this.app.vault.read(file);
+      const lines = content.split('\n');
+      const lineIndex = (memberCard.sourceStartLine || 1) - 1;
+
+      if (lineIndex < 0 || lineIndex >= lines.length) {
+        throw new Error(`Invalid source line number: ${memberCard.sourceStartLine}`);
+      }
+
+      let updatedLine = lines[lineIndex];
+      const memberPrefix = '@@';
+
+      if (isAssigning) {
+        // Add member if not already present
+        if (!updatedLine.includes(`${memberPrefix}${member}`)) {
+          // Insert member before any existing tags or block ID
+          const tagMatch = updatedLine.match(
+            /^(\s*-\s*\[[x ]\]\s*)(.*?)(\s*#.*)?(\s*\^[a-zA-Z0-9]+)?$/
+          );
+          if (tagMatch) {
+            const prefix = tagMatch[1]; // "- [ ] " or "- [x] "
+            const content = tagMatch[2]; // main content
+            const existingTags = tagMatch[3] || ''; // existing tags
+            const blockId = tagMatch[4] || ''; // block ID
+            updatedLine = `${prefix}${content} ${memberPrefix}${member}${existingTags}${blockId}`;
+          } else {
+            // Fallback: just append the member before any block ID
+            const blockIdMatch = updatedLine.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/);
+            if (blockIdMatch) {
+              const mainContent = blockIdMatch[1];
+              const blockId = blockIdMatch[2] || '';
+              updatedLine = `${mainContent} ${memberPrefix}${member}${blockId}`;
+            } else {
+              updatedLine = updatedLine.trim() + ` ${memberPrefix}${member}`;
+            }
+          }
+        }
+      } else {
+        // Remove member
+        const memberPattern = new RegExp(
+          `\\s*${this.escapeRegExpStr(memberPrefix)}${this.escapeRegExpStr(member)}\\b`,
+          'gi'
+        );
+        updatedLine = updatedLine.replace(memberPattern, '');
+      }
+
+      // Clean up multiple spaces
+      updatedLine = updatedLine.replace(/\s+/g, ' ').trim();
+
+      // Only update if the line actually changed
+      if (updatedLine !== lines[lineIndex]) {
+        lines[lineIndex] = updatedLine;
+        const updatedContent = lines.join('\n');
+        await this.app.vault.modify(file, updatedContent);
+        debugLog('[MemberView] Updated member in file:', {
+          file: file.path,
+          member,
+          isAssigning,
+          lineIndex,
+          originalLine: lines[lineIndex],
+          updatedLine,
+        });
+      }
+    } catch (error) {
+      // If there's an error, clear the tracking immediately
+      this.clearFileUpdateTracking(file.path);
+      throw error;
+    }
+    // No finally block needed - timeout will clean up tracking
+  }
+
+  // Helper to escape regex special characters
+  private escapeRegExpStr(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   // Get all directories that contain kanban boards
@@ -2020,5 +2212,39 @@ export class MemberView extends ItemView implements HoverParent {
     }
 
     return Array.from(directories).sort();
+  }
+
+  // Track a file update to prevent refresh loops with timeout
+  private trackFileUpdate(filePath: string): void {
+    // Clear any existing timeout for this file
+    this.clearFileUpdateTracking(filePath);
+
+    // Add to pending updates
+    this.pendingFileUpdates.add(filePath);
+
+    // Set a timeout to clear the tracking after 3 seconds
+    const timeout = setTimeout(() => {
+      this.clearFileUpdateTracking(filePath);
+      debugLog('[MemberView] File update tracking timeout for:', filePath);
+    }, 3000);
+
+    this.fileUpdateTimeouts.set(filePath, timeout);
+    debugLog('[MemberView] Tracking file update for 3 seconds:', filePath);
+  }
+
+  // Clear file update tracking
+  private clearFileUpdateTracking(filePath: string): void {
+    this.pendingFileUpdates.delete(filePath);
+
+    const timeout = this.fileUpdateTimeouts.get(filePath);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.fileUpdateTimeouts.delete(filePath);
+    }
+  }
+
+  // Public method to check if any updates are pending
+  public hasPendingUpdates(): boolean {
+    return this.pendingMemberUpdates.size > 0 || this.pendingFileUpdates.size > 0;
   }
 }

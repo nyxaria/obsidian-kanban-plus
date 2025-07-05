@@ -1,4 +1,3 @@
-import { debugLog } from '../helpers/debugLogger';
 import classcat from 'classcat';
 import { TFile } from 'obsidian';
 import { Component, memo, useMemo } from 'preact/compat';
@@ -14,6 +13,7 @@ import { SortPlaceholder } from '../dnd/components/SortPlaceholder';
 import { Sortable } from '../dnd/components/Sortable';
 import { DndManagerContext } from '../dnd/components/context';
 import { getBoardModifiers } from '../helpers/boardModifiers';
+import { debugLog } from '../helpers/debugLogger';
 import KanbanPlugin from '../main';
 import { Items } from './Item/Item';
 import { MemberItems } from './MemberItems';
@@ -91,7 +91,12 @@ function MemberLane({
                     cancelEditCounter={0}
                     memberCards={memberCards}
                     view={view}
-                    onCardUpdate={onRefresh}
+                    onCardUpdate={() => {
+                      // Only trigger refresh if no member updates are pending
+                      if (!view.hasPendingUpdates()) {
+                        onRefresh();
+                      }
+                    }}
                   />
                 )}
                 {lane.children.length === 0 ? (
@@ -134,6 +139,7 @@ interface MemberBoardProps {
   onMemberChange: (member: string) => void;
   onScanRootChange: (path: string) => void;
   onRefresh: () => void;
+  updateMemberAssignment: (cardId: string, member: string, isAssigning: boolean) => Promise<void>;
   reactState: any;
   setReactState: (state: any) => void;
   emitter: any;
