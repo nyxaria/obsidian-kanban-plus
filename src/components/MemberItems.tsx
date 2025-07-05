@@ -1,5 +1,5 @@
 import classcat from 'classcat';
-import { moment } from 'obsidian';
+import { TFile, WorkspaceLeaf, moment } from 'obsidian';
 import {
   JSX,
   memo,
@@ -182,16 +182,67 @@ const MemberItemInner = memo(function MemberItemInner({
   );
 
   const onDoubleClickCallback: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
-    (e) => {
-      debugLog('[MemberItemInner] onDoubleClick triggered', {
-        isStatic,
-        editable: stateManager.getSetting('editable'),
+    async (e) => {
+      debugLog('[MemberItemInner] onDoubleClick triggered - navigating to card', {
+        cardId: memberCard?.id,
+        sourceBoardPath: memberCard?.sourceBoardPath,
+        blockId: memberCard?.blockId,
       });
-      if (isStatic || !stateManager.getSetting('editable')) return;
-      setEditState({ x: e.clientX, y: e.clientY });
+
+      if (!memberCard) return;
+
       e.stopPropagation();
+
+      // Use the same navigation logic as "Go to card" context menu
+      const sourceFile = view.app.vault.getAbstractFileByPath(memberCard.sourceBoardPath);
+      if (sourceFile instanceof TFile) {
+        const navigationState = {
+          file: memberCard.sourceBoardPath,
+          eState: {
+            filePath: memberCard.sourceBoardPath,
+            blockId: memberCard.blockId || undefined,
+            cardTitle: !memberCard.blockId ? memberCard.titleRaw : undefined,
+            listName: undefined as string | undefined,
+          },
+        };
+
+        let linkPath = memberCard.sourceBoardPath;
+        if (memberCard.blockId) {
+          linkPath = `${memberCard.sourceBoardPath}#^${memberCard.blockId}`;
+        }
+
+        // Check for an existing Kanban view for this file
+        let existingLeaf: WorkspaceLeaf | null = null;
+        view.app.workspace.getLeavesOfType('kanban').forEach((leaf) => {
+          if ((leaf.view as any).file?.path === memberCard.sourceBoardPath) {
+            existingLeaf = leaf;
+          }
+        });
+
+        if (existingLeaf) {
+          debugLog(
+            `[MemberItemInner] Found existing Kanban view for ${memberCard.sourceBoardPath}. Activating and setting state.`,
+            navigationState
+          );
+          view.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+          // Set the state to highlight the card
+          (existingLeaf.view as any).setState(
+            { eState: navigationState.eState },
+            { history: true }
+          );
+        } else {
+          debugLog(
+            `[MemberItemInner] No existing Kanban view found for ${memberCard.sourceBoardPath}. Opening link '${linkPath}' with newLeaf: 'tab' and state:`,
+            navigationState
+          );
+          // Fallback to opening a new tab if no existing view is found
+          await view.app.workspace.openLinkText(linkPath, memberCard.sourceBoardPath, 'tab', {
+            state: navigationState,
+          });
+        }
+      }
     },
-    [setEditState, isStatic, stateManager]
+    [memberCard, view]
   );
 
   const ignoreAttr = useMemo(() => {

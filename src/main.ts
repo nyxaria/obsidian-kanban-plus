@@ -23,6 +23,7 @@ import {
   KanbanWorkspaceView,
 } from './KanbanWorkspaceView';
 import { MemberView, memberIcon, memberViewType } from './MemberView';
+import { SessionManager } from './SessionManager';
 import {
   DEFAULT_SETTINGS,
   KanbanSettings,
@@ -69,6 +70,7 @@ function getEditorClass(app: any) {
 export default class KanbanPlugin extends Plugin {
   settingsTab: KanbanSettingsTab;
   settings: KanbanSettings;
+  sessionManager: SessionManager;
 
   // leafid => view mode
   kanbanFileModes: Record<string, string> = {};
@@ -333,6 +335,10 @@ export default class KanbanPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
+
+    // Initialize SessionManager
+    this.sessionManager = new SessionManager(this);
+    await this.sessionManager.loadSession();
 
     // Initialize debug logger with plugin instance
     setDebugLoggerPlugin(this);
