@@ -123,7 +123,7 @@ export class ReminderModal extends Modal {
             .replace(/!\[[^]]+\]/g, '') // Remove ![priority] (if it was part of the title)
             .replace(/!\w+/g, '') // Remove !high, !medium, !low (if it was part of the title)
             .replace(/@@\w+/g, '') // Remove @@member
-            .replace(/#\w+(\/\w+)*\s?/g, '') // Remove #tags and #nested/tags
+            .replace(/#[\w-]+(\/[\w-]+)*\s?/g, '') // Remove #tags and #nested/tags
             .replace(/\s{2,}/g, ' ') // Replace multiple spaces with single
             .trim();
 

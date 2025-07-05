@@ -1927,7 +1927,7 @@ export default class KanbanPlugin extends Plugin {
     cleanTitle = cleanTitle.replace(/@@\w+/g, '');
 
     // Remove tags
-    cleanTitle = cleanTitle.replace(/#\w+(\/\w+)*\s?/g, '');
+    cleanTitle = cleanTitle.replace(/#[\w-]+(\/[\w-]+)*\s?/g, '');
 
     // Clean up multiple spaces but preserve newlines (only collapse spaces/tabs)
     cleanTitle = cleanTitle.replace(/[ \t]{2,}/g, ' ').trim();

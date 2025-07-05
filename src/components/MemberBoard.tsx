@@ -328,8 +328,17 @@ export function MemberBoard(props: MemberBoardProps) {
   useEffect(() => {
     let isMounted = true;
 
-    if (selectedMember && memberCards.length === 0 && !isLoading && isMounted) {
-      onRefresh();
+    // Only trigger initial scan if we haven't scanned yet and have a selected member
+    // Don't trigger if we already did the initial scan (even if it resulted in 0 cards)
+    if (
+      selectedMember &&
+      memberCards.length === 0 &&
+      !isLoading &&
+      isMounted &&
+      !view.hasInitialScan
+    ) {
+      debugLog('[MemberBoard] Triggering initial scan for member:', selectedMember);
+      view.debouncedRefresh();
     }
 
     return () => {
