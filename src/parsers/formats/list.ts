@@ -207,6 +207,11 @@ export function listItemToItemData(stateManager: StateManager, md: string, item:
 
     if (genericNode.type === 'blockid') {
       itemData.blockId = genericNode.value;
+      // Mark the block ID for deletion from the title
+      title = markRangeForDeletion(title, {
+        start: node.position.start.offset - itemBoundary.start,
+        end: node.position.end.offset - itemBoundary.start,
+      });
       return true;
     }
 
