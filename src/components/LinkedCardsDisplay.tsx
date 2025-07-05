@@ -1,4 +1,3 @@
-import { debugLog } from '../helpers/debugLogger';
 import update from 'immutability-helper';
 import moment from 'moment';
 import { Notice, TFile } from 'obsidian';
@@ -12,6 +11,7 @@ import { hasFrontmatterKey } from 'src/helpers';
 import KanbanPlugin from 'src/main';
 import { ListFormat } from 'src/parsers/List';
 
+import { debugLog } from '../helpers/debugLogger';
 import { getTagColorFn, getTagSymbolFn, useGetDateColorFn } from './helpers';
 
 // Interactive Markdown Renderer Component for handling both internal and external links
@@ -570,7 +570,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
     cleanContent = cleanContent.replace(/\s*\^[a-zA-Z0-9]+/g, '');
 
     // Remove tags from the content (they'll be shown in the tags section)
-    cleanContent = cleanContent.replace(/\s*#\w+(?:\/\w+)*/g, '');
+    cleanContent = cleanContent.replace(/\s*#[\w-]+(?:\/[\w-]+)*/g, '');
 
     // Remove member assignments (@@member)
     cleanContent = cleanContent.replace(/\s*@@\w+/g, '');
@@ -816,7 +816,7 @@ export const LinkedCardsDisplay = memo(function LinkedCardsDisplay({
 
         // Check if this line contains only tags (hashtags)
         // This matches lines that are just tags like "#tag1 #tag2" but not lines with actual content plus tags
-        const tagOnlyPattern = /^(#\w+(?:\/\w+)*\s*)+$/;
+        const tagOnlyPattern = /^(#[\w-]+(?:\/[\w-]+)*\s*)+$/;
         if (tagOnlyPattern.test(trimmedLine)) return false;
 
         // Check if this line contains only a blockId reference (^blockId)

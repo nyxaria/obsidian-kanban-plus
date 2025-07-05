@@ -86,7 +86,7 @@ export class MemberView extends ItemView implements HoverParent {
   private isLoading: boolean = false;
   private error: string | null = null;
   private scanRootPath: string = '';
-  private hasInitialScan = false;
+  public hasInitialScan = false;
   // Track files that are currently being updated to prevent refresh loops
   private pendingFileUpdates: Set<string> = new Set();
   // Track member cards that are being updated optimistically
@@ -98,6 +98,9 @@ export class MemberView extends ItemView implements HoverParent {
 
   // Debug flag - set to false for production to reduce console noise
   private debugDragDrop: boolean = false;
+  // Debounce onRefresh to prevent rapid successive calls
+  private lastRefreshTime: number = 0;
+  private refreshDebounceDelay: number = 1000; // 1 second debounce
 
   // Mock file property for compatibility with components that expect view.file
   file: TFile;
@@ -296,7 +299,7 @@ export class MemberView extends ItemView implements HoverParent {
     cleanTitle = cleanTitle.replace(memberRegex, ' ');
 
     // Remove tags
-    const tagRegex = /(?:^|\s)(#\w+(?:\/\w+)*)(?=\s|$)/gi;
+    const tagRegex = /(?:^|\s)(#[\w-]+(?:\/[\w-]+)*)(?=\s|$)/gi;
     cleanTitle = cleanTitle.replace(tagRegex, ' ');
 
     // For MemberView, we don't have a StateManager with settings, so skip date/time trigger removal
@@ -544,10 +547,27 @@ export class MemberView extends ItemView implements HoverParent {
     unmountComponentAtNode(this.contentEl);
   }
 
+  // Debounced refresh method to prevent rapid successive calls
+  debouncedRefresh = () => {
+    const now = Date.now();
+    if (now - this.lastRefreshTime < this.refreshDebounceDelay) {
+      debugLog('[MemberView] Refresh debounced - too soon since last refresh');
+      return;
+    }
+    this.lastRefreshTime = now;
+    this.scanMemberCards();
+  };
+
   async scanMemberCards() {
     // Check if view is properly initialized
     if (!this.app || !this.plugin || (this.leaf as any).detached) {
       debugLog('[MemberView] View not properly initialized, skipping scan');
+      return;
+    }
+
+    // Prevent concurrent scans
+    if (this.isLoading) {
+      debugLog('[MemberView] Scan already in progress, skipping');
       return;
     }
 
@@ -933,7 +953,7 @@ export class MemberView extends ItemView implements HoverParent {
       const memberRegex = new RegExp(`${memberPrefix}\\w+`, 'g');
       let cleanTitle = processedTitleRaw
         .replace(memberRegex, '') // Remove member assignments
-        .replace(/\s*#\w+(?:\/\w+)*/g, '') // Remove tags (including preceding spaces)
+        .replace(/\s*#[\w-]+(?:\/[\w-]+)*/g, '') // Remove tags (including preceding spaces)
         .replace(/\s*\^[a-zA-Z0-9]+$/, '') // Remove block ID (including preceding spaces)
         .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
         .trim();
@@ -1181,6 +1201,18 @@ export class MemberView extends ItemView implements HoverParent {
       return;
     }
 
+    // Check if component is still mounted and valid
+    if (!this.contentEl || (this.leaf as any).detached || !this.contentEl.isConnected) {
+      debugLog('[MemberView] Component not mounted, skipping setReactState');
+      return;
+    }
+
+    // Additional safety checks
+    if (!this.plugin || !this.app) {
+      debugLog('[MemberView] Plugin or app not available, skipping setReactState');
+      return;
+    }
+
     if (newState) {
       this._reactState = { ...this._reactState, ...newState };
     }
@@ -1192,6 +1224,7 @@ export class MemberView extends ItemView implements HoverParent {
 
     const renderCallback = () => {
       if (this._isRendering) {
+        debugLog('[MemberView] Render already in progress, skipping render callback');
         return;
       }
 
@@ -1201,12 +1234,14 @@ export class MemberView extends ItemView implements HoverParent {
         // Check if component is still mounted and valid
         if (!this.contentEl || (this.leaf as any).detached || !this.contentEl.isConnected) {
           debugLog('[MemberView] Content element not available, detached, or not connected to DOM');
+          this._isRendering = false;
           return;
         }
 
         // Additional safety checks
         if (!this.plugin || !this.app) {
           console.error('[MemberView] Plugin or app not available during render');
+          this._isRendering = false;
           return;
         }
 
@@ -1691,7 +1726,7 @@ export class MemberView extends ItemView implements HoverParent {
                 // Remove tags, assignments, dates, priorities, and block IDs
                 return titleRaw
                   .replace(/\s*@@\w+/g, '') // Remove member assignments
-                  .replace(/\s*#\w+/g, '') // Remove tags
+                  .replace(/\s*#[\w-]+/g, '') // Remove tags
                   .replace(/\s*!\w+/g, '') // Remove priorities
                   .replace(/\s*@\{[^}]+\}/g, '') // Remove dates
                   .replace(/\s*@start\{[^}]+\}/g, '') // Remove start dates

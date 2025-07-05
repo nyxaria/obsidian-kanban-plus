@@ -163,7 +163,7 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
                 // Remove member assignments
                 cleanTitle = cleanTitle.replace(/\s*@@\w+/g, '');
                 // Remove tags
-                cleanTitle = cleanTitle.replace(/\s*#\w+/g, '');
+                cleanTitle = cleanTitle.replace(/\s*#[\w-]+/g, '');
                 // Remove dates
                 cleanTitle = cleanTitle.replace(/\s*@\{[^}]+\}/g, '');
                 cleanTitle = cleanTitle.replace(/\s*@start\{[^}]+\}/g, '');

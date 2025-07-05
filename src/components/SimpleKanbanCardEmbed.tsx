@@ -162,7 +162,7 @@ export const SimpleKanbanCardEmbed = memo(function SimpleKanbanCardEmbed({
     cleanContent = cleanContent.replace(/\s*\^[a-zA-Z0-9]+/g, '');
 
     // Remove tags from the content (they'll be shown in the tags section)
-    cleanContent = cleanContent.replace(/\s*#\w+(?:\/\w+)*/g, '');
+    cleanContent = cleanContent.replace(/\s*#[\w-]+(?:\/[\w-]+)*/g, '');
 
     // Remove member assignments (@@member)
     cleanContent = cleanContent.replace(/\s*@@\w+/g, '');
