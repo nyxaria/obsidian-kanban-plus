@@ -48,7 +48,51 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
     // Create a mock StateManager for getAllTagsFromKanbanBoards
     const mockStateManager = {
       app: view.app,
+      file: {
+        path: 'mock-file-for-tag-scanning',
+        name: 'Mock File',
+        basename: 'Mock File',
+        extension: 'md',
+      } as any,
       getSetting: (key: string) => (view.plugin.settings as any)[key],
+      getSettingRaw: (key: string) => (view.plugin.settings as any)[key],
+      getGlobalSetting: (key: string) => (view.plugin.settings as any)[key],
+      compiledSettings: {},
+      compileSettings: (settings?: any) => {
+        // Mock implementation that sets basic compiled settings
+        mockStateManager.compiledSettings = {
+          'date-format': 'YYYY-MM-DD',
+          'date-display-format': 'YYYY-MM-DD',
+          'date-time-display-format': 'YYYY-MM-DD HH:mm',
+          'date-trigger': '@',
+          'time-trigger': '%',
+          'time-format': 'HH:mm',
+          'metadata-keys': [],
+          'tag-colors': (view.plugin.settings as any)['tag-colors'] || [],
+          'tag-sort': (view.plugin.settings as any)['tag-sort'] || [],
+          'tag-symbols': (view.plugin.settings as any)['tag-symbols'] || [],
+          'tag-action': 'obsidian',
+          'kanban-plugin': 'board',
+          'inline-metadata-position': 'top',
+          'link-date-to-daily-note': false,
+          'move-dates': false,
+          'move-tags': false,
+          'move-task-metadata': false,
+          'archive-date-separator': '',
+          'archive-date-format': 'YYYY-MM-DD HH:mm',
+          'show-add-list': true,
+          'show-archive-all': true,
+          'show-board-settings': true,
+          'show-checkboxes': true,
+          'show-relative-date': true,
+          'show-search': true,
+          'show-set-view': true,
+          'show-view-as-markdown': true,
+          'date-picker-week-start': 0,
+          'date-colors': [],
+          ...settings,
+        };
+      },
     } as any;
 
     getAllTagsFromKanbanBoards(mockStateManager)
@@ -295,7 +339,12 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
                   .setChecked(cardAssignedMembers.includes(member))
                   .onClick(async () => {
                     try {
-                      await updateCardMembers(memberCard, member, view);
+                      const isCurrentlyAssigned = cardAssignedMembers.includes(member);
+                      await view.updateMemberAssignment(
+                        memberCard.id,
+                        member,
+                        !isCurrentlyAssigned
+                      );
                       onCardUpdate();
                     } catch (error) {
                       console.error('[MemberItemMenu] Error updating members:', error);
@@ -562,62 +611,6 @@ async function updateCardPriority(
         updatedLine = `${mainContent} !${newPriority}${blockId}`;
       } else {
         updatedLine = updatedLine.trim() + ` !${newPriority}`;
-      }
-    }
-  }
-
-  // Clean up multiple spaces
-  updatedLine = updatedLine.replace(/\s+/g, ' ').trim();
-
-  lines[lineIndex] = updatedLine;
-  const updatedContent = lines.join('\n');
-  await view.app.vault.modify(file, updatedContent);
-}
-
-async function updateCardMembers(memberCard: MemberCard, member: string, view: MemberView) {
-  const file = view.app.vault.getAbstractFileByPath(memberCard.sourceBoardPath);
-  if (!file || !(file instanceof TFile)) {
-    throw new Error(`Could not find source file: ${memberCard.sourceBoardPath}`);
-  }
-
-  const content = await view.app.vault.read(file);
-  const lines = content.split('\n');
-  const lineIndex = (memberCard.sourceStartLine || 1) - 1;
-
-  if (lineIndex < 0 || lineIndex >= lines.length) {
-    throw new Error(`Invalid source line number: ${memberCard.sourceStartLine}`);
-  }
-
-  let updatedLine = lines[lineIndex];
-  const memberPrefix = '@@';
-  const memberAssignedMembers = memberCard.assignedMembers || [];
-
-  if (memberAssignedMembers.includes(member)) {
-    // Remove member
-    const memberPattern = new RegExp(
-      `\\s*${escapeRegExpStr(memberPrefix)}${escapeRegExpStr(member)}\\b`,
-      'gi'
-    );
-    updatedLine = updatedLine.replace(memberPattern, '');
-  } else {
-    // Add member
-    // Insert member before any existing tags or block ID
-    const tagMatch = updatedLine.match(/^(\s*-\s*\[[x ]\]\s*)(.*?)(\s*#.*)?(\s*\^[a-zA-Z0-9]+)?$/);
-    if (tagMatch) {
-      const prefix = tagMatch[1]; // "- [ ] " or "- [x] "
-      const content = tagMatch[2]; // main content
-      const existingTags = tagMatch[3] || ''; // existing tags
-      const blockId = tagMatch[4] || ''; // block ID
-      updatedLine = `${prefix}${content} ${memberPrefix}${member}${existingTags}${blockId}`;
-    } else {
-      // Fallback: just append the member before any block ID
-      const blockIdMatch = updatedLine.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/);
-      if (blockIdMatch) {
-        const mainContent = blockIdMatch[1];
-        const blockId = blockIdMatch[2] || '';
-        updatedLine = `${mainContent} ${memberPrefix}${member}${blockId}`;
-      } else {
-        updatedLine = updatedLine.trim() + ` ${memberPrefix}${member}`;
       }
     }
   }
