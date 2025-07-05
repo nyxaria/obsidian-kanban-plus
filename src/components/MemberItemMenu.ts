@@ -1,5 +1,5 @@
 import update from 'immutability-helper';
-import { Menu, MenuItem, Notice, TFile } from 'obsidian';
+import { Menu, MenuItem, Notice, TFile, WorkspaceLeaf } from 'obsidian';
 import { useCallback, useEffect, useState } from 'preact/hooks';
 
 import { KanbanView } from '../KanbanView';
@@ -124,120 +124,50 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
           .onClick(async () => {
             const sourceFile = view.app.vault.getAbstractFileByPath(memberCard.sourceBoardPath);
             if (sourceFile instanceof TFile) {
-              // Check if there's already a KanbanView open for this file
-              const existingKanbanLeaves = view.app.workspace
-                .getLeavesOfType('kanban')
-                .filter((leaf) => (leaf.view as any).file?.path === sourceFile.path);
+              // Use the same navigation approach as KanbanWorkspaceView
+              const navigationState = {
+                file: memberCard.sourceBoardPath,
+                eState: {
+                  filePath: memberCard.sourceBoardPath,
+                  blockId: memberCard.blockId || undefined,
+                  cardTitle: !memberCard.blockId ? memberCard.titleRaw : undefined,
+                  listName: undefined as string | undefined,
+                },
+              };
 
-              let targetLeaf;
-              let kanbanView;
-
-              if (existingKanbanLeaves.length > 0) {
-                // Use existing KanbanView
-                targetLeaf = existingKanbanLeaves[0];
-                kanbanView = targetLeaf.view;
-
-                // Activate the existing leaf
-                view.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
-              } else {
-                // Create new leaf and open file in KanbanView
-                targetLeaf = view.app.workspace.splitActiveLeaf();
-                await targetLeaf.openFile(sourceFile);
-
-                // Ensure it opens as Kanban view (not markdown)
-                if (targetLeaf.view.getViewType() !== 'kanban') {
-                  view.plugin.kanbanFileModes[(targetLeaf as any).id || sourceFile.path] = 'kanban';
-                  await view.plugin.setKanbanView(targetLeaf);
-                }
-
-                kanbanView = targetLeaf.view;
+              let linkPath = memberCard.sourceBoardPath;
+              if (memberCard.blockId) {
+                linkPath = `${memberCard.sourceBoardPath}#^${memberCard.blockId}`;
               }
 
-              // Now highlight the card in the KanbanView using the same approach as TimelineView
-              if (kanbanView && kanbanView.getViewType() === 'kanban') {
-                // Clean the title to match what's displayed in KanbanView (remove metadata)
-                let cleanTitle = memberCard.titleRaw;
-
-                // Remove block ID
-                cleanTitle = cleanTitle.replace(/\s*\^[a-zA-Z0-9]+/g, '');
-                // Remove member assignments
-                cleanTitle = cleanTitle.replace(/\s*@@\w+/g, '');
-                // Remove tags
-                cleanTitle = cleanTitle.replace(/\s*#[\w-]+/g, '');
-                // Remove dates
-                cleanTitle = cleanTitle.replace(/\s*@\{[^}]+\}/g, '');
-                cleanTitle = cleanTitle.replace(/\s*@start\{[^}]+\}/g, '');
-                // Remove priorities
-                cleanTitle = cleanTitle.replace(/\s*![a-zA-Z]+/g, '');
-                // Clean up extra whitespace and newlines
-                cleanTitle = cleanTitle.replace(/\s+/g, ' ').trim();
-
-                // Debug: Log what titles are actually in the KanbanView
-                const board = (kanbanView as KanbanView).getBoard();
-                if (board) {
-                  debugLog('[MemberItemMenu] Available cards in KanbanView board:');
-                  for (const lane of board.children) {
-                    debugLog(`  Lane '${lane.data.title}':`);
-                    for (const item of lane.children) {
-                      debugLog(`    - Card title: "${item.data.title}"`);
-                      debugLog(`    - Card titleRaw: "${item.data.titleRaw}"`);
-                      debugLog(`    - Card blockId: "${item.data.blockId}"`);
-                      debugLog(`    - Card id: "${item.id}"`);
-                    }
-                  }
-                } else {
-                  debugLog('[MemberItemMenu] No board data available in KanbanView');
+              // Check for an existing Kanban view for this file
+              let existingLeaf: WorkspaceLeaf | null = null;
+              view.app.workspace.getLeavesOfType('kanban').forEach((leaf) => {
+                if ((leaf.view as any).file?.path === memberCard.sourceBoardPath) {
+                  existingLeaf = leaf;
                 }
+              });
 
-                // Prepare navigation state similar to TimelineView
-                // Use blockId if available (most reliable), otherwise use cleaned cardTitle
-                const navigationState = {
-                  file: memberCard.sourceBoardPath,
-                  eState: {
-                    filePath: memberCard.sourceBoardPath,
-                    blockId: memberCard.blockId || undefined,
-                    cardTitle: !memberCard.blockId ? cleanTitle : undefined, // Use cleaned title for better matching
-                    listName: undefined as string | undefined, // Let KanbanView figure this out
-                    preventSetViewData: true, // Prevent reloading the view data
-                  },
-                };
-
-                debugLog('[MemberItemMenu] Navigation state for highlighting:', {
-                  blockId: navigationState.eState.blockId,
-                  cardTitle: navigationState.eState.cardTitle,
-                  cleanedTitle: cleanTitle,
-                  memberCardTitle: memberCard.title,
-                  memberCardTitleRaw: memberCard.titleRaw,
-                  memberCardBlockId: memberCard.blockId,
-                  usingBlockId: !!memberCard.blockId,
-                  blockIdType: typeof memberCard.blockId,
-                  blockIdLength: memberCard.blockId?.length,
+              if (existingLeaf) {
+                debugLog(
+                  `[MemberItemMenu] Found existing Kanban view for ${memberCard.sourceBoardPath}. Activating and setting state.`,
+                  navigationState
+                );
+                view.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+                // Set the state to highlight the card
+                (existingLeaf.view as any).setState(
+                  { eState: navigationState.eState },
+                  { history: true }
+                );
+              } else {
+                debugLog(
+                  `[MemberItemMenu] No existing Kanban view found for ${memberCard.sourceBoardPath}. Opening link '${linkPath}' with newLeaf: 'tab' and state:`,
+                  navigationState
+                );
+                // Fallback to opening a new tab if no existing view is found
+                await view.app.workspace.openLinkText(linkPath, memberCard.sourceBoardPath, 'tab', {
+                  state: navigationState,
                 });
-
-                // PROMINENT DEBUG: Show what we're using for highlighting
-                if (memberCard.blockId) {
-                  debugLog(
-                    `🎯 [MemberItemMenu] USING BLOCK ID for highlighting: "${memberCard.blockId}"`
-                  );
-                } else {
-                  debugLog(`🎯 [MemberItemMenu] USING TITLE for highlighting: "${cleanTitle}"`);
-                }
-
-                // Use setState to properly integrate with the highlighting system
-                (kanbanView as any).setState(navigationState, { history: true });
-
-                // Add a slight delay to ensure setState has processed and the view is ready
-                setTimeout(() => {
-                  if (kanbanView && (kanbanView as any).applyHighlight) {
-                    debugLog(
-                      '[MemberItemMenu] Directly calling applyHighlight on KanbanView instance for:',
-                      memberCard.sourceBoardPath,
-                      'with target:',
-                      navigationState.eState
-                    );
-                    (kanbanView as any).applyHighlight();
-                  }
-                }, 150);
               }
             } else {
               new Notice(`Could not find source file: ${memberCard.sourceBoardPath}`);

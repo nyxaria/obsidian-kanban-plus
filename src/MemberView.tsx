@@ -311,7 +311,7 @@ export class MemberView extends ItemView implements HoverParent {
     return cleanTitle;
   }
 
-  onload() {
+  async onload() {
     super.onload();
     if (Platform.isMobile) {
       this.containerEl.setCssProps({
@@ -319,10 +319,20 @@ export class MemberView extends ItemView implements HoverParent {
       });
     }
 
-    // Initialize with first team member if available
+    // Load session data for member selection and scan root path
+    const sessionData = this.plugin.sessionManager.getMemberBoardSession();
+
+    // Initialize with session data if available, otherwise with first team member
     const teamMembers = this.plugin.settings.teamMembers || [];
-    if (teamMembers.length > 0 && !this.selectedMember) {
+    if (sessionData.selectedMember && teamMembers.includes(sessionData.selectedMember)) {
+      this.selectedMember = sessionData.selectedMember;
+    } else if (teamMembers.length > 0 && !this.selectedMember) {
       this.selectedMember = teamMembers[0];
+    }
+
+    // Initialize scan root path from session data
+    if (sessionData.scanRootPath !== undefined) {
+      this.scanRootPath = sessionData.scanRootPath;
     }
 
     // Register for file change events to refresh when kanban content changes
@@ -1282,11 +1292,15 @@ export class MemberView extends ItemView implements HoverParent {
             onMemberChange: (member: string) => {
               this.selectedMember = member;
               this.hasInitialScan = false; // Reset initial scan flag when member changes
+              // Save to session
+              this.plugin.sessionManager.setMemberBoardSession({ selectedMember: member });
               this.scanMemberCards();
             },
             onScanRootChange: (path: string) => {
               this.scanRootPath = path;
               this.hasInitialScan = false; // Reset initial scan flag when scan root changes
+              // Save to session
+              this.plugin.sessionManager.setMemberBoardSession({ scanRootPath: path });
               if (this.selectedMember) {
                 this.scanMemberCards();
               }
