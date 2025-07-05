@@ -93,6 +93,8 @@ export class MemberView extends ItemView implements HoverParent {
   private pendingMemberUpdates: Set<string> = new Set();
   // Track file update timeouts to prevent refresh loops
   private fileUpdateTimeouts: Map<string, NodeJS.Timeout> = new Map();
+  private pendingRerenderTimeout: NodeJS.Timeout | null = null;
+  private pendingRerenderCards: Set<string> = new Set();
 
   // Debug flag - set to false for production to reduce console noise
   private debugDragDrop: boolean = false;
@@ -404,6 +406,14 @@ export class MemberView extends ItemView implements HoverParent {
     }
     this.fileUpdateTimeouts.clear();
     this.pendingFileUpdates.clear();
+    this.pendingMemberUpdates.clear();
+
+    // Clear pending re-render timeout
+    if (this.pendingRerenderTimeout) {
+      clearTimeout(this.pendingRerenderTimeout);
+      this.pendingRerenderTimeout = null;
+    }
+    this.pendingRerenderCards.clear();
 
     // Reset rendering state
     this._isRendering = false;
@@ -1958,12 +1968,44 @@ export class MemberView extends ItemView implements HoverParent {
       return false;
     }
 
+    // Store original values for DOM comparison
+    const originalAssignedMembers = [...(this.memberCards[cardIndex].assignedMembers || [])];
+    const originalTags = [...(this.memberCards[cardIndex].tags || [])];
+    const originalPriority = this.memberCards[cardIndex].priority;
+
     // Apply the update function to the card
     updateFn(this.memberCards[cardIndex]);
 
-    // Only trigger a visual update if requested
+    // Check what changed and update DOM accordingly
+    const newAssignedMembers = this.memberCards[cardIndex].assignedMembers || [];
+    const newTags = this.memberCards[cardIndex].tags || [];
+    const newPriority = this.memberCards[cardIndex].priority;
+
+    const membersChanged =
+      JSON.stringify(originalAssignedMembers) !== JSON.stringify(newAssignedMembers);
+    const tagsChanged = JSON.stringify(originalTags) !== JSON.stringify(newTags);
+    const priorityChanged = originalPriority !== newPriority;
+
+    if (membersChanged) {
+      // Update member badges in DOM immediately
+      this.updateMemberBadgesInDOM(cardId, newAssignedMembers);
+    }
+
+    if (tagsChanged) {
+      // Update tag badges in DOM immediately
+      this.updateTagBadgesInDOM(cardId, newTags);
+    }
+
+    if (priorityChanged) {
+      // Update priority badge in DOM immediately
+      this.updatePriorityBadgeInDOM(cardId, newPriority as 'high' | 'medium' | 'low' | null);
+    }
+
+    // For metadata updates (members, tags, priority), we skip all rendering to prevent text flashing
+    // The user gets immediate feedback from the DOM updates
     if (shouldRender) {
-      this.setReactState({ cardUpdate: cardId, timestamp: Date.now() });
+      // Only trigger React re-render for non-member updates (like priority, tags, etc.)
+      this.setReactState({ lastCardUpdate: cardId, updateTime: Date.now() });
     }
 
     debugLog('[MemberView] Updated specific card:', cardId);
@@ -2058,7 +2100,7 @@ export class MemberView extends ItemView implements HoverParent {
     // 3. Mark card as being updated
     this.pendingMemberUpdates.add(cardId);
 
-    // 4. Optimistically update the card with ONE render
+    // 4. Optimistically update the card WITHOUT any rendering
     const updateSuccess = this.updateSpecificCard(
       cardId,
       (c) => {
@@ -2072,8 +2114,8 @@ export class MemberView extends ItemView implements HoverParent {
           c.assignedMembers = (c.assignedMembers || []).filter((m) => m !== member);
         }
       },
-      true
-    ); // Render once for optimistic update
+      false // NO RENDERING - user gets feedback from the member assignment UI button
+    );
 
     if (!updateSuccess) {
       this.pendingMemberUpdates.delete(cardId);
@@ -2088,7 +2130,7 @@ export class MemberView extends ItemView implements HoverParent {
     } catch (error) {
       console.error('[MemberView] Failed to update member in file:', error);
 
-      // Revert the optimistic update (this will render)
+      // Revert the optimistic update (this will render to show the error state)
       this.updateSpecificCard(
         cardId,
         (c) => {
@@ -2100,6 +2142,7 @@ export class MemberView extends ItemView implements HoverParent {
       new Notice(`Failed to update member assignment: ${error.message}`);
     } finally {
       this.pendingMemberUpdates.delete(cardId);
+      // Don't trigger any React re-renders - rely purely on DOM updates
     }
   }
 
@@ -2143,7 +2186,7 @@ export class MemberView extends ItemView implements HoverParent {
             const blockId = tagMatch[4] || ''; // block ID
             updatedLine = `${prefix}${content} ${memberPrefix}${member}${existingTags}${blockId}`;
           } else {
-            // Fallback: just append the member before any block ID
+            // Fallback: just append member before any block ID
             const blockIdMatch = updatedLine.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/);
             if (blockIdMatch) {
               const mainContent = blockIdMatch[1];
@@ -2246,5 +2289,669 @@ export class MemberView extends ItemView implements HoverParent {
   // Public method to check if any updates are pending
   public hasPendingUpdates(): boolean {
     return this.pendingMemberUpdates.size > 0 || this.pendingFileUpdates.size > 0;
+  }
+
+  public hasPendingUpdatesForCard(cardId: string): boolean {
+    return this.pendingMemberUpdates.has(cardId);
+  }
+
+  /**
+   * Helper function to get initials from a member name
+   */
+  private getInitials(name: string): string {
+    return name
+      .split(' ')
+      .map((word) => word.charAt(0).toUpperCase())
+      .join('')
+      .substring(0, 2);
+  }
+
+  /**
+   * Helper function to get tag color from settings (using StateManager like KanbanView)
+   */
+  private getTagColor(tag: string): { color: string; backgroundColor: string } | null {
+    // Get tag colors from plugin global settings (these are global, not per-board)
+    const tagColors = this.plugin.settings['tag-colors'] || [];
+
+    const colorSetting = tagColors.find((tc: any) => {
+      // tagKey is stored with # prefix, so we need to match both ways
+      return tc.tagKey === tag || tc.tagKey === `#${tag}`;
+    });
+
+    return colorSetting
+      ? { color: colorSetting.color, backgroundColor: colorSetting.backgroundColor }
+      : null;
+  }
+
+  /**
+   * Helper function to get tag symbol from settings
+   */
+  private getTagSymbol(tag: string): { symbol: string; hideTag: boolean } | null {
+    // Get tag symbols from plugin global settings (these are global, not per-board)
+    const tagSymbols = this.plugin.settings['tag-symbols'] || [];
+
+    const symbolSetting = tagSymbols.find((ts: any) => {
+      // tagKey is stored with # prefix, so we need to match both ways
+      return ts.data?.tagKey === tag || ts.data?.tagKey === `#${tag}`;
+    });
+
+    return symbolSetting?.data
+      ? { symbol: symbolSetting.data.symbol, hideTag: symbolSetting.data.hideTag }
+      : null;
+  }
+
+  /**
+   * Helper function to get priority style
+   */
+  private getPriorityStyle(priority: 'high' | 'medium' | 'low'): {
+    backgroundColor: string;
+    color: string;
+  } {
+    switch (priority) {
+      case 'high':
+        return { backgroundColor: '#cd1e00', color: '#eeeeee' };
+      case 'medium':
+        return { backgroundColor: '#ff9600', color: '#ffffff' };
+      case 'low':
+        return { backgroundColor: '#008bff', color: '#eeeeee' };
+      default:
+        return { backgroundColor: 'var(--background-modifier-hover)', color: 'var(--text-normal)' };
+    }
+  }
+
+  /**
+   * Update member badges directly in the DOM without triggering React re-renders
+   */
+  private updateMemberBadgesInDOM(cardId: string, newAssignedMembers: string[]): void {
+    try {
+      // Find the card element by data-id
+      const cardElement = this.contentEl.querySelector(`[data-id="${cardId}"]`);
+      if (!cardElement) {
+        debugLog('[MemberView] Card element not found for DOM update:', cardId);
+        return;
+      }
+
+      // Find the assigned members container
+      const membersContainer = cardElement.querySelector('.kanban-plugin__item-assigned-members');
+      if (!membersContainer) {
+        debugLog('[MemberView] Members container not found for DOM update:', cardId);
+        return;
+      }
+
+      // Clear existing member badges
+      membersContainer.innerHTML = '';
+
+      // Add new member badges
+      if (newAssignedMembers && newAssignedMembers.length > 0) {
+        newAssignedMembers.forEach((member, index) => {
+          const memberConfig = this.plugin.settings.teamMemberColors?.[member];
+          const backgroundColor = memberConfig?.background || 'var(--background-modifier-hover)';
+          const textColor =
+            memberConfig?.text ||
+            (memberConfig?.background ? 'var(--text-on-accent)' : 'var(--text-normal)');
+          const initials = this.getInitials(member);
+
+          // Create member badge element
+          const memberBadge = document.createElement('div');
+          memberBadge.className = 'kanban-plugin__item-assigned-member-initials';
+          memberBadge.title = member;
+          memberBadge.style.cssText = `
+            background-color: ${backgroundColor};
+            color: ${textColor};
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            user-select: none;
+          `;
+          memberBadge.textContent = initials;
+
+          // Add click handler for member search
+          memberBadge.addEventListener('click', (e) => {
+            e.preventDefault();
+            const searchQueryTerm = `@@${member}`;
+            const globalSearchPlugin = (this.app as any).internalPlugins.getPluginById(
+              'global-search'
+            );
+            if (globalSearchPlugin) {
+              globalSearchPlugin.instance.openGlobalSearch(searchQueryTerm);
+            }
+          });
+
+          membersContainer.appendChild(memberBadge);
+        });
+      }
+
+      debugLog('[MemberView] Successfully updated member badges in DOM:', {
+        cardId,
+        memberCount: newAssignedMembers.length,
+        members: newAssignedMembers,
+      });
+    } catch (error) {
+      debugLog('[MemberView] Error updating member badges in DOM:', error);
+    }
+  }
+
+  /**
+   * Update tag badges directly in the DOM without triggering React re-renders
+   */
+  private updateTagBadgesInDOM(cardId: string, newTags: string[]): void {
+    try {
+      // Find the card element by data-id
+      const cardElement = this.contentEl.querySelector(`[data-id="${cardId}"]`);
+      if (!cardElement) {
+        debugLog('[MemberView] Card element not found for tag DOM update:', cardId);
+        return;
+      }
+
+      // Find the tags container
+      const tagsContainer = cardElement.querySelector('.kanban-plugin__item-tags');
+      if (!tagsContainer) {
+        debugLog('[MemberView] Tags container not found for DOM update:', cardId);
+        return;
+      }
+
+      // Clear existing tags
+      tagsContainer.innerHTML = '';
+
+      // Add new tags
+      if (newTags && newTags.length > 0) {
+        const hideHashForTagsWithoutSymbols = this.plugin.settings.hideHashForTagsWithoutSymbols;
+        const hideLaneTagDisplay = this.plugin.settings['hide-lane-tag-display'];
+        const hideBoardTagDisplay = this.plugin.settings['hide-board-tag-display'];
+
+        // Filter out lane and board tags if settings are enabled
+        let filteredTags = newTags;
+        if (hideLaneTagDisplay || hideBoardTagDisplay) {
+          const boardName = this.plugin.app.workspace.getActiveFile()?.basename;
+
+          filteredTags = newTags.filter((tag) => {
+            const tagWithoutHash = tag.replace(/^#/, '').toLowerCase();
+
+            // Check if this is a board tag (matches board name)
+            if (hideBoardTagDisplay && boardName) {
+              const boardTagPattern = boardName.toLowerCase().replace(/\s+/g, '-');
+              if (tagWithoutHash === boardTagPattern) {
+                return false; // Hide this tag
+              }
+            }
+
+            // Check if this is a lane tag (matches lane name)
+            if (hideLaneTagDisplay) {
+              const laneNames = ['backlog', 'doing', 'done']; // Common lane names
+              for (const laneName of laneNames) {
+                const laneTagPattern = laneName.toLowerCase().replace(/\s+/g, '-');
+                if (tagWithoutHash === laneTagPattern) {
+                  return false; // Hide this tag
+                }
+              }
+            }
+
+            return true; // Show this tag
+          });
+        }
+
+        filteredTags.forEach((tag) => {
+          // Clean tag name for lookups (remove # if present)
+          const cleanTag = tag.replace(/^#/, '');
+          const tagColor = this.getTagColor(cleanTag);
+          const symbolInfo = this.getTagSymbol(cleanTag);
+
+          // Create tag element
+          const tagElement = document.createElement('span');
+          tagElement.className = 'tag kanban-plugin__item-tag';
+          tagElement.title = tag;
+
+          // Apply styling similar to original React components
+          let styleCSS = 'cursor: pointer;';
+          if (tagColor) {
+            styleCSS += `
+              color: ${tagColor.color} !important;
+              background-color: ${tagColor.backgroundColor} !important;
+              --tag-color: ${tagColor.color};
+              --tag-background: ${tagColor.backgroundColor};
+            `;
+          }
+          tagElement.style.cssText = styleCSS;
+
+          // Set tag content with proper structure
+          if (symbolInfo) {
+            // Create symbol and text spans like React components
+            const symbolSpan = document.createElement('span');
+            symbolSpan.textContent = symbolInfo.symbol;
+            tagElement.appendChild(symbolSpan);
+
+            if (!symbolInfo.hideTag && cleanTag.length > 0) {
+              const textSpan = document.createElement('span');
+              textSpan.style.marginLeft = '0.2em';
+              textSpan.textContent = cleanTag;
+              tagElement.appendChild(textSpan);
+            }
+          } else {
+            // Simple text content
+            let tagContent = '';
+            if (hideHashForTagsWithoutSymbols) {
+              tagContent = cleanTag;
+            } else {
+              tagContent = tag;
+            }
+            tagElement.textContent = tagContent;
+          }
+
+          // Add click handler for tag search
+          tagElement.addEventListener('click', (e) => {
+            e.preventDefault();
+            const globalSearchPlugin = (this.app as any).internalPlugins.getPluginById(
+              'global-search'
+            );
+            if (globalSearchPlugin) {
+              globalSearchPlugin.instance.openGlobalSearch(`tag:${tag}`);
+            }
+          });
+
+          tagsContainer.appendChild(tagElement);
+        });
+      }
+
+      debugLog('[MemberView] Successfully updated tag badges in DOM:', {
+        cardId,
+        tagCount: newTags.length,
+        tags: newTags,
+      });
+    } catch (error) {
+      debugLog('[MemberView] Error updating tag badges in DOM:', error);
+    }
+  }
+
+  /**
+   * Update priority badge directly in the DOM without triggering React re-renders
+   */
+  private updatePriorityBadgeInDOM(
+    cardId: string,
+    newPriority: 'high' | 'medium' | 'low' | null
+  ): void {
+    try {
+      // Find the card element by data-id
+      const cardElement = this.contentEl.querySelector(`[data-id="${cardId}"]`);
+      if (!cardElement) {
+        debugLog('[MemberView] Card element not found for priority DOM update:', cardId);
+        return;
+      }
+
+      // Find all priority containers to ensure we update all instances
+      const priorityContainers = cardElement.querySelectorAll('.kanban-plugin__item-priority');
+      const priorityContainer = priorityContainers[0]; // Use first one for updating
+
+      debugLog('[MemberView] Found priority containers:', {
+        cardId,
+        containerCount: priorityContainers.length,
+        existingTexts: Array.from(priorityContainers).map((el) => el.textContent),
+      });
+
+      if (!newPriority) {
+        // Remove all priority elements if they exist
+        priorityContainers.forEach((container) => container.remove());
+        debugLog('[MemberView] Removed priority badges from DOM:', {
+          cardId,
+          removedCount: priorityContainers.length,
+        });
+        return;
+      }
+
+      const priorityStyle = this.getPriorityStyle(newPriority);
+      let displayPriority = newPriority.charAt(0).toUpperCase() + newPriority.slice(1);
+
+      // Check if we need to abbreviate "Medium" based on assigned members count
+      const membersContainer = cardElement.querySelector('.kanban-plugin__item-assigned-members');
+      const memberCount = membersContainer ? membersContainer.children.length : 0;
+      if (newPriority === 'medium' && memberCount >= 2) {
+        displayPriority = 'Med';
+      }
+
+      if (priorityContainer) {
+        // Update existing priority containers - remove extras and update the first one
+        priorityContainers.forEach((container, index) => {
+          if (index === 0) {
+            // Update the first container
+            container.innerHTML = '';
+            (container as HTMLElement).style.cssText = `
+              background-color: ${priorityStyle.backgroundColor};
+              color: ${priorityStyle.color};
+              padding: 1px 6px;
+              border-radius: 4px;
+              font-size: 0.85em;
+              font-weight: 500;
+              margin-left: -2px;
+              margin-right: 7px;
+              text-transform: capitalize;
+              margin-bottom: 7px;
+            `;
+            container.textContent = displayPriority;
+            (container as HTMLElement).title = `Priority: ${displayPriority}`;
+          } else {
+            // Remove duplicate containers
+            container.remove();
+          }
+        });
+      } else {
+        // Create new priority element
+        const priorityElement = document.createElement('div');
+        priorityElement.className = 'kanban-plugin__item-priority';
+        priorityElement.style.cssText = `
+          background-color: ${priorityStyle.backgroundColor};
+          color: ${priorityStyle.color};
+          padding: 1px 6px;
+          border-radius: 4px;
+          font-size: 0.85em;
+          font-weight: 500;
+          margin-left: -2px;
+          margin-right: 7px;
+          text-transform: capitalize;
+          margin-bottom: 7px;
+        `;
+        priorityElement.textContent = displayPriority;
+        priorityElement.title = `Priority: ${displayPriority}`;
+
+        // Insert priority at the right position (after members, before other elements)
+        const bottomMetadataContainer = cardElement.querySelector(
+          '.kanban-plugin__item-bottom-metadata'
+        );
+        if (bottomMetadataContainer) {
+          const rightContainer = bottomMetadataContainer.querySelector('div:last-child');
+          if (rightContainer) {
+            rightContainer.appendChild(priorityElement);
+          }
+        }
+      }
+
+      debugLog('[MemberView] Successfully updated priority badge in DOM:', {
+        cardId,
+        priority: newPriority,
+        displayPriority,
+        finalText: cardElement.querySelector('.kanban-plugin__item-priority')?.textContent,
+      });
+
+      // Set the text again after 1ms to overwrite any React interference
+      setTimeout(() => {
+        const priorityElement = cardElement.querySelector('.kanban-plugin__item-priority');
+        if (priorityElement) {
+          priorityElement.textContent = displayPriority;
+          debugLog('[MemberView] Re-applied priority text after React interference:', {
+            cardId,
+            displayPriority,
+            finalText: priorityElement.textContent,
+          });
+        }
+      }, 1);
+    } catch (error) {
+      debugLog('[MemberView] Error updating priority badge in DOM:', error);
+    }
+  }
+
+  // Optimistically update tag assignment without triggering refresh
+  async updateTagAssignment(cardId: string, tag: string, isAssigning: boolean) {
+    debugLog('[MemberView] Updating tag assignment:', { cardId, tag, isAssigning });
+
+    // 1. Find the card
+    const card = this.memberCards.find((c) => c.id === cardId);
+    if (!card) {
+      console.error('[MemberView] Card not found for tag update:', cardId);
+      return;
+    }
+
+    // 2. Store original value for potential revert
+    const originalTags = [...(card.tags || [])];
+
+    // 3. Mark card as being updated
+    this.pendingMemberUpdates.add(cardId);
+
+    // 4. Optimistically update the card WITHOUT any rendering
+    const updateSuccess = this.updateSpecificCard(
+      cardId,
+      (c) => {
+        const tagWithHash = tag.startsWith('#') ? tag : `#${tag}`;
+        if (isAssigning) {
+          // Add tag if not already assigned
+          if (!c.tags?.includes(tagWithHash)) {
+            c.tags = [...(c.tags || []), tagWithHash];
+          }
+        } else {
+          // Remove tag if assigned
+          c.tags = (c.tags || []).filter((t) => t !== tagWithHash);
+        }
+      },
+      false // NO RENDERING - user gets feedback from the DOM update
+    );
+
+    if (!updateSuccess) {
+      this.pendingMemberUpdates.delete(cardId);
+      return;
+    }
+
+    // 5. Update the file in background WITHOUT triggering more renders
+    try {
+      await this.updateTagInFileBackground(card, tag, isAssigning);
+      debugLog('[MemberView] Tag assignment update successful');
+    } catch (error) {
+      console.error('[MemberView] Failed to update tag in file:', error);
+
+      // Revert the optimistic update
+      this.updateSpecificCard(
+        cardId,
+        (c) => {
+          c.tags = originalTags;
+        },
+        true
+      );
+
+      new Notice(`Failed to update tag assignment: ${error.message}`);
+    } finally {
+      this.pendingMemberUpdates.delete(cardId);
+      // Don't trigger any React re-renders - rely purely on DOM updates
+    }
+  }
+
+  // Update tag in file without triggering refresh
+  private async updateTagInFileBackground(
+    memberCard: MemberCard,
+    tag: string,
+    isAssigning: boolean
+  ) {
+    const file = this.app.vault.getAbstractFileByPath(memberCard.sourceBoardPath);
+    if (!file || !(file instanceof TFile)) {
+      throw new Error(`Could not find source file: ${memberCard.sourceBoardPath}`);
+    }
+
+    // Track that we're updating this file with a timeout
+    this.trackFileUpdate(file.path);
+
+    try {
+      const content = await this.app.vault.read(file);
+      const lines = content.split('\n');
+      const lineIndex = (memberCard.sourceStartLine || 1) - 1;
+
+      if (lineIndex < 0 || lineIndex >= lines.length) {
+        throw new Error(`Invalid source line number: ${memberCard.sourceStartLine}`);
+      }
+
+      let updatedLine = lines[lineIndex];
+      const tagClean = tag.replace(/^#/, '');
+      const tagWithHash = `#${tagClean}`;
+
+      if (isAssigning) {
+        // Add tag if not already present
+        if (!updatedLine.includes(tagWithHash)) {
+          // Insert tag before any block ID
+          const blockIdMatch = updatedLine.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/);
+          if (blockIdMatch) {
+            const mainContent = blockIdMatch[1];
+            const blockId = blockIdMatch[2] || '';
+            updatedLine = `${mainContent} ${tagWithHash}${blockId}`;
+          } else {
+            updatedLine = updatedLine.trim() + ` ${tagWithHash}`;
+          }
+        }
+      } else {
+        // Remove tag
+        const tagPattern = new RegExp(`\\s*#?${this.escapeRegExpStr(tagClean)}\\b`, 'gi');
+        updatedLine = updatedLine.replace(tagPattern, '');
+      }
+
+      // Clean up multiple spaces
+      updatedLine = updatedLine.replace(/\s+/g, ' ').trim();
+
+      // Only update if the line actually changed
+      if (updatedLine !== lines[lineIndex]) {
+        lines[lineIndex] = updatedLine;
+        const updatedContent = lines.join('\n');
+        await this.app.vault.modify(file, updatedContent);
+        debugLog('[MemberView] Updated tag in file:', {
+          file: file.path,
+          tag,
+          isAssigning,
+          lineIndex,
+          originalLine: lines[lineIndex],
+          updatedLine,
+        });
+      }
+    } catch (error) {
+      // If there's an error, clear the tracking immediately
+      this.clearFileUpdateTracking(file.path);
+      throw error;
+    }
+  }
+
+  // Optimistically update priority without triggering refresh
+  async updatePriorityAssignment(cardId: string, newPriority: 'high' | 'medium' | 'low' | null) {
+    debugLog('[MemberView] Updating priority assignment:', { cardId, newPriority });
+
+    // 1. Find the card
+    const card = this.memberCards.find((c) => c.id === cardId);
+    if (!card) {
+      console.error('[MemberView] Card not found for priority update:', cardId);
+      return;
+    }
+
+    // 2. Store original value for potential revert
+    const originalPriority = card.priority;
+
+    // 3. Mark card as being updated
+    this.pendingMemberUpdates.add(cardId);
+
+    // 4. Optimistically update the card WITHOUT any rendering
+    const updateSuccess = this.updateSpecificCard(
+      cardId,
+      (c) => {
+        c.priority = newPriority || undefined;
+      },
+      false // NO RENDERING - user gets feedback from the DOM update
+    );
+
+    if (!updateSuccess) {
+      this.pendingMemberUpdates.delete(cardId);
+      return;
+    }
+
+    // 5. Update the file in background WITHOUT triggering more renders
+    try {
+      await this.updatePriorityInFileBackground(card, newPriority);
+      debugLog('[MemberView] Priority assignment update successful');
+    } catch (error) {
+      console.error('[MemberView] Failed to update priority in file:', error);
+
+      // Revert the optimistic update
+      this.updateSpecificCard(
+        cardId,
+        (c) => {
+          c.priority = originalPriority;
+        },
+        true
+      );
+
+      new Notice(`Failed to update priority: ${error.message}`);
+    } finally {
+      this.pendingMemberUpdates.delete(cardId);
+      // Don't trigger any React re-renders - rely purely on DOM updates
+    }
+  }
+
+  // Update priority in file without triggering refresh
+  private async updatePriorityInFileBackground(
+    memberCard: MemberCard,
+    newPriority: 'high' | 'medium' | 'low' | null
+  ) {
+    const file = this.app.vault.getAbstractFileByPath(memberCard.sourceBoardPath);
+    if (!file || !(file instanceof TFile)) {
+      throw new Error(`Could not find source file: ${memberCard.sourceBoardPath}`);
+    }
+
+    // Track that we're updating this file with a timeout
+    this.trackFileUpdate(file.path);
+
+    try {
+      const content = await this.app.vault.read(file);
+      const lines = content.split('\n');
+      const lineIndex = (memberCard.sourceStartLine || 1) - 1;
+
+      if (lineIndex < 0 || lineIndex >= lines.length) {
+        throw new Error(`Invalid source line number: ${memberCard.sourceStartLine}`);
+      }
+
+      let updatedLine = lines[lineIndex];
+
+      // Remove existing priority
+      updatedLine = updatedLine.replace(/\s*!(low|medium|high)\b/gi, '');
+
+      // Add new priority if specified
+      if (newPriority) {
+        // Insert priority before any existing tags or block ID
+        const tagMatch = updatedLine.match(
+          /^(\s*-\s*\[[x ]\]\s*)(.*?)(\s*#.*)?(\s*\^[a-zA-Z0-9]+)?$/
+        );
+        if (tagMatch) {
+          const prefix = tagMatch[1]; // "- [ ] " or "- [x] "
+          const content = tagMatch[2]; // main content
+          const existingTags = tagMatch[3] || ''; // existing tags
+          const blockId = tagMatch[4] || ''; // block ID
+          updatedLine = `${prefix}${content} !${newPriority}${existingTags}${blockId}`;
+        } else {
+          // Fallback: just append the priority before any block ID
+          const blockIdMatch = updatedLine.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/);
+          if (blockIdMatch) {
+            const mainContent = blockIdMatch[1];
+            const blockId = blockIdMatch[2] || '';
+            updatedLine = `${mainContent} !${newPriority}${blockId}`;
+          } else {
+            updatedLine = updatedLine.trim() + ` !${newPriority}`;
+          }
+        }
+      }
+
+      // Clean up multiple spaces
+      updatedLine = updatedLine.replace(/\s+/g, ' ').trim();
+
+      // Only update if the line actually changed
+      if (updatedLine !== lines[lineIndex]) {
+        lines[lineIndex] = updatedLine;
+        const updatedContent = lines.join('\n');
+        await this.app.vault.modify(file, updatedContent);
+        debugLog('[MemberView] Updated priority in file:', {
+          file: file.path,
+          newPriority,
+          lineIndex,
+          originalLine: lines[lineIndex],
+          updatedLine,
+        });
+      }
+    } catch (error) {
+      // If there's an error, clear the tracking immediately
+      this.clearFileUpdateTracking(file.path);
+      throw error;
+    }
   }
 }

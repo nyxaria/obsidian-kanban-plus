@@ -1,4 +1,3 @@
-import { debugLog } from '../helpers/debugLogger';
 import classcat from 'classcat';
 import { moment } from 'obsidian';
 import {
@@ -17,6 +16,7 @@ import { useDragHandle } from 'src/dnd/managers/DragManager';
 import { frontmatterKey } from 'src/parsers/common';
 
 import { MemberView } from '../MemberView';
+import { debugLog } from '../helpers/debugLogger';
 import { DateAndTime } from './Item/DateAndTime';
 import { ItemCheckbox } from './Item/ItemCheckbox';
 import { AssignedMembers, ItemContent, Tags } from './Item/ItemContent';

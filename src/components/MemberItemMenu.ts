@@ -313,8 +313,11 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
               .setChecked(isCurrentPriority)
               .onClick(async () => {
                 try {
-                  await updateCardPriority(memberCard, priority.value, view);
-                  onCardUpdate();
+                  await view.updatePriorityAssignment(
+                    memberCard.id,
+                    priority.value as 'high' | 'medium' | 'low' | null
+                  );
+                  // Don't call onCardUpdate() since it will be handled by the tracking system
                 } catch (error) {
                   console.error('[MemberItemMenu] Error updating priority:', error);
                   new Notice(`Failed to update priority: ${error.message}`);
@@ -404,8 +407,13 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
                     .setChecked(isAssigned)
                     .onClick(async () => {
                       try {
-                        await updateCardTags(memberCard, menuTagClean, view);
-                        onCardUpdate();
+                        const isCurrentlyAssigned = cardMetaTagsLower.includes(menuTagLower);
+                        await view.updateTagAssignment(
+                          memberCard.id,
+                          menuTagClean,
+                          !isCurrentlyAssigned
+                        );
+                        // Don't call onCardUpdate() since it will be handled by the tracking system
                       } catch (error) {
                         console.error('[MemberItemMenu] Error updating tags:', error);
                         new Notice(`Failed to update tag: ${error.message}`);
@@ -433,12 +441,12 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
 
                     if (newTagClean) {
                       try {
-                        await updateCardTags(memberCard, newTagClean, view);
+                        await view.updateTagAssignment(memberCard.id, newTagClean, true);
                         // Optimistic update for kanbanBoardTags
                         if (!kanbanBoardTags.includes(newTagClean)) {
                           setKanbanBoardTags((prevTags) => [...prevTags, newTagClean].sort());
                         }
-                        onCardUpdate();
+                        // Don't call onCardUpdate() since it will be handled by the tracking system
                       } catch (error) {
                         console.error('[MemberItemMenu] Error adding new tag:', error);
                         new Notice(`Failed to add tag: ${error.message}`);
