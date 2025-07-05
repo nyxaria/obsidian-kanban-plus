@@ -102,6 +102,7 @@ function MemberLane({
                 {lane.children.length === 0 ? (
                   <div
                     className="member-board-empty-placeholder-wrapper"
+                    data-lane-id={lane.id}
                     onMouseEnter={(e) => {
                       debugLog('[MemberBoard] Empty placeholder hover enter:', lane.id);
                       e.currentTarget.classList.add('hover');
@@ -114,7 +115,9 @@ function MemberLane({
                     <SortPlaceholder accepts={laneAccepts} index={lane.children.length} />
                   </div>
                 ) : (
-                  <SortPlaceholder accepts={laneAccepts} index={lane.children.length} />
+                  <div data-lane-id={lane.id} style={{ display: 'none' }}>
+                    <SortPlaceholder accepts={laneAccepts} index={lane.children.length} />
+                  </div>
                 )}
               </Sortable>
             </ScrollContainer>
