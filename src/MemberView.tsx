@@ -86,6 +86,7 @@ export class MemberView extends ItemView implements HoverParent {
   private isLoading: boolean = false;
   private error: string | null = null;
   private scanRootPath: string = ''; // Added scan root path state
+  private hasInitialScan: boolean = false; // Track if we've done initial scan
 
   // Debug flag - set to false for production to reduce console noise
   private debugDragDrop: boolean = false;
@@ -168,6 +169,102 @@ export class MemberView extends ItemView implements HoverParent {
     return getParentWindow(this.containerEl) as Window & typeof globalThis;
   }
 
+  registerFileChangeEvents() {
+    // Create a debounced function to handle file changes
+    const debouncedFileChange = debounce(
+      (file: TFile) => {
+        if (this.shouldRefreshOnFileChange(file)) {
+          debugLog('[MemberView] File change detected, refreshing cards:', file.path);
+          this.scanMemberCards();
+        }
+      },
+      1000, // 1 second debounce
+      true
+    );
+
+    // Register file modification events
+    this.registerEvent(
+      this.app.vault.on('modify', (file: TFile) => {
+        if (file instanceof TFile) {
+          debouncedFileChange(file);
+        }
+      })
+    );
+
+    // Register file creation events
+    this.registerEvent(
+      this.app.vault.on('create', (file: TAbstractFile) => {
+        if (file instanceof TFile) {
+          debouncedFileChange(file);
+        }
+      })
+    );
+
+    // Register file deletion events
+    this.registerEvent(
+      this.app.vault.on('delete', (file: TAbstractFile) => {
+        if (file instanceof TFile) {
+          debouncedFileChange(file);
+        }
+      })
+    );
+
+    // Register file rename events
+    this.registerEvent(
+      this.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
+        if (file instanceof TFile) {
+          debouncedFileChange(file);
+        }
+      })
+    );
+
+    // Register metadata changes (for frontmatter changes)
+    this.registerEvent(
+      this.app.metadataCache.on('changed', (file: TFile) => {
+        if (file instanceof TFile) {
+          debouncedFileChange(file);
+        }
+      })
+    );
+  }
+
+  shouldRefreshOnFileChange(file: TFile): boolean {
+    // Only refresh if we have a selected member and the view is active
+    if (!this.selectedMember || (this.leaf as any).detached) {
+      return false;
+    }
+
+    // Only refresh if this view is currently active (visible to the user)
+    if (this.app.workspace.activeLeaf !== this.leaf) {
+      debugLog('[MemberView] View is not active, skipping refresh for file:', file.path);
+      return false;
+    }
+
+    // Check if file is a markdown file
+    if (file.extension !== 'md') {
+      return false;
+    }
+
+    // Check if file is in the scan root path (if specified)
+    if (this.scanRootPath && this.scanRootPath.trim() !== '') {
+      const isInScanPath =
+        file.path.startsWith(this.scanRootPath + '/') || file.parent?.path === this.scanRootPath;
+      if (!isInScanPath) {
+        return false;
+      }
+    }
+
+    // Check if file has kanban frontmatter (synchronously check cache first)
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (cache?.frontmatter && cache.frontmatter['kanban-plugin']) {
+      return true;
+    }
+
+    // If we can't determine from cache, assume it might be relevant
+    // (This is a fallback to prevent missing updates)
+    return true;
+  }
+
   getCleanTitleForDisplay(titleRaw: string): string {
     if (!titleRaw) return '';
 
@@ -208,12 +305,15 @@ export class MemberView extends ItemView implements HoverParent {
       this.selectedMember = teamMembers[0];
     }
 
-    // Register for active leaf changes to refresh when tabbing in/out
+    // Register for file change events to refresh when kanban content changes
+    this.registerFileChangeEvents();
+
+    // Register for active leaf changes to do initial scan when view becomes active for first time
     this.registerEvent(
       this.app.workspace.on('active-leaf-change', (leaf) => {
-        if (leaf === this.leaf && this.selectedMember) {
-          // This view just became active - refresh the cards
-          debugLog('[MemberView] View became active, refreshing cards');
+        if (leaf === this.leaf && this.selectedMember && !this.hasInitialScan) {
+          // Only scan if this is the first time the view becomes active and we haven't scanned yet
+          debugLog('[MemberView] View became active for first time, performing initial scan');
           this.scanMemberCards();
         }
       })
@@ -309,12 +409,14 @@ export class MemberView extends ItemView implements HoverParent {
     await super.setState(state, result);
 
     // Handle member selection and scan root path from state
-    if (state?.selectedMember) {
+    if (state?.selectedMember && state.selectedMember !== this.selectedMember) {
       this.selectedMember = state.selectedMember;
+      this.hasInitialScan = false; // Reset initial scan flag when member changes from state
     }
 
-    if (state?.scanRootPath !== undefined) {
+    if (state?.scanRootPath !== undefined && state.scanRootPath !== this.scanRootPath) {
       this.scanRootPath = state.scanRootPath;
+      this.hasInitialScan = false; // Reset initial scan flag when scan root changes from state
     }
 
     // Only render if contentEl is ready
@@ -419,6 +521,7 @@ export class MemberView extends ItemView implements HoverParent {
 
     if (!this.selectedMember) {
       this.memberCards = [];
+      this.hasInitialScan = true; // Mark as scanned even if no member selected
       this.setReactState({});
       return;
     }
@@ -502,11 +605,13 @@ export class MemberView extends ItemView implements HoverParent {
 
       this.memberCards = allCards;
       this.isLoading = false;
+      this.hasInitialScan = true; // Mark as scanned successfully
       this.setReactState({});
     } catch (e) {
       console.error('[MemberView] Error scanning member cards:', e);
       this.error = `Error scanning cards: ${e.message}`;
       this.isLoading = false;
+      this.hasInitialScan = true; // Mark as scanned even if there was an error
       this.setReactState({});
     }
   }
@@ -1107,10 +1212,12 @@ export class MemberView extends ItemView implements HoverParent {
             availableDirectories: this.getAvailableKanbanDirectories(),
             onMemberChange: (member: string) => {
               this.selectedMember = member;
+              this.hasInitialScan = false; // Reset initial scan flag when member changes
               this.scanMemberCards();
             },
             onScanRootChange: (path: string) => {
               this.scanRootPath = path;
+              this.hasInitialScan = false; // Reset initial scan flag when scan root changes
               if (this.selectedMember) {
                 this.scanMemberCards();
               }
