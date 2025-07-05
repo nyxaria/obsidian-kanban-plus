@@ -59,7 +59,7 @@ interface MemberCard {
   blockId?: string;
   assignedMembers: string[];
   tags: string[];
-  date?: any;
+  date?: moment.Moment;
   priority?: string;
   depth?: number; // Nesting depth for multi-layer lists
 }
@@ -488,6 +488,13 @@ export class MemberView extends ItemView implements HoverParent {
     return state;
   }
 
+  public refreshHeader() {
+    debugLog(`[MemberView] refreshHeader: Updating tab title for member: ${this.selectedMember}`);
+    this.app.workspace.trigger('layout-change');
+    this.app.workspace.trigger('layout-ready');
+    (this.leaf as any).updateHeader?.();
+  }
+
   setViewState<K extends keyof KanbanViewSettings>(
     key: K,
     val?: KanbanViewSettings[K],
@@ -841,20 +848,12 @@ export class MemberView extends ItemView implements HoverParent {
 
       const checked = listItemNode.checked === true;
 
-      // Use KanbanView approach: get the content boundary and extract content
-      const startNode = listItemNode.children[0];
-      const endNode = listItemNode.children[listItemNode.children.length - 1];
+      // Use full list item boundaries to capture complete content including block ID
+      // The getNodeContentBoundary function excludes block IDs, so we need the full item boundaries
+      const fullListItemStart = listItemNode.position.start.offset;
+      const fullListItemEnd = listItemNode.position.end.offset;
 
-      const start =
-        startNode.type === 'paragraph'
-          ? getNodeContentBoundary(startNode).start
-          : startNode.position.start.offset;
-      const end =
-        endNode.type === 'paragraph'
-          ? getNodeContentBoundary(endNode).end
-          : endNode.position.end.offset;
-
-      const itemBoundary = { start, end };
+      const itemBoundary = { start: fullListItemStart, end: fullListItemEnd };
       let titleRaw = getStringFromBoundary(fileContent, itemBoundary);
 
       // Handle empty task (same as KanbanView)
@@ -875,25 +874,12 @@ export class MemberView extends ItemView implements HoverParent {
       //   selectedMember: this.selectedMember,
       // });
 
-      // Extract block ID - look for ^blockId anywhere in the content
+      // Extract block ID - look for ^blockId anywhere in the content BEFORE processing
       const blockIdMatch = titleRaw.match(/\^([a-zA-Z0-9]+)/);
       const blockId = blockIdMatch ? blockIdMatch[1] : undefined;
 
-      // debugLog('[MemberView] Block ID extraction debug:', {
-      //   titleRaw: titleRaw,
-      //   blockIdMatch: blockIdMatch,
-      //   extractedBlockId: blockId,
-      //   regexPattern: '/\\^([a-zA-Z0-9]+)/',
-      // });
-
-      // // PROMINENT DEBUG: Show blockId extraction result
-      // if (blockId) {
-      //   debugLog(
-      //     `🔍 [MemberView] BLOCK ID FOUND: "${blockId}" in card: "${titleRaw.substring(0, 50)}..."`
-      //   );
-      // } else {
-      //   debugLog(`❌ [MemberView] NO BLOCK ID FOUND in card: "${titleRaw.substring(0, 50)}..."`);
-      // }
+      // Process titleRaw like KanbanView does - AFTER extracting block ID
+      const processedTitleRaw = removeBlockId(dedentNewLines(replaceBrs(titleRaw)));
 
       // Extract assigned members from the entire item tree (including nested items)
       const assignedMembers = this.extractMembersFromItemTree(listItemNode);
@@ -919,9 +905,6 @@ export class MemberView extends ItemView implements HoverParent {
         const cleanTag = tag.replace(/^#/, '').toLowerCase();
         return cleanTag === 'doing';
       });
-
-      // Process titleRaw like KanbanView does
-      const processedTitleRaw = removeBlockId(dedentNewLines(replaceBrs(titleRaw)));
 
       // Extract dates and times using regex patterns like regular parsing
       let dateStr: string | undefined;
@@ -994,6 +977,10 @@ export class MemberView extends ItemView implements HoverParent {
         // Add date information extracted from AST
         dateStr,
         timeStr,
+        // Create proper date moment object for menu detection
+        date: dateStr
+          ? moment(dateStr, this.plugin.settings['date-format'] || 'YYYY-MM-DD')
+          : undefined,
       };
 
       // debugLog('[MemberView] Created member card:', {
@@ -1294,6 +1281,8 @@ export class MemberView extends ItemView implements HoverParent {
               this.hasInitialScan = false; // Reset initial scan flag when member changes
               // Save to session
               this.plugin.sessionManager.setMemberBoardSession({ selectedMember: member });
+              // Update tab title to reflect the new selected member
+              this.refreshHeader();
               this.scanMemberCards();
             },
             onScanRootChange: (path: string) => {
@@ -2123,12 +2112,13 @@ export class MemberView extends ItemView implements HoverParent {
       case 'doing':
         // Add "doing" tag if not present in the current line
         if (!currentLineHasDoing) {
-          // Find the end of the task content (before any existing tags or block ID)
+          // Updated regex to handle indented/nested list items
+          // This pattern allows for leading whitespace/tabs before the dash and checkbox
           const tagMatch = updatedLine.match(
             /^(\s*-\s*\[[x ]\]\s*)(.*?)(\s*#.*)?(\s*\^[a-zA-Z0-9]+)?$/
           );
           if (tagMatch) {
-            const prefix = tagMatch[1]; // "- [ ] " or "- [x] "
+            const prefix = tagMatch[1]; // "    - [ ] " or "\t- [x] " etc.
             const content = tagMatch[2]; // main content
             const existingTags = tagMatch[3] || ''; // existing tags
             const blockId = tagMatch[4] || ''; // block ID
@@ -2151,8 +2141,11 @@ export class MemberView extends ItemView implements HoverParent {
         // Remove "doing" tag if present in the current line
         if (currentLineHasDoing) {
           updatedLine = updatedLine.replace(/\s*#doing\b/g, '');
-          // Clean up excessive spaces but preserve newlines
-          updatedLine = updatedLine.replace(/[ \t]+/g, ' ').replace(/[ \t]+$/gm, '');
+          // Clean up excessive spaces but preserve leading indentation
+          const leadingWhitespace = updatedLine.match(/^\s*/)?.[0] || '';
+          const restOfLine = updatedLine.substring(leadingWhitespace.length);
+          updatedLine =
+            leadingWhitespace + restOfLine.replace(/[ \t]+/g, ' ').replace(/[ \t]+$/gm, '');
         }
         break;
 
@@ -2166,8 +2159,11 @@ export class MemberView extends ItemView implements HoverParent {
         // Remove "doing" tag if present in the current line
         if (currentLineHasDoing) {
           updatedLine = updatedLine.replace(/\s*#doing\b/g, '');
-          // Clean up excessive spaces but preserve newlines
-          updatedLine = updatedLine.replace(/[ \t]+/g, ' ').replace(/[ \t]+$/gm, '');
+          // Clean up excessive spaces but preserve leading indentation
+          const leadingWhitespace = updatedLine.match(/^\s*/)?.[0] || '';
+          const restOfLine = updatedLine.substring(leadingWhitespace.length);
+          updatedLine =
+            leadingWhitespace + restOfLine.replace(/[ \t]+/g, ' ').replace(/[ \t]+$/gm, '');
         }
 
         // TRIGGER AUTO-MOVE AUTOMATION: If auto-move-done-to-lane is enabled
@@ -2414,37 +2410,151 @@ export class MemberView extends ItemView implements HoverParent {
     try {
       const content = await this.app.vault.read(file);
       const lines = content.split('\n');
-      const lineIndex = (memberCard.sourceStartLine || 1) - 1;
+      const memberPrefix = '@@';
+      const memberTag = `${memberPrefix}${member}`;
 
-      if (lineIndex < 0 || lineIndex >= lines.length) {
-        throw new Error(`Invalid source line number: ${memberCard.sourceStartLine}`);
+      debugLog('[MemberView] updateMemberInFileBackground debug:', {
+        cardId: memberCard.id,
+        cardTitle: memberCard.title,
+        member,
+        isAssigning,
+        sourceStartLine: memberCard.sourceStartLine,
+        memberTag,
+        blockId: memberCard.blockId,
+      });
+
+      // Find the correct line that contains the member assignment
+      let targetLineIndex = -1;
+      let targetLine = '';
+
+      if (isAssigning) {
+        // For assignment, use the stored sourceStartLine if it doesn't already have the member
+        const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+        if (storedLineIndex >= 0 && storedLineIndex < lines.length) {
+          const storedLine = lines[storedLineIndex];
+          if (!storedLine.includes(memberTag)) {
+            targetLineIndex = storedLineIndex;
+            targetLine = storedLine;
+          }
+        }
+      } else {
+        // For removal, search for the line that actually contains this member assignment
+        // Start searching from the sourceStartLine and look within a reasonable range (e.g., 10 lines)
+        const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+        const searchStartIndex = Math.max(0, storedLineIndex);
+        const searchEndIndex = Math.min(lines.length, storedLineIndex + 10); // Search within 10 lines of the card
+
+        debugLog('[MemberView] Searching for member in range:', {
+          storedLineIndex,
+          searchStartIndex,
+          searchEndIndex,
+          memberTag,
+          blockId: memberCard.blockId,
+        });
+
+        // First, try to find it within the expected range
+        for (let i = searchStartIndex; i < searchEndIndex; i++) {
+          if (lines[i].includes(memberTag)) {
+            // Verify this is actually a task line (contains checkbox)
+            if (/\s*-\s*\[[x ]\]/.test(lines[i])) {
+              targetLineIndex = i;
+              targetLine = lines[i];
+              debugLog('[MemberView] Found member in expected range:', {
+                lineIndex: i,
+                line: lines[i].substring(0, 100),
+              });
+              break;
+            }
+          }
+        }
+
+        // If we have a blockId, we can also try to find the card by its blockId and then search around it
+        if (targetLineIndex === -1 && memberCard.blockId) {
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(`^${memberCard.blockId}`)) {
+              // Found the line with the blockId, now search for member assignment in this area
+              const blockIdLineIndex = i;
+              const localSearchStart = Math.max(0, blockIdLineIndex);
+              const localSearchEnd = Math.min(lines.length, blockIdLineIndex + 10);
+
+              debugLog('[MemberView] Found blockId, searching around it:', {
+                blockIdLineIndex,
+                localSearchStart,
+                localSearchEnd,
+                blockIdLine: lines[i].substring(0, 100),
+              });
+
+              for (let j = localSearchStart; j < localSearchEnd; j++) {
+                if (lines[j].includes(memberTag)) {
+                  // Verify this is actually a task line (contains checkbox)
+                  if (/\s*-\s*\[[x ]\]/.test(lines[j])) {
+                    targetLineIndex = j;
+                    targetLine = lines[j];
+                    debugLog('[MemberView] Found member near blockId:', {
+                      lineIndex: j,
+                      line: lines[j].substring(0, 100),
+                    });
+                    break;
+                  }
+                }
+              }
+              break; // Stop after finding the blockId
+            }
+          }
+        }
+
+        // If still not found, fall back to the stored line (might be a parsing issue)
+        if (targetLineIndex === -1) {
+          const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+          if (storedLineIndex >= 0 && storedLineIndex < lines.length) {
+            targetLineIndex = storedLineIndex;
+            targetLine = lines[storedLineIndex];
+            debugLog('[MemberView] Falling back to stored line:', {
+              storedLineIndex,
+              line: lines[storedLineIndex].substring(0, 100),
+            });
+          }
+        }
       }
 
-      let updatedLine = lines[lineIndex];
-      const memberPrefix = '@@';
+      if (targetLineIndex === -1 || targetLineIndex >= lines.length) {
+        throw new Error(
+          `Could not find target line for member update: ${memberCard.sourceStartLine}`
+        );
+      }
+
+      debugLog('[MemberView] Found target line for member update:', {
+        targetLineIndex,
+        targetLine: targetLine.substring(0, 100),
+        action: isAssigning ? 'assigning' : 'removing',
+        memberTag,
+      });
+
+      let updatedLine = targetLine;
 
       if (isAssigning) {
         // Add member if not already present
-        if (!updatedLine.includes(`${memberPrefix}${member}`)) {
-          // Insert member before any existing tags or block ID
+        if (!updatedLine.includes(memberTag)) {
+          // Updated regex to handle indented/nested list items
+          // This pattern allows for leading whitespace/tabs before the dash and checkbox
           const tagMatch = updatedLine.match(
             /^(\s*-\s*\[[x ]\]\s*)(.*?)(\s*#.*)?(\s*\^[a-zA-Z0-9]+)?$/
           );
           if (tagMatch) {
-            const prefix = tagMatch[1]; // "- [ ] " or "- [x] "
+            const prefix = tagMatch[1]; // "    - [ ] " or "\t- [x] " etc.
             const content = tagMatch[2]; // main content
             const existingTags = tagMatch[3] || ''; // existing tags
             const blockId = tagMatch[4] || ''; // block ID
-            updatedLine = `${prefix}${content} ${memberPrefix}${member}${existingTags}${blockId}`;
+            updatedLine = `${prefix}${content} ${memberTag}${existingTags}${blockId}`;
           } else {
             // Fallback: just append member before any block ID
             const blockIdMatch = updatedLine.match(/^(.*?)(\s*\^[a-zA-Z0-9]+)?$/);
             if (blockIdMatch) {
               const mainContent = blockIdMatch[1];
               const blockId = blockIdMatch[2] || '';
-              updatedLine = `${mainContent} ${memberPrefix}${member}${blockId}`;
+              updatedLine = `${mainContent} ${memberTag}${blockId}`;
             } else {
-              updatedLine = updatedLine.trim() + ` ${memberPrefix}${member}`;
+              updatedLine = updatedLine.trim() + ` ${memberTag}`;
             }
           }
         }
@@ -2457,22 +2567,26 @@ export class MemberView extends ItemView implements HoverParent {
         updatedLine = updatedLine.replace(memberPattern, '');
       }
 
-      // Clean up multiple spaces
-      updatedLine = updatedLine.replace(/\s+/g, ' ').trim();
+      // Clean up multiple spaces but preserve leading indentation
+      const leadingWhitespace = updatedLine.match(/^\s*/)?.[0] || '';
+      const restOfLine = updatedLine.substring(leadingWhitespace.length);
+      updatedLine = leadingWhitespace + restOfLine.replace(/\s+/g, ' ').trim();
 
       // Only update if the line actually changed
-      if (updatedLine !== lines[lineIndex]) {
-        lines[lineIndex] = updatedLine;
+      if (updatedLine !== lines[targetLineIndex]) {
+        lines[targetLineIndex] = updatedLine;
         const updatedContent = lines.join('\n');
         await this.app.vault.modify(file, updatedContent);
         debugLog('[MemberView] Updated member in file:', {
           file: file.path,
           member,
           isAssigning,
-          lineIndex,
-          originalLine: lines[lineIndex],
+          targetLineIndex,
+          originalLine: targetLine,
           updatedLine,
         });
+      } else {
+        debugLog('[MemberView] No changes needed for member update');
       }
     } catch (error) {
       // If there's an error, clear the tracking immediately
@@ -2608,6 +2722,100 @@ export class MemberView extends ItemView implements HoverParent {
       default:
         return { backgroundColor: 'var(--background-modifier-hover)', color: 'var(--text-normal)' };
     }
+  }
+
+  /**
+   * Helper function to get date color based on settings (same logic as React components)
+   */
+  private getDateColor(date: moment.Moment): { color: string; backgroundColor: string } | null {
+    const dateColors = this.plugin.settings['date-colors'] || [];
+
+    // Use the same logic as the main getDateColorFn from helpers.ts
+    const orders = dateColors.map<[moment.Moment | 'today' | 'before' | 'after', any]>((c: any) => {
+      if (c.isToday) {
+        return ['today', c];
+      }
+      if (c.isBefore) {
+        return ['before', c];
+      }
+      if (c.isAfter) {
+        return ['after', c];
+      }
+      const modifier = c.direction === 'after' ? 1 : -1;
+      const date = moment();
+      date.add(c.distance * modifier, c.unit);
+      return [date, c];
+    });
+
+    const now = moment();
+    orders.sort((a, b) => {
+      if (a[0] === 'today') {
+        return typeof b[0] === 'string' ? -1 : (b[0] as moment.Moment).isSame(now, 'day') ? 1 : -1;
+      }
+      if (b[0] === 'today') {
+        return typeof a[0] === 'string' ? 1 : (a[0] as moment.Moment).isSame(now, 'day') ? -1 : 1;
+      }
+      if (a[0] === 'after') return 1;
+      if (a[0] === 'before') return 1;
+      if (b[0] === 'after') return -1;
+      if (b[0] === 'before') return -1;
+      return (a[0] as moment.Moment).isBefore(b[0] as moment.Moment) ? -1 : 1;
+    });
+
+    const result = orders.find((o) => {
+      const key = o[1];
+      if (key.isToday) return date.isSame(now, 'day');
+      if (key.isAfter) return date.isAfter(now);
+      if (key.isBefore) return date.isBefore(now);
+
+      let granularity: moment.unitOfTime.StartOf = 'days';
+      if (key.unit === 'hours') {
+        granularity = 'hours';
+      }
+
+      if (key.direction === 'before') {
+        return date.isBetween(o[0], now, granularity, '[]');
+      }
+      return date.isBetween(now, o[0], granularity, '[]');
+    });
+
+    return result ? result[1] : null;
+  }
+
+  /**
+   * Helper function to get relative date text matching React component logic
+   */
+  private getRelativeDateText(date: moment.Moment): string {
+    const now = moment();
+    const startOfToday = moment().startOf('day');
+    const startOfTomorrow = moment().add(1, 'day').startOf('day');
+    const startOfYesterday = moment().subtract(1, 'day').startOf('day');
+    const dateStartOfDay = moment(date).startOf('day');
+
+    // Check if it's today, tomorrow, or yesterday
+    if (dateStartOfDay.isSame(startOfToday)) {
+      return 'today';
+    } else if (dateStartOfDay.isSame(startOfTomorrow)) {
+      return 'tomorrow';
+    } else if (dateStartOfDay.isSame(startOfYesterday)) {
+      return 'yesterday';
+    }
+
+    // For other dates, use moment's relative time but customize the format
+    const diffDays = dateStartOfDay.diff(startOfToday, 'days');
+
+    if (Math.abs(diffDays) < 7) {
+      // Within a week - use "in X days" or "X days ago"
+      if (diffDays > 0) {
+        return `in ${diffDays} day${diffDays > 1 ? 's' : ''}`;
+      } else {
+        const absDays = Math.abs(diffDays);
+        return `${absDays} day${absDays > 1 ? 's' : ''} ago`;
+      }
+    }
+
+    // For dates more than a week away, use moment's built-in relative time
+    return date.fromNow();
   }
 
   /**
@@ -2820,6 +3028,180 @@ export class MemberView extends ItemView implements HoverParent {
   }
 
   /**
+   * Update date display directly in the DOM without triggering React re-renders
+   */
+  private updateDateDisplayInDOM(cardId: string, newDate: moment.Moment | undefined): void {
+    try {
+      // Find the card element by data-id
+      const cardElement = this.contentEl.querySelector(`[data-id="${cardId}"]`);
+      if (!cardElement) {
+        debugLog('[MemberView] Card element not found for date DOM update:', cardId);
+        return;
+      }
+
+      // Find the existing date lozenge (React component styling)
+      const existingDateLozenge = cardElement.querySelector(
+        '.kanban-plugin__item-metadata-date-lozenge'
+      );
+
+      if (!newDate) {
+        // Remove date display if date was removed
+        if (existingDateLozenge) {
+          existingDateLozenge.remove();
+        }
+        debugLog('[MemberView] Removed date display from DOM:', { cardId });
+        return;
+      }
+
+      // Format the date for display - match React component logic
+      const dateFormat = this.plugin.settings['date-display-format'] || 'YYYY-MM-DD';
+      const formattedDate = newDate.format(dateFormat);
+      const shouldShowRelativeDate = this.plugin.settings['show-relative-date'];
+
+      let displayText = formattedDate;
+      let titleText = `Due: ${formattedDate}`;
+
+      if (shouldShowRelativeDate) {
+        // Use the same relative date logic as React components
+        displayText = this.getRelativeDateText(newDate);
+        titleText = `Due: ${formattedDate} (${displayText})`;
+      }
+
+      // Use the same date color logic as React components
+      const dateColorResult = this.getDateColor(newDate);
+
+      // Apply date colors from settings, or use fallback colors
+      let dateColor: string;
+      let backgroundColor: string;
+
+      if (dateColorResult) {
+        // Use configured date colors
+        dateColor = dateColorResult.color;
+        backgroundColor = dateColorResult.backgroundColor || 'rgba(0, 0, 0, 0.02)';
+      } else {
+        // Use fallback coloring if no date colors are configured (same as React components)
+        let fallbackColor = 'var(--text-muted)';
+        const fallbackBackground = 'transparent';
+
+        if (newDate.isValid()) {
+          const now = moment();
+          if (newDate.isSame(now, 'day')) {
+            // Today - blue
+            fallbackColor = 'var(--color-blue)';
+          } else if (newDate.isBefore(now, 'day')) {
+            // Past - red
+            fallbackColor = 'var(--color-red)';
+          } else {
+            // Future - green
+            fallbackColor = 'var(--color-green)';
+          }
+        }
+
+        dateColor = fallbackColor;
+        backgroundColor = fallbackBackground;
+      }
+
+      if (existingDateLozenge) {
+        // Update existing date lozenge - clear content completely first
+        existingDateLozenge.innerHTML = '';
+
+        // Create fresh inner span for text
+        const textSpan = document.createElement('span');
+        textSpan.style.cursor = 'pointer';
+        textSpan.textContent = displayText;
+        existingDateLozenge.appendChild(textSpan);
+
+        (existingDateLozenge as HTMLElement).title = titleText;
+        (existingDateLozenge as HTMLElement).style.color = dateColor;
+        (existingDateLozenge as HTMLElement).style.backgroundColor = backgroundColor;
+      } else {
+        // Create new date lozenge matching React component styling
+        const dateElement = document.createElement('div');
+        dateElement.className = 'kanban-plugin__item-metadata-date-lozenge';
+        dateElement.setAttribute('aria-label', 'Search date');
+        dateElement.title = titleText;
+        dateElement.style.cssText = `
+          cursor: pointer;
+          padding: 1px 5px;
+          border-radius: 3px;
+          font-size: 0.9em;
+          display: inline-flex;
+          align-items: center;
+          background-color: ${backgroundColor};
+          color: ${dateColor};
+          flex-grow: 0;
+          flex-shrink: 0;
+          margin-right: 0px;
+          margin-left: 4px;
+          margin-bottom: 7px;
+        `;
+
+        // Create inner span for text
+        const textSpan = document.createElement('span');
+        textSpan.style.cursor = 'pointer';
+        textSpan.textContent = displayText;
+        dateElement.appendChild(textSpan);
+
+        // Add click handler for date search
+        dateElement.addEventListener('click', (e) => {
+          e.preventDefault();
+          const searchQueryTerm = `path:"${cardId}" /@\\{.*\\}/`;
+          const globalSearchPlugin = (this.app as any).internalPlugins.getPluginById(
+            'global-search'
+          );
+          if (globalSearchPlugin) {
+            globalSearchPlugin.instance.openGlobalSearch(searchQueryTerm);
+          }
+        });
+
+        // Insert into the left side of bottom metadata (same as React components)
+        const bottomMetadata = cardElement.querySelector('.kanban-plugin__item-bottom-metadata');
+        if (bottomMetadata) {
+          const leftContainer = bottomMetadata.querySelector('div:first-child');
+          if (leftContainer) {
+            leftContainer.appendChild(dateElement);
+          } else {
+            // Create left container if it doesn't exist
+            const newLeftContainer = document.createElement('div');
+            newLeftContainer.style.cssText = 'display: flex; align-items: flex-end;';
+            newLeftContainer.appendChild(dateElement);
+            bottomMetadata.insertBefore(newLeftContainer, bottomMetadata.firstChild);
+          }
+        }
+      }
+
+      debugLog('[MemberView] Successfully updated date display in DOM:', {
+        cardId,
+        formattedDate,
+        displayText,
+        shouldShowRelativeDate,
+      });
+
+      // Set the date text again after 1ms to overwrite any React interference
+      setTimeout(() => {
+        const dateElement = cardElement.querySelector('.kanban-plugin__item-metadata-date-lozenge');
+        if (dateElement) {
+          // Clear and recreate content completely to prevent text appending
+          dateElement.innerHTML = '';
+
+          const textSpan = document.createElement('span');
+          textSpan.style.cursor = 'pointer';
+          textSpan.textContent = displayText;
+          dateElement.appendChild(textSpan);
+
+          debugLog('[MemberView] Re-applied date text after React interference:', {
+            cardId,
+            displayText,
+            finalText: textSpan.textContent,
+          });
+        }
+      }, 1);
+    } catch (error) {
+      debugLog('[MemberView] Error updating date display in DOM:', error);
+    }
+  }
+
+  /**
    * Update priority badge directly in the DOM without triggering React re-renders
    */
   private updatePriorityBadgeInDOM(
@@ -3024,15 +3406,125 @@ export class MemberView extends ItemView implements HoverParent {
     try {
       const content = await this.app.vault.read(file);
       const lines = content.split('\n');
-      const lineIndex = (memberCard.sourceStartLine || 1) - 1;
-
-      if (lineIndex < 0 || lineIndex >= lines.length) {
-        throw new Error(`Invalid source line number: ${memberCard.sourceStartLine}`);
-      }
-
-      let updatedLine = lines[lineIndex];
       const tagClean = tag.replace(/^#/, '');
       const tagWithHash = `#${tagClean}`;
+
+      debugLog('[MemberView] updateTagInFileBackground debug:', {
+        cardId: memberCard.id,
+        cardTitle: memberCard.title,
+        tag,
+        isAssigning,
+        sourceStartLine: memberCard.sourceStartLine,
+        tagWithHash,
+        blockId: memberCard.blockId,
+      });
+
+      // Find the correct line that contains the tag assignment
+      let targetLineIndex = -1;
+      let targetLine = '';
+
+      if (isAssigning) {
+        // For assignment, use the stored sourceStartLine if it doesn't already have the tag
+        const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+        if (storedLineIndex >= 0 && storedLineIndex < lines.length) {
+          const storedLine = lines[storedLineIndex];
+          if (!storedLine.includes(tagWithHash)) {
+            targetLineIndex = storedLineIndex;
+            targetLine = storedLine;
+          }
+        }
+      } else {
+        // For removal, search for the line that actually contains this tag
+        // Start searching from the sourceStartLine and look within a reasonable range (e.g., 10 lines)
+        const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+        const searchStartIndex = Math.max(0, storedLineIndex);
+        const searchEndIndex = Math.min(lines.length, storedLineIndex + 10); // Search within 10 lines of the card
+
+        debugLog('[MemberView] Searching for tag in range:', {
+          storedLineIndex,
+          searchStartIndex,
+          searchEndIndex,
+          tagWithHash,
+          blockId: memberCard.blockId,
+        });
+
+        // First, try to find it within the expected range
+        for (let i = searchStartIndex; i < searchEndIndex; i++) {
+          if (lines[i].includes(tagWithHash)) {
+            // Verify this is actually a task line (contains checkbox)
+            if (/\s*-\s*\[[x ]\]/.test(lines[i])) {
+              targetLineIndex = i;
+              targetLine = lines[i];
+              debugLog('[MemberView] Found tag in expected range:', {
+                lineIndex: i,
+                line: lines[i].substring(0, 100),
+              });
+              break;
+            }
+          }
+        }
+
+        // If we have a blockId, we can also try to find the card by its blockId and then search around it
+        if (targetLineIndex === -1 && memberCard.blockId) {
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(`^${memberCard.blockId}`)) {
+              // Found the line with the blockId, now search for tag in this area
+              const blockIdLineIndex = i;
+              const localSearchStart = Math.max(0, blockIdLineIndex);
+              const localSearchEnd = Math.min(lines.length, blockIdLineIndex + 10);
+
+              debugLog('[MemberView] Found blockId, searching around it for tag:', {
+                blockIdLineIndex,
+                localSearchStart,
+                localSearchEnd,
+                blockIdLine: lines[i].substring(0, 100),
+              });
+
+              for (let j = localSearchStart; j < localSearchEnd; j++) {
+                if (lines[j].includes(tagWithHash)) {
+                  // Verify this is actually a task line (contains checkbox)
+                  if (/\s*-\s*\[[x ]\]/.test(lines[j])) {
+                    targetLineIndex = j;
+                    targetLine = lines[j];
+                    debugLog('[MemberView] Found tag near blockId:', {
+                      lineIndex: j,
+                      line: lines[j].substring(0, 100),
+                    });
+                    break;
+                  }
+                }
+              }
+              break; // Stop after finding the blockId
+            }
+          }
+        }
+
+        // If still not found, fall back to the stored line (might be a parsing issue)
+        if (targetLineIndex === -1) {
+          const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+          if (storedLineIndex >= 0 && storedLineIndex < lines.length) {
+            targetLineIndex = storedLineIndex;
+            targetLine = lines[storedLineIndex];
+            debugLog('[MemberView] Falling back to stored line for tag:', {
+              storedLineIndex,
+              line: lines[storedLineIndex].substring(0, 100),
+            });
+          }
+        }
+      }
+
+      if (targetLineIndex === -1 || targetLineIndex >= lines.length) {
+        throw new Error(`Could not find target line for tag update: ${memberCard.sourceStartLine}`);
+      }
+
+      debugLog('[MemberView] Found target line for tag update:', {
+        targetLineIndex,
+        targetLine: targetLine.substring(0, 100),
+        action: isAssigning ? 'assigning' : 'removing',
+        tagWithHash,
+      });
+
+      let updatedLine = targetLine;
 
       if (isAssigning) {
         // Add tag if not already present
@@ -3053,22 +3545,26 @@ export class MemberView extends ItemView implements HoverParent {
         updatedLine = updatedLine.replace(tagPattern, '');
       }
 
-      // Clean up multiple spaces
-      updatedLine = updatedLine.replace(/\s+/g, ' ').trim();
+      // Clean up multiple spaces but preserve leading indentation
+      const leadingWhitespace = updatedLine.match(/^\s*/)?.[0] || '';
+      const restOfLine = updatedLine.substring(leadingWhitespace.length);
+      updatedLine = leadingWhitespace + restOfLine.replace(/\s+/g, ' ').trim();
 
       // Only update if the line actually changed
-      if (updatedLine !== lines[lineIndex]) {
-        lines[lineIndex] = updatedLine;
+      if (updatedLine !== lines[targetLineIndex]) {
+        lines[targetLineIndex] = updatedLine;
         const updatedContent = lines.join('\n');
         await this.app.vault.modify(file, updatedContent);
         debugLog('[MemberView] Updated tag in file:', {
           file: file.path,
           tag,
           isAssigning,
-          lineIndex,
-          originalLine: lines[lineIndex],
+          targetLineIndex,
+          originalLine: targetLine,
           updatedLine,
         });
+      } else {
+        debugLog('[MemberView] No changes needed for tag update');
       }
     } catch (error) {
       // If there's an error, clear the tracking immediately
@@ -3131,6 +3627,168 @@ export class MemberView extends ItemView implements HoverParent {
     }
   }
 
+  // Optimistically update date without triggering refresh
+  async updateDateAssignment(cardId: string, newTitleRaw: string) {
+    debugLog('[MemberView] Updating date assignment:', { cardId, newTitleRaw });
+
+    // 1. Find the card
+    const card = this.memberCards.find((c) => c.id === cardId);
+    if (!card) {
+      console.error('[MemberView] Card not found for date update:', cardId);
+      return;
+    }
+
+    // 2. Store original values for potential revert
+    const originalTitleRaw = card.titleRaw;
+    const originalDate = card.date;
+
+    // 3. Mark card as being updated
+    this.pendingMemberUpdates.add(cardId);
+
+    // 4. Parse the new date from titleRaw
+    const dateTrigger = '@'; // Default date trigger
+    const escapeRegExpStr = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const dateRegExText = `(?:^|\\s)${escapeRegExpStr(dateTrigger)}(?:\\w*)?(?:\\{([^\\}]+?)\\}|\\[\\[([^\\]]+?)\\]\\])`;
+    const dateRegEx = new RegExp(dateRegExText, 'gi');
+
+    let newDateStr: string | undefined;
+    let newDate: moment.Moment | undefined;
+
+    const dateMatch = dateRegEx.exec(newTitleRaw);
+    if (dateMatch) {
+      newDateStr = dateMatch[1] || dateMatch[2]; // From {} or [[]]
+      if (newDateStr) {
+        newDate = moment(newDateStr, this.plugin.settings['date-format'] || 'YYYY-MM-DD');
+      }
+    }
+
+    // 5. Optimistically update the card WITHOUT any rendering
+    const updateSuccess = this.updateSpecificCard(
+      cardId,
+      (c) => {
+        c.titleRaw = newTitleRaw;
+        c.date = newDate;
+      },
+      false // NO RENDERING - user gets feedback from the DOM update
+    );
+
+    if (!updateSuccess) {
+      this.pendingMemberUpdates.delete(cardId);
+      return;
+    }
+
+    // 6. Update DOM to show new date
+    this.updateDateDisplayInDOM(cardId, newDate);
+
+    // 7. Update the file in background WITHOUT triggering more renders
+    try {
+      await this.updateDateInFileBackground(card, newTitleRaw);
+      debugLog('[MemberView] Date assignment update successful');
+    } catch (error) {
+      console.error('[MemberView] Failed to update date in file:', error);
+
+      // Revert the optimistic update
+      this.updateSpecificCard(
+        cardId,
+        (c) => {
+          c.titleRaw = originalTitleRaw;
+          c.date = originalDate;
+        },
+        true
+      );
+
+      // Revert DOM display
+      this.updateDateDisplayInDOM(cardId, originalDate);
+
+      new Notice(`Failed to update date: ${error.message}`);
+    } finally {
+      this.pendingMemberUpdates.delete(cardId);
+      // Don't trigger any React re-renders - rely purely on DOM updates
+    }
+  }
+
+  // Update date in file without triggering refresh
+  private async updateDateInFileBackground(memberCard: MemberCard, newTitleRaw: string) {
+    const file = this.app.vault.getAbstractFileByPath(memberCard.sourceBoardPath);
+    if (!file || !(file instanceof TFile)) {
+      throw new Error(`Could not find source file: ${memberCard.sourceBoardPath}`);
+    }
+
+    // Track that we're updating this file with a timeout
+    this.trackFileUpdate(file.path);
+
+    try {
+      const content = await this.app.vault.read(file);
+      const lines = content.split('\n');
+
+      debugLog('[MemberView] updateDateInFileBackground debug:', {
+        cardId: memberCard.id,
+        cardTitle: memberCard.title,
+        newTitleRaw,
+        sourceStartLine: memberCard.sourceStartLine,
+        blockId: memberCard.blockId,
+      });
+
+      // Find the correct line to update
+      let targetLineIndex = -1;
+      let targetLine = '';
+
+      // Use the stored sourceStartLine as the primary target
+      const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+      if (storedLineIndex >= 0 && storedLineIndex < lines.length) {
+        targetLineIndex = storedLineIndex;
+        targetLine = lines[storedLineIndex];
+      }
+
+      // If we have a blockId, we can also try to find the card by its blockId for verification
+      if (memberCard.blockId && targetLineIndex !== -1) {
+        const targetLineContainsBlockId = lines[targetLineIndex].includes(`^${memberCard.blockId}`);
+        if (!targetLineContainsBlockId) {
+          // Search for the line with this blockId
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(`^${memberCard.blockId}`)) {
+              targetLineIndex = i;
+              targetLine = lines[i];
+              debugLog('[MemberView] Found line via blockId:', {
+                lineIndex: i,
+                line: lines[i].substring(0, 100),
+              });
+              break;
+            }
+          }
+        }
+      }
+
+      if (targetLineIndex === -1 || targetLineIndex >= lines.length) {
+        throw new Error(
+          `Could not find target line for date update: ${memberCard.sourceStartLine}`
+        );
+      }
+
+      debugLog('[MemberView] Found target line for date update:', {
+        targetLineIndex,
+        targetLine: targetLine.substring(0, 100),
+        newTitleRaw: newTitleRaw.substring(0, 100),
+      });
+
+      // Replace the entire line with the new titleRaw
+      lines[targetLineIndex] = newTitleRaw;
+      const updatedContent = lines.join('\n');
+      await this.app.vault.modify(file, updatedContent);
+
+      debugLog('[MemberView] Updated date in file:', {
+        file: file.path,
+        targetLineIndex,
+        originalLine: targetLine,
+        updatedLine: newTitleRaw,
+      });
+    } catch (error) {
+      // If there's an error, clear the tracking immediately
+      this.clearFileUpdateTracking(file.path);
+      throw error;
+    }
+  }
+
   // Update priority in file without triggering refresh
   private async updatePriorityInFileBackground(
     memberCard: MemberCard,
@@ -3147,25 +3805,132 @@ export class MemberView extends ItemView implements HoverParent {
     try {
       const content = await this.app.vault.read(file);
       const lines = content.split('\n');
-      const lineIndex = (memberCard.sourceStartLine || 1) - 1;
 
-      if (lineIndex < 0 || lineIndex >= lines.length) {
-        throw new Error(`Invalid source line number: ${memberCard.sourceStartLine}`);
+      debugLog('[MemberView] updatePriorityInFileBackground debug:', {
+        cardId: memberCard.id,
+        cardTitle: memberCard.title,
+        newPriority,
+        sourceStartLine: memberCard.sourceStartLine,
+        blockId: memberCard.blockId,
+      });
+
+      // Find the correct line that contains the priority or where priority should be added
+      let targetLineIndex = -1;
+      let targetLine = '';
+
+      if (newPriority) {
+        // For assignment, use the stored sourceStartLine if it doesn't already have a priority
+        const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+        if (storedLineIndex >= 0 && storedLineIndex < lines.length) {
+          targetLineIndex = storedLineIndex;
+          targetLine = lines[storedLineIndex];
+        }
+      } else {
+        // For removal, search for the line that actually contains a priority
+        // Start searching from the sourceStartLine and look within a reasonable range (e.g., 10 lines)
+        const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+        const searchStartIndex = Math.max(0, storedLineIndex);
+        const searchEndIndex = Math.min(lines.length, storedLineIndex + 10); // Search within 10 lines of the card
+
+        debugLog('[MemberView] Searching for priority in range:', {
+          storedLineIndex,
+          searchStartIndex,
+          searchEndIndex,
+          blockId: memberCard.blockId,
+        });
+
+        // First, try to find it within the expected range
+        for (let i = searchStartIndex; i < searchEndIndex; i++) {
+          if (/!(low|medium|high)\b/i.test(lines[i])) {
+            // Verify this is actually a task line (contains checkbox)
+            if (/\s*-\s*\[[x ]\]/.test(lines[i])) {
+              targetLineIndex = i;
+              targetLine = lines[i];
+              debugLog('[MemberView] Found priority in expected range:', {
+                lineIndex: i,
+                line: lines[i].substring(0, 100),
+              });
+              break;
+            }
+          }
+        }
+
+        // If we have a blockId, we can also try to find the card by its blockId and then search around it
+        if (targetLineIndex === -1 && memberCard.blockId) {
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(`^${memberCard.blockId}`)) {
+              // Found the line with the blockId, now search for priority in this area
+              const blockIdLineIndex = i;
+              const localSearchStart = Math.max(0, blockIdLineIndex);
+              const localSearchEnd = Math.min(lines.length, blockIdLineIndex + 10);
+
+              debugLog('[MemberView] Found blockId, searching around it for priority:', {
+                blockIdLineIndex,
+                localSearchStart,
+                localSearchEnd,
+                blockIdLine: lines[i].substring(0, 100),
+              });
+
+              for (let j = localSearchStart; j < localSearchEnd; j++) {
+                if (/!(low|medium|high)\b/i.test(lines[j])) {
+                  // Verify this is actually a task line (contains checkbox)
+                  if (/\s*-\s*\[[x ]\]/.test(lines[j])) {
+                    targetLineIndex = j;
+                    targetLine = lines[j];
+                    debugLog('[MemberView] Found priority near blockId:', {
+                      lineIndex: j,
+                      line: lines[j].substring(0, 100),
+                    });
+                    break;
+                  }
+                }
+              }
+              break; // Stop after finding the blockId
+            }
+          }
+        }
+
+        // If still not found, fall back to the stored line (might be a parsing issue)
+        if (targetLineIndex === -1) {
+          const storedLineIndex = (memberCard.sourceStartLine || 1) - 1;
+          if (storedLineIndex >= 0 && storedLineIndex < lines.length) {
+            targetLineIndex = storedLineIndex;
+            targetLine = lines[storedLineIndex];
+            debugLog('[MemberView] Falling back to stored line for priority:', {
+              storedLineIndex,
+              line: lines[storedLineIndex].substring(0, 100),
+            });
+          }
+        }
       }
 
-      let updatedLine = lines[lineIndex];
+      if (targetLineIndex === -1 || targetLineIndex >= lines.length) {
+        throw new Error(
+          `Could not find target line for priority update: ${memberCard.sourceStartLine}`
+        );
+      }
+
+      debugLog('[MemberView] Found target line for priority update:', {
+        targetLineIndex,
+        targetLine: targetLine.substring(0, 100),
+        action: newPriority ? 'setting' : 'removing',
+        newPriority,
+      });
+
+      let updatedLine = targetLine;
 
       // Remove existing priority
       updatedLine = updatedLine.replace(/\s*!(low|medium|high)\b/gi, '');
 
       // Add new priority if specified
       if (newPriority) {
-        // Insert priority before any existing tags or block ID
+        // Updated regex to handle indented/nested list items
+        // This pattern allows for leading whitespace/tabs before the dash and checkbox
         const tagMatch = updatedLine.match(
           /^(\s*-\s*\[[x ]\]\s*)(.*?)(\s*#.*)?(\s*\^[a-zA-Z0-9]+)?$/
         );
         if (tagMatch) {
-          const prefix = tagMatch[1]; // "- [ ] " or "- [x] "
+          const prefix = tagMatch[1]; // "    - [ ] " or "\t- [x] " etc.
           const content = tagMatch[2]; // main content
           const existingTags = tagMatch[3] || ''; // existing tags
           const blockId = tagMatch[4] || ''; // block ID
@@ -3183,21 +3948,25 @@ export class MemberView extends ItemView implements HoverParent {
         }
       }
 
-      // Clean up multiple spaces
-      updatedLine = updatedLine.replace(/\s+/g, ' ').trim();
+      // Clean up multiple spaces but preserve leading indentation
+      const leadingWhitespace = updatedLine.match(/^\s*/)?.[0] || '';
+      const restOfLine = updatedLine.substring(leadingWhitespace.length);
+      updatedLine = leadingWhitespace + restOfLine.replace(/\s+/g, ' ').trim();
 
       // Only update if the line actually changed
-      if (updatedLine !== lines[lineIndex]) {
-        lines[lineIndex] = updatedLine;
+      if (updatedLine !== lines[targetLineIndex]) {
+        lines[targetLineIndex] = updatedLine;
         const updatedContent = lines.join('\n');
         await this.app.vault.modify(file, updatedContent);
         debugLog('[MemberView] Updated priority in file:', {
           file: file.path,
           newPriority,
-          lineIndex,
-          originalLine: lines[lineIndex],
+          targetLineIndex,
+          originalLine: targetLine,
           updatedLine,
         });
+      } else {
+        debugLog('[MemberView] No changes needed for priority update');
       }
     } catch (error) {
       // If there's an error, clear the tracking immediately

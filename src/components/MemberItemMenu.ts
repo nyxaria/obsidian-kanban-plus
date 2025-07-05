@@ -408,19 +408,38 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
                   'date-picker-week-start': 0,
                 }[key],
               app: view.app,
+              updateItemContent: (item: any, newTitleRaw: string) => {
+                // Return updated item with new titleRaw
+                return {
+                  ...item,
+                  data: {
+                    ...item.data,
+                    titleRaw: newTitleRaw,
+                  },
+                };
+              },
             } as any;
 
             // Create mock boardModifiers
             const mockBoardModifiers = {
               updateItem: async (path: any, item: any) => {
-                // Update the card directly via file modification
-                await updateCardDate(memberCard, item.data.titleRaw, view);
-                onCardUpdate();
+                // Use the new optimistic date update method instead of full refresh
+                if (view.updateDateAssignment) {
+                  await view.updateDateAssignment(item.id, item.data.titleRaw);
+                } else {
+                  console.warn(
+                    '[MemberItemMenu] updateDateAssignment method not available, falling back to full refresh'
+                  );
+                  // Fallback to old behavior
+                  await updateCardDate(memberCard, item.data.titleRaw, view);
+                  onCardUpdate();
+                }
               },
             } as any;
 
             // Create mock item
             const mockItem = {
+              id: memberCard.id, // Add the card ID so updateDateAssignment can find the card
               data: {
                 titleRaw: memberCard.titleRaw,
                 metadata: {
@@ -452,8 +471,18 @@ export function useMemberItemMenu({ memberCard, view, onCardUpdate }: UseMemberI
             .setTitle(t('Remove date'))
             .onClick(async () => {
               try {
-                await removeCardDate(memberCard, view);
-                onCardUpdate();
+                if (view.updateDateAssignment) {
+                  // Generate titleRaw without date
+                  const titleRawWithoutDate = await generateTitleRawWithoutDate(memberCard, view);
+                  await view.updateDateAssignment(memberCard.id, titleRawWithoutDate);
+                } else {
+                  console.warn(
+                    '[MemberItemMenu] updateDateAssignment method not available, falling back to full refresh'
+                  );
+                  // Fallback to old behavior
+                  await removeCardDate(memberCard, view);
+                  onCardUpdate();
+                }
               } catch (error) {
                 console.error('[MemberItemMenu] Error removing date:', error);
                 new Notice(`Failed to remove date: ${error.message}`);
@@ -692,4 +721,31 @@ async function addBlockIdToCard(memberCard: MemberCard, blockId: string, view: M
 
   // Update the memberCard object
   memberCard.blockId = blockId;
+}
+
+async function generateTitleRawWithoutDate(
+  memberCard: MemberCard,
+  view: MemberView
+): Promise<string> {
+  let titleRaw = memberCard.titleRaw;
+
+  // Remove dates: @{date}, @[[date]], @start{date}, etc.
+  const dateTrigger = '@'; // Default date trigger
+  const escapeRegExpStr = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Match various date formats
+  const datePatterns = [
+    `\\s*${escapeRegExpStr(dateTrigger)}\\w*\\{[^\\}]+\\}`, // @{date}, @start{date}, etc.
+    `\\s*${escapeRegExpStr(dateTrigger)}\\w*\\[\\[[^\\]]+\\]\\]`, // @[[date]], @start[[date]], etc.
+  ];
+
+  for (const pattern of datePatterns) {
+    const regex = new RegExp(pattern, 'gi');
+    titleRaw = titleRaw.replace(regex, '');
+  }
+
+  // Clean up multiple spaces but preserve newlines
+  titleRaw = titleRaw.replace(/[ \t]+/g, ' ').replace(/[ \t]+$/gm, '');
+
+  return titleRaw;
 }
