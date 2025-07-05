@@ -206,9 +206,77 @@ export class KanbanView extends TextFileView implements HoverParent {
     const memberRegex = /(?:^|\s)(@@\w+)(?=\s|$)/gi;
     cleanTitle = cleanTitle.replace(memberRegex, ' ');
 
-    // Remove tags
-    const tagRegex = /(?:^|\s)(#\w+(?:\/\w+)*)(?=\s|$)/gi;
-    cleanTitle = cleanTitle.replace(tagRegex, ' ');
+    // Handle tags based on settings
+    const tagStateManager = this.plugin.getStateManager(this.file);
+    if (tagStateManager) {
+      const moveTags = tagStateManager.getSetting('move-tags');
+      const hideLaneTagDisplay = tagStateManager.getSetting('hide-lane-tag-display');
+      const hideBoardTagDisplay = tagStateManager.getSetting('hide-board-tag-display');
+
+      // DEBUG: Log the actual settings being used
+      console.log('[KanbanView] getCleanTitleForDisplay settings:', {
+        moveTags,
+        hideLaneTagDisplay,
+        hideBoardTagDisplay,
+        boardName: tagStateManager.file?.basename,
+        titleRaw: titleRaw.substring(0, 50) + (titleRaw.length > 50 ? '...' : ''),
+      });
+
+      if (moveTags) {
+        // If move-tags is enabled, remove all tags (they go to tag section)
+        const tagRegex = /(?:^|\s)(#[\w-]+(?:\/[\w-]+)*)(?=\s|$)/gi;
+        cleanTitle = cleanTitle.replace(tagRegex, ' ');
+        console.log(
+          '[KanbanView] getCleanTitleForDisplay: Removed ALL tags due to move-tags setting'
+        );
+      } else if (hideLaneTagDisplay || hideBoardTagDisplay) {
+        // If move-tags is disabled but hide settings are enabled, only remove board/lane tags
+        const board = tagStateManager.state;
+        const boardName = tagStateManager.file?.basename;
+
+        if (hideBoardTagDisplay && boardName) {
+          const boardTagPattern = boardName.toLowerCase().replace(/\s+/g, '-');
+          const boardTagRegex = new RegExp(
+            `(?:^|\\s)(#${boardTagPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?=\\s|$)`,
+            'gi'
+          );
+          const beforeReplace = cleanTitle;
+          cleanTitle = cleanTitle.replace(boardTagRegex, ' ');
+          console.log('[KanbanView] getCleanTitleForDisplay: Board tag filtering:', {
+            boardName,
+            boardTagPattern,
+            beforeReplace,
+            afterReplace: cleanTitle,
+            changed: beforeReplace !== cleanTitle,
+          });
+        }
+
+        if (hideLaneTagDisplay && board) {
+          for (const lane of board.children) {
+            const laneTagPattern = lane.data.title.toLowerCase().replace(/\s+/g, '-');
+            const laneTagRegex = new RegExp(
+              `(?:^|\\s)(#${laneTagPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?=\\s|$)`,
+              'gi'
+            );
+            const beforeReplace = cleanTitle;
+            cleanTitle = cleanTitle.replace(laneTagRegex, ' ');
+            if (beforeReplace !== cleanTitle) {
+              console.log('[KanbanView] getCleanTitleForDisplay: Removed lane tag:', {
+                laneTitle: lane.data.title,
+                laneTagPattern,
+                beforeReplace,
+                afterReplace: cleanTitle,
+              });
+            }
+          }
+        }
+      } else {
+        console.log(
+          '[KanbanView] getCleanTitleForDisplay: No tag filtering applied - settings disabled'
+        );
+      }
+      // If move-tags is disabled and hide settings are disabled, keep all tags inline
+    }
 
     // Get settings from state manager if available
     const stateManager = this.plugin.getStateManager(this.file);
@@ -258,6 +326,11 @@ export class KanbanView extends TextFileView implements HoverParent {
 
     // Clean up multiple spaces but preserve newlines
     cleanTitle = cleanTitle.replace(/[ \t]{2,}/g, ' ').trim();
+
+    console.log('[KanbanView] getCleanTitleForDisplay: Final result:', {
+      originalTitle: titleRaw.substring(0, 50) + (titleRaw.length > 50 ? '...' : ''),
+      cleanedTitle: cleanTitle.substring(0, 50) + (cleanTitle.length > 50 ? '...' : ''),
+    });
 
     return cleanTitle;
   }
@@ -1505,9 +1578,7 @@ export class KanbanView extends TextFileView implements HoverParent {
       this.contentEl.querySelectorAll('.search-result-highlight').forEach((el) => {
         el.removeClass('search-result-highlight');
       });
-      debugLog(
-        '[KanbanView] clearActiveSearchHighlight: Cleared BORDER highlight and DOM class.'
-      );
+      debugLog('[KanbanView] clearActiveSearchHighlight: Cleared BORDER highlight and DOM class.');
     } else {
       debugLog('[KanbanView] clearActiveSearchHighlight: No active BORDER highlight to clear.');
     }
@@ -1634,10 +1705,7 @@ export class KanbanView extends TextFileView implements HoverParent {
           );
         } catch (e) {
           console.error('[KanbanView] ERROR stringifying dropDataForLog (placeholder):', e.message);
-          debugLog(
-            '[KanbanView] dropDataForLog (placeholder) keys:',
-            Object.keys(dropDataForLog)
-          );
+          debugLog('[KanbanView] dropDataForLog (placeholder) keys:', Object.keys(dropDataForLog));
         }
 
         const placeholderPath = dropEntity.getPath();
@@ -1742,14 +1810,8 @@ export class KanbanView extends TextFileView implements HoverParent {
             '[KanbanView] ERROR stringifying data in Missing Critical IDs block:',
             e_ids.message
           );
-          debugLog(
-            '[KanbanView] dragDataForLog (Missing IDs) keys:',
-            Object.keys(dragDataForLog)
-          );
-          debugLog(
-            '[KanbanView] dropDataForLog (Missing IDs) keys:',
-            Object.keys(dropDataForLog)
-          );
+          debugLog('[KanbanView] dragDataForLog (Missing IDs) keys:', Object.keys(dragDataForLog));
+          debugLog('[KanbanView] dropDataForLog (Missing IDs) keys:', Object.keys(dropDataForLog));
         }
         return;
       }

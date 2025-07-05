@@ -1,4 +1,3 @@
-import { debugLog } from '../../helpers/debugLogger';
 // May need to move/share this
 // import { MdastHeading, MdastList, MdastListItem, MdastRoot } from 'mdast'; // Removed due to import errors
 import moment from 'moment';
@@ -20,6 +19,7 @@ import { updateCardDatesInMarkdown } from 'src/markdownUpdater';
 import { getHeadingText } from '../../KanbanWorkspaceView';
 import { StateManager } from '../../StateManager';
 import { hasFrontmatterKey } from '../../helpers';
+import { debugLog } from '../../helpers/debugLogger';
 import KanbanPlugin from '../../main';
 // Assuming this path and file are correct
 import { listItemToItemData } from '../../parsers/formats/list';
@@ -146,9 +146,71 @@ function getCleanTitleForDisplay(titleRaw: string, stateManager: StateManager): 
   const memberRegex = /(?:^|\s)(@@\w+)(?=\s|$)/gi;
   cleanTitle = cleanTitle.replace(memberRegex, ' ');
 
-  // Remove tags
-  const tagRegex = /(?:^|\s)(#\w+(?:\/\w+)*)(?=\s|$)/gi;
-  cleanTitle = cleanTitle.replace(tagRegex, ' ');
+  // Handle tags based on settings
+  const moveTags = stateManager.getSetting('move-tags');
+  const hideLaneTagDisplay = stateManager.getSetting('hide-lane-tag-display');
+  const hideBoardTagDisplay = stateManager.getSetting('hide-board-tag-display');
+
+  // DEBUG: Log the actual settings being used
+  console.log('[Timeline] getCleanTitleForDisplay settings:', {
+    moveTags,
+    hideLaneTagDisplay,
+    hideBoardTagDisplay,
+    boardName: stateManager.file?.basename,
+    titleRaw: titleRaw.substring(0, 50) + (titleRaw.length > 50 ? '...' : ''),
+  });
+
+  if (moveTags) {
+    // If move-tags is enabled, remove all tags (they go to tag section)
+    const tagRegex = /(?:^|\s)(#[\w-]+(?:\/[\w-]+)*)(?=\s|$)/gi;
+    cleanTitle = cleanTitle.replace(tagRegex, ' ');
+    console.debug('[Timeline] getCleanTitleForDisplay: Removed ALL tags due to move-tags setting');
+  } else if (hideLaneTagDisplay || hideBoardTagDisplay) {
+    // If move-tags is disabled but hide settings are enabled, only remove board/lane tags
+    const board = stateManager.state;
+    const boardName = stateManager.file?.basename;
+
+    if (hideBoardTagDisplay && boardName) {
+      const boardTagPattern = boardName.toLowerCase().replace(/\s+/g, '-');
+      const boardTagRegex = new RegExp(
+        `(?:^|\\s)(#${boardTagPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?=\\s|$)`,
+        'gi'
+      );
+      const beforeReplace = cleanTitle;
+      cleanTitle = cleanTitle.replace(boardTagRegex, ' ');
+      console.debug('[Timeline] getCleanTitleForDisplay: Board tag filtering:', {
+        boardName,
+        boardTagPattern,
+        beforeReplace,
+        afterReplace: cleanTitle,
+        changed: beforeReplace !== cleanTitle,
+      });
+    }
+
+    if (hideLaneTagDisplay && board) {
+      for (const lane of board.children) {
+        const laneTagPattern = lane.data.title.toLowerCase().replace(/\s+/g, '-');
+        const laneTagRegex = new RegExp(
+          `(?:^|\\s)(#${laneTagPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?=\\s|$)`,
+          'gi'
+        );
+        const beforeReplace = cleanTitle;
+        cleanTitle = cleanTitle.replace(laneTagRegex, ' ');
+        if (beforeReplace !== cleanTitle) {
+          console.debug('[Timeline] getCleanTitleForDisplay: Removed lane tag:', {
+            laneTitle: lane.data.title,
+            laneTagPattern,
+            beforeReplace,
+            afterReplace: cleanTitle,
+          });
+        }
+      }
+    }
+  } else {
+    console.debug(
+      '[Timeline] getCleanTitleForDisplay: No tag filtering applied - settings disabled'
+    );
+  }
 
   // Remove date triggers
   const dateTrigger = stateManager.getSetting('date-trigger');
@@ -191,6 +253,11 @@ function getCleanTitleForDisplay(titleRaw: string, stateManager: StateManager): 
 
   // Clean up multiple spaces but preserve newlines
   cleanTitle = cleanTitle.replace(/[ \t]{2,}/g, ' ').trim();
+
+  console.debug('[Timeline] getCleanTitleForDisplay: Final result:', {
+    originalTitle: titleRaw.substring(0, 50) + (titleRaw.length > 50 ? '...' : ''),
+    cleanedTitle: cleanTitle.substring(0, 50) + (cleanTitle.length > 50 ? '...' : ''),
+  });
 
   return cleanTitle;
 }
@@ -335,9 +402,7 @@ export function TimelineViewComponent(props: TimelineViewComponentProps) {
                     const colorMatch = colorCommentRegex.exec(htmlContent);
                     if (colorMatch && colorMatch[1]) {
                       currentLaneColor = colorMatch[1].trim();
-                      debugLog(
-                        `[TimelineView]    Found and set lane color: ${currentLaneColor}`
-                      );
+                      debugLog(`[TimelineView]    Found and set lane color: ${currentLaneColor}`);
                       break;
                     } else {
                       debugLog(`[TimelineView]    HTML node did not match color regex.`);
