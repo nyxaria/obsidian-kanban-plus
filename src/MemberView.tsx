@@ -87,6 +87,9 @@ export class MemberView extends ItemView implements HoverParent {
   private error: string | null = null;
   private scanRootPath: string = '';
   public hasInitialScan = false;
+  // Add sorting state
+  private sortBy: 'dueDate' | 'priority' = 'dueDate';
+  private sortOrder: 'asc' | 'desc' = 'asc';
   // Track files that are currently being updated to prevent refresh loops
   private pendingFileUpdates: Set<string> = new Set();
   // Track member cards that are being updated optimistically
@@ -335,6 +338,14 @@ export class MemberView extends ItemView implements HoverParent {
       this.scanRootPath = sessionData.scanRootPath;
     }
 
+    // Initialize sort preferences from session data
+    if (sessionData.sortBy) {
+      this.sortBy = sessionData.sortBy;
+    }
+    if (sessionData.sortOrder) {
+      this.sortOrder = sessionData.sortOrder;
+    }
+
     // Register for file change events to refresh when kanban content changes
     this.registerFileChangeEvents();
 
@@ -464,6 +475,15 @@ export class MemberView extends ItemView implements HoverParent {
       this.hasInitialScan = false; // Reset initial scan flag when scan root changes from state
     }
 
+    // Handle sort preferences from state
+    if (state?.sortBy && state.sortBy !== this.sortBy) {
+      this.sortBy = state.sortBy;
+    }
+
+    if (state?.sortOrder && state.sortOrder !== this.sortOrder) {
+      this.sortOrder = state.sortOrder;
+    }
+
     // Only render if contentEl is ready
     if (this.contentEl && this.contentEl.isConnected) {
       this.setReactState({});
@@ -485,14 +505,58 @@ export class MemberView extends ItemView implements HoverParent {
     const state = super.getState();
     state.selectedMember = this.selectedMember;
     state.scanRootPath = this.scanRootPath;
+    state.sortBy = this.sortBy;
+    state.sortOrder = this.sortOrder;
     return state;
   }
 
   public refreshHeader() {
     debugLog(`[MemberView] refreshHeader: Updating tab title for member: ${this.selectedMember}`);
+
+    // Standard header refresh approaches
     this.app.workspace.trigger('layout-change');
     this.app.workspace.trigger('layout-ready');
     (this.leaf as any).updateHeader?.();
+
+    // DIRECT DOM UPDATE: Update the view header title directly
+    this.updateViewHeaderTitle();
+
+    // Schedule a delayed update in case the immediate one doesn't work
+    setTimeout(() => {
+      this.updateViewHeaderTitle();
+    }, 100);
+  }
+
+  private updateViewHeaderTitle() {
+    try {
+      const newTitle = this.getDisplayText();
+      debugLog(`[MemberView] Attempting to update view header title to: ${newTitle}`);
+
+      // Try to find the view header title element in various locations
+      const searchLocations = [
+        this.containerEl,
+        this.containerEl.parentElement,
+        this.app.workspace.containerEl,
+        document,
+      ];
+
+      for (const location of searchLocations) {
+        if (!location) continue;
+
+        const viewHeaderTitle = location.querySelector('.view-header-title');
+        if (viewHeaderTitle) {
+          debugLog(
+            `[MemberView] Found view header title element in ${location === document ? 'document' : 'container'}, updating to: ${newTitle}`
+          );
+          viewHeaderTitle.textContent = newTitle;
+          return; // Successfully updated, exit
+        }
+      }
+
+      debugLog('[MemberView] View header title element not found in any location');
+    } catch (error) {
+      debugLog('[MemberView] Error updating view header title:', error);
+    }
   }
 
   setViewState<K extends keyof KanbanViewSettings>(
@@ -1009,8 +1073,11 @@ export class MemberView extends ItemView implements HoverParent {
     const doingCards: Item[] = [];
     const doneCards: Item[] = [];
 
+    // Sort member cards before categorizing
+    const sortedCards = this.sortMemberCards(this.memberCards);
+
     // Categorize cards
-    this.memberCards.forEach((card) => {
+    sortedCards.forEach((card) => {
       // Ensure card has all required properties with defaults
       const safeCard = {
         id: card.id || generateInstanceId(),
@@ -1295,6 +1362,16 @@ export class MemberView extends ItemView implements HoverParent {
               }
             },
             onRefresh: () => this.scanMemberCards(),
+            onSortChange: (sortBy: 'dueDate' | 'priority', sortOrder: 'asc' | 'desc') => {
+              this.sortBy = sortBy;
+              this.sortOrder = sortOrder;
+              // Save to session
+              this.plugin.sessionManager.setMemberBoardSession({ sortBy, sortOrder });
+              // Re-render with new sort
+              this.setReactState({ lastSortUpdate: Date.now() });
+            },
+            sortBy: this.sortBy,
+            sortOrder: this.sortOrder,
             updateMemberAssignment: (cardId: string, member: string, isAssigning: boolean) =>
               this.updateMemberAssignment(cardId, member, isAssigning),
             reactState: this._reactState,
@@ -3973,5 +4050,61 @@ export class MemberView extends ItemView implements HoverParent {
       this.clearFileUpdateTracking(file.path);
       throw error;
     }
+  }
+
+  // Sort member cards based on current sort settings
+  private sortMemberCards(cards: MemberCard[]): MemberCard[] {
+    return cards.sort((a, b) => {
+      let primaryComparison = 0;
+      let secondaryComparison = 0;
+
+      if (this.sortBy === 'dueDate') {
+        // Primary sort: Due date
+        const aDate = a.date;
+        const bDate = b.date;
+
+        if (!aDate && !bDate) {
+          primaryComparison = 0;
+        } else if (!aDate) {
+          primaryComparison = 1; // Cards without dates go to the end
+        } else if (!bDate) {
+          primaryComparison = -1; // Cards without dates go to the end
+        } else {
+          primaryComparison = aDate.isBefore(bDate) ? -1 : aDate.isAfter(bDate) ? 1 : 0;
+        }
+
+        // Secondary sort: Priority
+        const aPriority = a.priority || 'none';
+        const bPriority = b.priority || 'none';
+        const priorityOrder: Record<string, number> = { high: 3, medium: 2, low: 1, none: 0 };
+        secondaryComparison = priorityOrder[bPriority] - priorityOrder[aPriority];
+      } else {
+        // Primary sort: Priority
+        const aPriority = a.priority || 'none';
+        const bPriority = b.priority || 'none';
+        const priorityOrder: Record<string, number> = { high: 3, medium: 2, low: 1, none: 0 };
+        primaryComparison = priorityOrder[bPriority] - priorityOrder[aPriority];
+
+        // Secondary sort: Due date
+        const aDate = a.date;
+        const bDate = b.date;
+
+        if (!aDate && !bDate) {
+          secondaryComparison = 0;
+        } else if (!aDate) {
+          secondaryComparison = 1; // Cards without dates go to the end
+        } else if (!bDate) {
+          secondaryComparison = -1; // Cards without dates go to the end
+        } else {
+          secondaryComparison = aDate.isBefore(bDate) ? -1 : aDate.isAfter(bDate) ? 1 : 0;
+        }
+      }
+
+      // Apply primary comparison first, then secondary if primary is equal
+      const finalComparison = primaryComparison !== 0 ? primaryComparison : secondaryComparison;
+
+      // Apply sort order (asc/desc)
+      return this.sortOrder === 'asc' ? finalComparison : -finalComparison;
+    });
   }
 }

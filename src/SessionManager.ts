@@ -7,6 +7,8 @@ export interface SessionData {
   memberBoard?: {
     selectedMember?: string;
     scanRootPath?: string;
+    sortBy?: 'dueDate' | 'priority';
+    sortOrder?: 'asc' | 'desc';
     [key: string]: any; // Allow for future expansion
   };
   [key: string]: any; // Allow for other session data
@@ -71,16 +73,20 @@ export class SessionManager {
   }
 
   // Member Board specific methods
-  getMemberBoardSession(): { selectedMember: string; scanRootPath: string } {
+  getMemberBoardSession(): { selectedMember: string; scanRootPath: string; sortBy?: 'dueDate' | 'priority'; sortOrder?: 'asc' | 'desc' } {
     return {
       selectedMember: this.sessionData.memberBoard?.selectedMember || '',
       scanRootPath: this.sessionData.memberBoard?.scanRootPath || '',
+      sortBy: this.sessionData.memberBoard?.sortBy,
+      sortOrder: this.sessionData.memberBoard?.sortOrder,
     };
   }
 
   async setMemberBoardSession(data: {
     selectedMember?: string;
     scanRootPath?: string;
+    sortBy?: 'dueDate' | 'priority';
+    sortOrder?: 'asc' | 'desc';
   }): Promise<void> {
     if (!this.sessionData.memberBoard) {
       this.sessionData.memberBoard = {};
@@ -92,6 +98,14 @@ export class SessionManager {
 
     if (data.scanRootPath !== undefined) {
       this.sessionData.memberBoard.scanRootPath = data.scanRootPath;
+    }
+
+    if (data.sortBy !== undefined) {
+      this.sessionData.memberBoard.sortBy = data.sortBy;
+    }
+
+    if (data.sortOrder !== undefined) {
+      this.sessionData.memberBoard.sortOrder = data.sortOrder;
     }
 
     await this.saveSession();

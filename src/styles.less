@@ -2806,6 +2806,60 @@ body:not(.native-scrollbars) .kanban-plugin__scroll-container::-webkit-scrollbar
     }
   }
 
+  .kanban-plugin__sort-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 160px;
+
+    label {
+      font-size: 0.9em;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .kanban-plugin__sort-select-dropdown {
+      padding: 6px 8px;
+      border: 1px solid var(--background-modifier-border);
+      border-radius: 4px;
+      background: var(--background-primary);
+      color: var(--text-normal);
+      font-size: 0.9em;
+      min-width: 100px;
+
+      &:focus {
+        outline: none;
+        border-color: var(--interactive-accent);
+      }
+    }
+
+    .kanban-plugin__sort-order-button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px;
+      border: 1px solid var(--background-modifier-border);
+      border-radius: 4px;
+      background: var(--background-primary);
+      color: var(--text-normal);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      width: 32px;
+      height: 32px;
+      margin-top: 5px;
+
+      &:hover {
+        background: var(--background-modifier-hover);
+        border-color: var(--interactive-accent);
+      }
+
+      span {
+        width: 14px;
+        height: 14px;
+      }
+    }
+  }
+
   .kanban-plugin__refresh-button {
     display: flex;
     align-items: center;

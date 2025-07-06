@@ -142,6 +142,9 @@ interface MemberBoardProps {
   onMemberChange: (member: string) => void;
   onScanRootChange: (path: string) => void;
   onRefresh: () => void;
+  onSortChange: (sortBy: 'dueDate' | 'priority', sortOrder: 'asc' | 'desc') => void;
+  sortBy: 'dueDate' | 'priority';
+  sortOrder: 'asc' | 'desc';
   updateMemberAssignment: (cardId: string, member: string, isAssigning: boolean) => Promise<void>;
   reactState: any;
   setReactState: (state: any) => void;
@@ -204,6 +207,9 @@ export function MemberBoard(props: MemberBoardProps) {
     onMemberChange,
     onScanRootChange,
     onRefresh,
+    onSortChange,
+    sortBy,
+    sortOrder,
     reactState,
     setReactState,
     emitter,
@@ -382,12 +388,13 @@ export function MemberBoard(props: MemberBoardProps) {
       <div className={c('member-board-header')}>
         <div className={c('member-board-controls')}>
           <div className={c('member-selector')}>
-            <label htmlFor="member-select">Team Member:</label>
+            {/* <label htmlFor="member-select">Team Member:</label> */}
             <select
               id="member-select"
               value={selectedMember}
               onChange={handleMemberSelect}
               className={c('member-select-dropdown')}
+              style={{ width: '90%', marginLeft: '30px', marginRight: '10px' }}
             >
               <option value="">Select a member...</option>
               {teamMembers.map((member) => (
@@ -417,14 +424,40 @@ export function MemberBoard(props: MemberBoardProps) {
             </select>
           </div>
 
+          <div className={c('sort-controls')}>
+            <label htmlFor="sort-select">Sort by:</label>
+            <select
+              id="sort-select"
+              value={sortBy}
+              onChange={(e) =>
+                onSortChange(
+                  (e.target as HTMLSelectElement).value as 'dueDate' | 'priority',
+                  sortOrder
+                )
+              }
+              className={c('sort-select-dropdown')}
+            >
+              <option value="">Sort by...</option>
+              <option value="dueDate">Due Date</option>
+              <option value="priority">Priority</option>
+            </select>
+            {/* <button
+              className={c('sort-order-button')}
+              onClick={() => onSortChange(sortBy, sortOrder === 'asc' ? 'desc' : 'asc')}
+              title={`Sort order: ${sortOrder === 'asc' ? 'Ascending' : 'Descending'}`}
+            >
+              <span className={`lucide-arrow-${sortOrder === 'asc' ? 'up' : 'down'}`} />
+            </button> */}
+          </div>
+
           <button
             className={c('refresh-button')}
             onClick={onRefresh}
             disabled={isLoading}
             title="Refresh member board"
           >
-            <span className="lucide-refresh-cw" />
-            {isLoading ? 'Loading...' : 'Refresh'}
+            {/* <span className="lucide-refresh-cw" /> */}
+            {'Refresh'}
           </button>
         </div>
       </div>
