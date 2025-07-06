@@ -26,6 +26,7 @@ interface MarkdownEditorProps {
   value?: string;
   className: string;
   placeholder?: string;
+  itemElement?: HTMLElement;
 }
 
 export function allowNewLine(stateManager: StateManager, mod: boolean, shift: boolean) {
@@ -96,6 +97,99 @@ function getVimPlugin(cm: EditorView): string {
   })?.value?.cm;
 }
 
+function findCardContainer(element: HTMLElement): HTMLElement | null {
+  // Try to find the card container using multiple selectors
+  const selectors = [
+    '.kanban-plugin__item-wrapper',
+    '.kanban-plugin__item',
+    '.kanban-plugin__item-content-wrapper',
+    '[data-id]', // Fallback to any element with data-id
+  ];
+
+  for (const selector of selectors) {
+    const container = element.closest(selector);
+    if (container) {
+      return container as HTMLElement;
+    }
+  }
+
+  return element; // Return the element itself as fallback
+}
+
+function scrollCardIntoView(itemElement: HTMLElement, behavior: ScrollBehavior = 'smooth') {
+  try {
+    const cardContainer = findCardContainer(itemElement);
+    if (cardContainer) {
+      cardContainer.scrollIntoView({
+        block: 'center',
+        behavior,
+        inline: 'nearest',
+      });
+      return true;
+    }
+  } catch (error) {
+    console.warn('Error scrolling card into view:', error);
+  }
+  return false;
+}
+
+function calculateCursorPosition(
+  editState: EditState,
+  value: string,
+  itemElement?: HTMLElement
+): number {
+  // If no edit coordinates are provided, default to end of text
+  if (!isEditCoordinates(editState)) {
+    return value.length;
+  }
+
+  const { x, y } = editState;
+
+  // If we have an item element, try to calculate position based on click coordinates
+  if (itemElement) {
+    try {
+      // Get the text content element within the item
+      const textElement = itemElement.querySelector(
+        '.kanban-plugin__item-markdown, .kanban-plugin__item-text-wrapper'
+      );
+
+      if (textElement) {
+        const rect = textElement.getBoundingClientRect();
+
+        // Calculate relative position within the text element
+        const relativeX = x - rect.left;
+        const relativeY = y - rect.top;
+
+        // If click is in the bottom half of the element, position cursor at end
+        if (relativeY > rect.height / 2) {
+          return value.length;
+        }
+
+        // If click is in the top half, try to find a reasonable position
+        // For now, we'll estimate based on the percentage of height clicked
+        const heightPercentage = relativeY / rect.height;
+        const lines = value.split('\n');
+        const targetLine = Math.floor(heightPercentage * lines.length);
+
+        // Calculate character position up to the target line
+        let charPosition = 0;
+        for (let i = 0; i < Math.min(targetLine, lines.length); i++) {
+          charPosition += lines[i].length;
+          if (i < lines.length - 1) charPosition += 1; // Add 1 for newline character
+        }
+
+        return Math.min(charPosition, value.length);
+      }
+    } catch (error) {
+      // If anything goes wrong, fall back to end position
+      console.warn('Error calculating cursor position:', error);
+    }
+  }
+
+  // Default to end of text
+  return value.length;
+}
+
 export function MarkdownEditor({
   editorRef,
   onEnter,
@@ -107,6 +201,7 @@ export function MarkdownEditor({
   editState,
   value,
   placeholder,
+  itemElement,
 }: MarkdownEditorProps) {
   const { view, stateManager } = useContext(KanbanContext);
   const elRef = useRef<HTMLDivElement>();
@@ -240,22 +335,68 @@ export function MarkdownEditor({
 
     controller.editMode = editor;
     editor.set(value || '');
-    cm.dispatch({ selection: EditorSelection.cursor((value || '').length) });
+
+    // Calculate cursor position based on click coordinates or default to end
+    const cursorPosition = calculateCursorPosition(editState, value || '', itemElement);
 
     if (isEditCoordinates(editState)) {
       const editorInstance = internalRef.current;
       if (editorInstance && !editorInstance.hasFocus) {
         editorInstance.focus();
       }
-      cm.dispatch({ selection: EditorSelection.cursor((value || '').length) });
 
+      // Set cursor position WITHOUT automatic scrolling to prevent conflicts
+      cm.dispatch({
+        selection: EditorSelection.cursor(cursorPosition),
+        scrollIntoView: false, // This prevents CodeMirror's automatic scrolling
+      });
+
+      // Now handle scrolling manually with smooth animation
       cm.dom.win.setTimeout(() => {
         setInsertMode(cm);
-      });
+
+        // Ensure the entire card is visible with smooth scrolling
+        if (itemElement) {
+          if (!scrollCardIntoView(itemElement, 'smooth')) {
+            // Fallback if scrollCardIntoView fails
+            try {
+              itemElement.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            } catch (error) {
+              console.warn('Fallback scroll failed:', error);
+            }
+          }
+        }
+
+        // Then, after scrolling animation, fine-tune cursor visibility if needed
+        cm.dom.win.setTimeout(() => {
+          const cursorElement = cm.dom.querySelector('.cm-cursor');
+          if (cursorElement) {
+            // Check if cursor is already visible before scrolling
+            const cursorRect = cursorElement.getBoundingClientRect();
+            const viewportHeight = window.innerHeight;
+            const isVisible = cursorRect.top >= 0 && cursorRect.bottom <= viewportHeight;
+
+            if (!isVisible) {
+              cursorElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+          }
+        }, 300); // Wait for card scroll animation to complete
+      }, 50);
+    } else {
+      // For non-editing states, set cursor normally
+      cm.dispatch({ selection: EditorSelection.cursor(cursorPosition) });
     }
 
     const onShow = () => {
-      elRef.current.scrollIntoView({ block: 'end' });
+      // For mobile, ensure the entire card is visible when keyboard shows
+      if (itemElement) {
+        if (!scrollCardIntoView(itemElement, 'smooth')) {
+          // Fallback if scrollCardIntoView fails
+          elRef.current.scrollIntoView({ block: 'end', behavior: 'smooth' });
+        }
+      } else {
+        elRef.current.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      }
     };
 
     if (Platform.isMobile) {
@@ -290,10 +431,12 @@ export function MarkdownEditor({
         cm.dispatch({
           changes: { from: 0, to: cm.state.doc.length, insert: value || '' },
         });
-        cm.dispatch({ selection: EditorSelection.cursor((value || '').length) });
+        const cursorPosition = calculateCursorPosition(editState, value || '', itemElement);
+        // Set cursor position without triggering automatic scroll
+        cm.dispatch({ selection: EditorSelection.cursor(cursorPosition) });
       }
     }
-  }, [value]);
+  }, [value, editState, itemElement]);
 
   const cls = ['cm-table-widget'];
   if (className) cls.push(className);

@@ -115,6 +115,7 @@ export interface ItemContentProps {
   isStatic: boolean;
   targetHighlight?: any;
   style?: JSX.CSSProperties;
+  itemElement?: HTMLElement;
 }
 
 function checkCheckbox(stateManager: StateManager, title: string, checkboxIndex: number) {
@@ -471,6 +472,7 @@ const ItemContentComponent = function ItemContent({
   isStatic,
   targetHighlight,
   style,
+  itemElement,
 }: ItemContentProps) {
   const path = useNestedEntityPath();
 
@@ -812,6 +814,7 @@ const ItemContentComponent = function ItemContent({
             onEnter={onEnter}
             onEscape={onEscape}
             onSubmit={onSubmit}
+            itemElement={itemElement}
           />
         </div>
       </div>
@@ -868,6 +871,7 @@ function areItemPropsEqual(prevProps: ItemContentProps, nextProps: ItemContentPr
   const showMetadataSame = prevProps.showMetadata === nextProps.showMetadata;
   const isStaticSame = prevProps.isStatic === nextProps.isStatic;
   const targetHighlightSame = prevProps.targetHighlight === nextProps.targetHighlight;
+  const itemElementSame = prevProps.itemElement === nextProps.itemElement;
 
   const criticalPropsSame =
     itemDataBasicallySame &&
@@ -875,7 +879,8 @@ function areItemPropsEqual(prevProps: ItemContentProps, nextProps: ItemContentPr
     searchQuerySame &&
     showMetadataSame &&
     isStaticSame &&
-    targetHighlightSame;
+    targetHighlightSame &&
+    itemElementSame;
 
   return criticalPropsSame;
 }

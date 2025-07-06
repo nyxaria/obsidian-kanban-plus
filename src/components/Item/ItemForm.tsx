@@ -88,6 +88,7 @@ export function ItemForm({
               createItem(cm.state.doc.toString(), false);
             }}
             onEscape={clear}
+            itemElement={undefined}
           />
         </div>
       </div>

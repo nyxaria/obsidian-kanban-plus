@@ -270,6 +270,7 @@ const ItemInner = memo(function ItemInner({
             isStatic={!!isStatic}
             targetHighlight={targetHighlight}
             style={{ marginLeft: '-2.5px', marginRight: '0px' }}
+            itemElement={itemInnerRef.current}
           />
         </div>
       </div>
