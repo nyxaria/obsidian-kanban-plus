@@ -379,6 +379,9 @@ export function MemberBoard(props: MemberBoardProps) {
   // Calculate stats width based on member view lane width
   const statsWidth = `calc(3 * ${memberViewLaneWidth}px + 2 * 10px)`;
 
+  // Show "Sort by..." only when no explicit sort has been set yet, otherwise show the actual sort
+  const sortDisplayValue = sortBy;
+
   return (
     <div
       className={c('member-board-container')}
@@ -413,7 +416,7 @@ export function MemberBoard(props: MemberBoardProps) {
               onChange={handleScanRootSelect}
               className={c('scan-root-select-dropdown')}
             >
-              <option value="">Vault Root</option>
+              <option value="">All Boards</option>
               {availableDirectories
                 .filter((dir) => dir !== '') // Remove empty string since it's already shown as "Vault Root"
                 .map((directory) => (
@@ -428,13 +431,14 @@ export function MemberBoard(props: MemberBoardProps) {
             <label htmlFor="sort-select">Sort by:</label>
             <select
               id="sort-select"
-              value={sortBy}
-              onChange={(e) =>
-                onSortChange(
-                  (e.target as HTMLSelectElement).value as 'dueDate' | 'priority',
-                  sortOrder
-                )
-              }
+              value={sortDisplayValue}
+              onChange={(e) => {
+                const selectedValue = (e.target as HTMLSelectElement).value;
+                // If "Sort by..." is selected (empty string), default to 'dueDate'
+                const sortType =
+                  selectedValue === '' ? 'dueDate' : (selectedValue as 'dueDate' | 'priority');
+                onSortChange(sortType, sortOrder);
+              }}
               className={c('sort-select-dropdown')}
             >
               <option value="">Sort by...</option>
