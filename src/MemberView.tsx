@@ -87,8 +87,8 @@ export class MemberView extends ItemView implements HoverParent {
   private error: string | null = null;
   private scanRootPath: string = '';
   public hasInitialScan = false;
-  // Add sorting state
-  private sortBy: 'dueDate' | 'priority' = 'dueDate';
+  // Add sorting state - empty string indicates no explicit sort preference set
+  private sortBy: 'dueDate' | 'priority' | '' = '';
   private sortOrder: 'asc' | 'desc' = 'asc';
   // Track files that are currently being updated to prevent refresh loops
   private pendingFileUpdates: Set<string> = new Set();
@@ -114,6 +114,10 @@ export class MemberView extends ItemView implements HoverParent {
 
   get isShiftPressed(): boolean {
     return this.plugin.isShiftPressed;
+  }
+
+  get currentSortBy(): 'dueDate' | 'priority' | '' {
+    return this.sortBy;
   }
 
   constructor(leaf: WorkspaceLeaf, plugin: KanbanPlugin) {
@@ -325,12 +329,29 @@ export class MemberView extends ItemView implements HoverParent {
     // Load session data for member selection and scan root path
     const sessionData = this.plugin.sessionManager.getMemberBoardSession();
 
-    // Initialize with session data if available, otherwise with first team member
+    debugLog('[MemberView] Session data loaded:', {
+      sessionData,
+      initialSortBy: this.sortBy,
+      hasExplicitSortBy: 'sortBy' in sessionData && sessionData.sortBy !== undefined,
+    });
+
+    // Initialize with session data if available, otherwise keep empty (shows "Select a member...")
     const teamMembers = this.plugin.settings.teamMembers || [];
-    if (sessionData.selectedMember && teamMembers.includes(sessionData.selectedMember)) {
+    if (
+      'selectedMember' in sessionData &&
+      sessionData.selectedMember !== undefined &&
+      sessionData.selectedMember !== null &&
+      sessionData.selectedMember !== '' &&
+      teamMembers.includes(sessionData.selectedMember)
+    ) {
       this.selectedMember = sessionData.selectedMember;
-    } else if (teamMembers.length > 0 && !this.selectedMember) {
-      this.selectedMember = teamMembers[0];
+      debugLog('[MemberView] Applied selectedMember from session:', sessionData.selectedMember);
+    } else {
+      // Keep empty string to show "Select a member..." as default
+      this.selectedMember = '';
+      debugLog(
+        '[MemberView] No explicit selectedMember in session, keeping empty string for "Select a member..."'
+      );
     }
 
     // Initialize scan root path from session data
@@ -338,12 +359,25 @@ export class MemberView extends ItemView implements HoverParent {
       this.scanRootPath = sessionData.scanRootPath;
     }
 
-    // Initialize sort preferences from session data
-    if (sessionData.sortBy) {
+    // Initialize sort preferences from session data ONLY if they were explicitly set
+    // Check if the session data has sort preferences that were explicitly saved
+    if (
+      'sortBy' in sessionData &&
+      sessionData.sortBy !== undefined &&
+      sessionData.sortBy !== null
+    ) {
       this.sortBy = sessionData.sortBy;
+      debugLog('[MemberView] Applied sortBy from session:', sessionData.sortBy);
+    } else {
+      debugLog('[MemberView] No explicit sortBy in session, keeping default empty string');
     }
-    if (sessionData.sortOrder) {
+    if (
+      'sortOrder' in sessionData &&
+      sessionData.sortOrder !== undefined &&
+      sessionData.sortOrder !== null
+    ) {
       this.sortOrder = sessionData.sortOrder;
+      debugLog('[MemberView] Applied sortOrder from session:', sessionData.sortOrder);
     }
 
     // Register for file change events to refresh when kanban content changes
@@ -1362,11 +1396,16 @@ export class MemberView extends ItemView implements HoverParent {
               }
             },
             onRefresh: () => this.scanMemberCards(),
-            onSortChange: (sortBy: 'dueDate' | 'priority', sortOrder: 'asc' | 'desc') => {
+            onSortChange: (sortBy: 'dueDate' | 'priority' | '', sortOrder: 'asc' | 'desc') => {
               this.sortBy = sortBy;
               this.sortOrder = sortOrder;
-              // Save to session
-              this.plugin.sessionManager.setMemberBoardSession({ sortBy, sortOrder });
+              // Save to session - only save non-empty sortBy values
+              if (sortBy !== '') {
+                this.plugin.sessionManager.setMemberBoardSession({ sortBy, sortOrder });
+              } else {
+                // If empty string, remove the sort preference from session
+                this.plugin.sessionManager.setMemberBoardSession({ sortBy: undefined, sortOrder });
+              }
               // Re-render with new sort
               this.setReactState({ lastSortUpdate: Date.now() });
             },
@@ -4058,7 +4097,10 @@ export class MemberView extends ItemView implements HoverParent {
       let primaryComparison = 0;
       let secondaryComparison = 0;
 
-      if (this.sortBy === 'dueDate') {
+      // Treat empty string as 'dueDate' (default sort)
+      const actualSortBy = this.sortBy || 'dueDate';
+
+      if (actualSortBy === 'dueDate') {
         // Primary sort: Due date
         const aDate = a.date;
         const bDate = b.date;

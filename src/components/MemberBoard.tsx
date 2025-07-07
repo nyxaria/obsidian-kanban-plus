@@ -142,8 +142,8 @@ interface MemberBoardProps {
   onMemberChange: (member: string) => void;
   onScanRootChange: (path: string) => void;
   onRefresh: () => void;
-  onSortChange: (sortBy: 'dueDate' | 'priority', sortOrder: 'asc' | 'desc') => void;
-  sortBy: 'dueDate' | 'priority';
+  onSortChange: (sortBy: 'dueDate' | 'priority' | '', sortOrder: 'asc' | 'desc') => void;
+  sortBy: 'dueDate' | 'priority' | '';
   sortOrder: 'asc' | 'desc';
   updateMemberAssignment: (cardId: string, member: string, isAssigning: boolean) => Promise<void>;
   reactState: any;
@@ -379,7 +379,7 @@ export function MemberBoard(props: MemberBoardProps) {
   // Calculate stats width based on member view lane width
   const statsWidth = `calc(3 * ${memberViewLaneWidth}px + 2 * 10px)`;
 
-  // Show "Sort by..." only when no explicit sort has been set yet, otherwise show the actual sort
+  // Show "Sort by..." when sortBy is empty string, otherwise show the actual sort value
   const sortDisplayValue = sortBy;
 
   return (
@@ -434,10 +434,12 @@ export function MemberBoard(props: MemberBoardProps) {
               value={sortDisplayValue}
               onChange={(e) => {
                 const selectedValue = (e.target as HTMLSelectElement).value;
-                // If "Sort by..." is selected (empty string), default to 'dueDate'
-                const sortType =
-                  selectedValue === '' ? 'dueDate' : (selectedValue as 'dueDate' | 'priority');
-                onSortChange(sortType, sortOrder);
+                // Pass the selected value directly, including empty string for "Sort by..."
+                if (selectedValue === '') {
+                  onSortChange('', sortOrder);
+                } else {
+                  onSortChange(selectedValue as 'dueDate' | 'priority', sortOrder);
+                }
               }}
               className={c('sort-select-dropdown')}
             >
