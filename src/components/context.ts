@@ -11,6 +11,7 @@ export interface KanbanContextProps {
   stateManager: StateManager;
   boardModifiers: BoardModifiers;
   view: KanbanView;
+  onItemStartEdit?: () => void;
 }
 
 export const KanbanContext = createContext<KanbanContextProps>(null);

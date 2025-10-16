@@ -68,11 +68,13 @@ const ItemInner = memo(function ItemInner({
   targetHighlight,
   cancelEditCounter,
 }: ItemInnerProps) {
-  const { stateManager, boardModifiers, filePath, view } = useContext(KanbanContext);
+  const { stateManager, boardModifiers, filePath, view, onItemStartEdit } =
+    useContext(KanbanContext);
   const [editState, setEditState] = useState<EditState>(EditingProcessState.Cancel);
   const [isHovered, setIsHovered] = useState(false);
   const itemInnerRef = useRef<HTMLDivElement>(null);
   const prevCancelEditCounterRef = useRef<number>(cancelEditCounter);
+  const isInitiatingEditRef = useRef<boolean>(false);
 
   const dndManager = useContext(DndManagerContext);
   const path = useNestedEntityPath();
@@ -94,14 +96,22 @@ const ItemInner = memo(function ItemInner({
 
   useEffect(() => {
     if (item.data.forceEditMode) {
+      isInitiatingEditRef.current = true;
       setEditState({ x: 0, y: 0 });
+      onItemStartEdit?.();
     }
-  }, [item.data.forceEditMode]);
+  }, [item.data.forceEditMode, onItemStartEdit]);
 
   useEffect(() => {
     const currentEditStateAtEffectStart = editState;
     if (prevCancelEditCounterRef.current !== cancelEditCounter) {
-      if (isEditingActive(currentEditStateAtEffectStart)) {
+      // Skip cancellation if this card is the one initiating the edit
+      if (isInitiatingEditRef.current) {
+        debugLog(
+          `[ItemInner item ${item.id}] cancelEditCounter changed, but this card is initiating edit. Skipping cancellation.`
+        );
+        isInitiatingEditRef.current = false;
+      } else if (isEditingActive(currentEditStateAtEffectStart)) {
         debugLog(
           `[ItemInner item ${item.id}] cancelEditCounter changed to ${cancelEditCounter}. Was ${prevCancelEditCounterRef.current}. Condition isEditingActive(${JSON.stringify(currentEditStateAtEffectStart)}) is TRUE. Setting editState from`,
           currentEditStateAtEffectStart,
@@ -167,6 +177,8 @@ const ItemInner = memo(function ItemInner({
     setEditState: setEditState,
     stateManager,
     path,
+    onItemStartEdit,
+    isInitiatingEditRef,
   });
 
   const onContextMenu: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
@@ -192,10 +204,12 @@ const ItemInner = memo(function ItemInner({
       });
       if (isStatic || !stateManager.getSetting('editable')) return;
       if (isEditingActive(editState)) return;
+      isInitiatingEditRef.current = true;
       setEditState({ x: e.clientX, y: e.clientY });
+      onItemStartEdit?.();
       e.stopPropagation();
     },
-    [setEditState, isStatic, stateManager, editState]
+    [setEditState, isStatic, stateManager, editState, onItemStartEdit]
   );
 
   const ignoreAttr = useMemo(() => {

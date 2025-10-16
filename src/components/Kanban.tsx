@@ -189,14 +189,19 @@ export const Kanban = ({
     };
   }, [emitter, showLaneForm]);
 
+  const onItemStartEdit = useCallback(() => {
+    setCancelEditCounter((c) => c + 1);
+  }, []);
+
   const kanbanContext = useMemo(() => {
     return {
       view,
       stateManager,
       boardModifiers,
       filePath,
+      onItemStartEdit,
     };
-  }, [view, stateManager, boardModifiers, filePath]);
+  }, [view, stateManager, boardModifiers, filePath, onItemStartEdit]);
 
   const html5DragHandlers = createHTMLDndHandlers(stateManager);
 

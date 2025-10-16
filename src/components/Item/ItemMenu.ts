@@ -1,6 +1,6 @@
 import update from 'immutability-helper';
 import { Menu, MenuItem, Platform, TFile, TFolder } from 'obsidian';
-import { Dispatch, StateUpdater, useCallback, useEffect, useState } from 'preact/hooks';
+import { Dispatch, MutableRef, StateUpdater, useCallback, useEffect, useState } from 'preact/hooks';
 import { StateManager } from 'src/StateManager';
 import { Path } from 'src/dnd/types';
 import { moveEntity } from 'src/dnd/util/data';
@@ -424,6 +424,8 @@ interface UseItemMenuParams {
   path: Path;
   boardModifiers: BoardModifiers;
   stateManager: StateManager;
+  onItemStartEdit?: () => void;
+  isInitiatingEditRef?: MutableRef<boolean>;
 }
 
 export function useItemMenu({
@@ -432,6 +434,8 @@ export function useItemMenu({
   path,
   boardModifiers,
   stateManager,
+  onItemStartEdit,
+  isInitiatingEditRef,
 }: UseItemMenuParams) {
   const [kanbanBoardTags, setKanbanBoardTags] = useState<string[]>([]);
   const [isLoadingTags, setIsLoadingTags] = useState<boolean>(true);
@@ -647,7 +651,13 @@ export function useItemMenu({
         menuItem
           .setIcon('lucide-edit')
           .setTitle(t('Edit card'))
-          .onClick(() => setEditState(coordinates));
+          .onClick(() => {
+            if (isInitiatingEditRef) {
+              isInitiatingEditRef.current = true;
+            }
+            setEditState(coordinates);
+            onItemStartEdit?.();
+          });
       });
 
       menu
@@ -799,6 +809,16 @@ export function useItemMenu({
 
       menu.showAtMouseEvent(e);
     },
-    [setEditState, item, path, boardModifiers, stateManager, isLoadingTags, kanbanBoardTags]
+    [
+      setEditState,
+      item,
+      path,
+      boardModifiers,
+      stateManager,
+      isLoadingTags,
+      kanbanBoardTags,
+      onItemStartEdit,
+      isInitiatingEditRef,
+    ]
   );
 }
