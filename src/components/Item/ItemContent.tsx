@@ -642,7 +642,7 @@ const ItemContentComponent = function ItemContent({
         cleanTitle = cleanTitle.substring(0, range.start) + ' ' + cleanTitle.substring(range.end);
       }
 
-      cleanTitle = cleanTitle.replace(/\s{2,}/g, ' ').trim();
+      cleanTitle = cleanTitle.replace(/[ \t]{2,}/g, ' ').trim();
       setTitleForEditor(cleanTitle);
       titleRef.current = cleanTitle;
     }
