@@ -1,4 +1,3 @@
-import { debugLog } from '../../helpers/debugLogger';
 import animateScrollTo from 'animated-scroll-to';
 import classcat from 'classcat';
 import update from 'immutability-helper';
@@ -16,6 +15,7 @@ import { useDragHandle } from 'src/dnd/managers/DragManager';
 import { frontmatterKey } from 'src/parsers/common';
 import { getTaskStatusDone } from 'src/parsers/helpers/inlineMetadata';
 
+import { debugLog } from '../../helpers/debugLogger';
 import { Items } from '../Item/Item';
 import { ItemForm } from '../Item/ItemForm';
 import { KanbanContext, SearchContext, SortContext } from '../context';
@@ -251,12 +251,19 @@ export const DraggableLane = memo(DraggableLaneRaw);
 
 export interface LanesProps {
   lanes: Lane[];
+  hideDoneLane?: boolean;
   collapseDir: 'horizontal' | 'vertical';
   targetHighlight?: any;
   cancelEditCounter: number;
 }
 
-function LanesRaw({ lanes, collapseDir, targetHighlight, cancelEditCounter }: LanesProps) {
+function LanesRaw({
+  lanes,
+  hideDoneLane,
+  collapseDir,
+  targetHighlight,
+  cancelEditCounter,
+}: LanesProps) {
   const search = useContext(SearchContext);
   const { view } = useContext(KanbanContext);
   const boardView = view.useViewState(frontmatterKey) || 'board';
@@ -265,16 +272,21 @@ function LanesRaw({ lanes, collapseDir, targetHighlight, cancelEditCounter }: La
   return (
     <>
       {lanes.map((lane, i) => {
+        // Hide Done lane with CSS if hideDoneLane is enabled (keeps DND indices correct)
+        const isDoneLane = lane.data.title?.toLowerCase() === 'done';
+        const shouldHide = hideDoneLane && isDoneLane;
+
         return (
-          <DraggableLane
-            collapseDir={collapseDir}
-            isCollapsed={(search?.query && !search.lanes.has(lane)) || !!collapseState[i]}
-            key={boardView + lane.id}
-            lane={lane}
-            laneIndex={i}
-            targetHighlight={targetHighlight}
-            cancelEditCounter={cancelEditCounter}
-          />
+          <div key={boardView + lane.id} style={shouldHide ? { display: 'none' } : undefined}>
+            <DraggableLane
+              collapseDir={collapseDir}
+              isCollapsed={(search?.query && !search.lanes.has(lane)) || !!collapseState[i]}
+              lane={lane}
+              laneIndex={i}
+              targetHighlight={targetHighlight}
+              cancelEditCounter={cancelEditCounter}
+            />
+          </div>
         );
       })}
     </>

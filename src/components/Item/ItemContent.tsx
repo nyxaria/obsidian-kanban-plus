@@ -383,7 +383,8 @@ function getCleanTitleForDisplay(titleRaw: string, stateManager: StateManager): 
 
   if (moveTags) {
     // If move-tags is enabled, remove all tags (they go to tag section)
-    const tagRegex = /(?:^|\s)(#[\w-]+(?:\/[\w-]+)*)(?=\s|$)/gi;
+    // Updated to also remove any invalid trailing characters
+    const tagRegex = /(?:^|\s)(#[a-zA-Z0-9_/-]+)([^\s]*)/gi;
     cleanTitle = cleanTitle.replace(tagRegex, ' ');
   } else if (hideLaneTagDisplay || hideBoardTagDisplay) {
     // If move-tags is disabled but hide settings are enabled, only remove board/lane tags
@@ -581,12 +582,13 @@ const ItemContentComponent = function ItemContent({
       }
 
       for (const memberSyntax of memberStringsForRemoval) {
-        const memberRegex = new RegExp(escapeRegExpStr(memberSyntax), 'gi');
+        const memberRegex = new RegExp(`(?:^|\\s)${escapeRegExpStr(memberSyntax)}(?=\\s|$)`, 'gi');
         cleanTitle = cleanTitle.replace(memberRegex, ' ');
       }
 
       for (const tagSyntax of tagStringsForRemoval) {
-        const tagRegex = new RegExp(escapeRegExpStr(tagSyntax), 'gi');
+        // Also match and remove any invalid trailing characters (e.g., #hello& -> remove entire thing)
+        const tagRegex = new RegExp(`(?:^|\\s)${escapeRegExpStr(tagSyntax)}([^\\s]*)`, 'gi');
         cleanTitle = cleanTitle.replace(tagRegex, ' ');
       }
 
@@ -640,7 +642,7 @@ const ItemContentComponent = function ItemContent({
         cleanTitle = cleanTitle.substring(0, range.start) + ' ' + cleanTitle.substring(range.end);
       }
 
-      cleanTitle = cleanTitle.replace(/\\s{2,}/g, ' ').trim();
+      cleanTitle = cleanTitle.replace(/\s{2,}/g, ' ').trim();
       setTitleForEditor(cleanTitle);
       titleRef.current = cleanTitle;
     }
@@ -733,8 +735,66 @@ const ItemContentComponent = function ItemContent({
         // Clean up multiple spaces but preserve newlines
         finalTitle = finalTitle.replace(/[ \t]{2,}/g, ' ').trim();
 
-        if (finalTitle !== safeTitleRaw || !item.data.blockId) {
-          boardModifiers.updateItem(path, stateManager.updateItemContent(item, finalTitle));
+        // Deduplicate tags in finalTitle before saving
+        const tagRegex = /(?:^|\s)(#[a-zA-Z0-9_/-]+)([^\s]*)/g;
+
+        // Find all tag occurrences
+        let tagMatch;
+        const tagMatches: Array<{
+          fullMatch: string;
+          validTag: string;
+          index: number;
+          invalidSuffix: string;
+        }> = [];
+        while ((tagMatch = tagRegex.exec(finalTitle)) !== null) {
+          tagMatches.push({
+            fullMatch: tagMatch[0],
+            validTag: tagMatch[1],
+            index: tagMatch.index,
+            invalidSuffix: tagMatch[3] || '',
+          });
+        }
+
+        // Build a set of tags we want to keep (first occurrence of each)
+        const tagPositionsToKeep = new Set<number>();
+        const seenTagsLower = new Set<string>();
+
+        for (let i = 0; i < tagMatches.length; i++) {
+          const tagLower = tagMatches[i].validTag.toLowerCase();
+          if (!seenTagsLower.has(tagLower)) {
+            seenTagsLower.add(tagLower);
+            tagPositionsToKeep.add(i);
+          }
+        }
+
+        // Process tags in reverse order to maintain string indices
+        let normalizedTitle = finalTitle;
+        for (let i = tagMatches.length - 1; i >= 0; i--) {
+          const tm = tagMatches[i];
+          const shouldKeep = tagPositionsToKeep.has(i);
+
+          if (!shouldKeep) {
+            // This is a duplicate - remove it entirely
+            const leadingSpace = tm.fullMatch.match(/^\s+/)?.[0] || '';
+            normalizedTitle =
+              normalizedTitle.substring(0, tm.index) +
+              leadingSpace +
+              normalizedTitle.substring(tm.index + tm.fullMatch.length);
+          } else if (tm.invalidSuffix) {
+            // Keep this tag but strip invalid characters
+            const leadingSpace = tm.fullMatch.match(/^\s+/)?.[0] || '';
+            normalizedTitle =
+              normalizedTitle.substring(0, tm.index) +
+              leadingSpace +
+              tm.validTag +
+              normalizedTitle.substring(tm.index + tm.fullMatch.length);
+          }
+        }
+
+        normalizedTitle = normalizedTitle.replace(/[ \t]{2,}/g, ' ').trim();
+
+        if (normalizedTitle !== safeTitleRaw || !item.data.blockId) {
+          boardModifiers.updateItem(path, stateManager.updateItemContent(item, normalizedTitle));
         }
       }
       // Always transition out of edit mode if state was 'complete'

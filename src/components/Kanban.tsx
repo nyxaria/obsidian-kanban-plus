@@ -1,4 +1,3 @@
-import { debugLog } from '../helpers/debugLogger';
 import animateScrollTo from 'animated-scroll-to';
 import classcat from 'classcat';
 import EventEmitter from 'eventemitter3';
@@ -19,6 +18,7 @@ import { useDebounce } from 'use-debounce';
 
 import { DndScope } from '../dnd/components/Scope';
 import { getBoardModifiers } from '../helpers/boardModifiers';
+import { debugLog } from '../helpers/debugLogger';
 import KanbanPlugin from '../main';
 import { frontmatterKey } from '../parsers/common';
 import { Icon } from './Icon/Icon';
@@ -232,13 +232,8 @@ export const Kanban = ({
     setIsSearching
   );
 
-  // ADDED: Logic to filter out "Done" lane if setting is enabled
+  // Check if Done lane should be hidden (used in Lanes component for conditional rendering)
   const hideDoneLane = stateManager.getSetting('hideDoneLane');
-  let filteredLanes = boardData.children;
-  if (hideDoneLane) {
-    filteredLanes = boardData.children.filter((lane) => lane.data.title?.toLowerCase() !== 'done');
-  }
-  // END ADDED
 
   useEffect(() => {
     debugLog(
@@ -321,7 +316,8 @@ export const Kanban = ({
                 <div>
                   <Sortable axis={axis}>
                     <Lanes
-                      lanes={filteredLanes}
+                      lanes={boardData.children}
+                      hideDoneLane={hideDoneLane}
                       collapseDir={axis}
                       targetHighlight={reactState?.targetHighlight ?? null}
                       cancelEditCounter={cancelEditCounter}

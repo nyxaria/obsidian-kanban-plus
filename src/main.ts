@@ -823,7 +823,30 @@ export default class KanbanPlugin extends Plugin {
     }
 
     if (view.isPrimary) {
-      this.getStateManager(view.file).softRefresh();
+      const stateManager = this.getStateManager(view.file);
+
+      // Check if auto-add-board-tag is enabled
+      const shouldUpdateBoardTags = stateManager.getSetting('auto-add-board-tag');
+
+      if (shouldUpdateBoardTags) {
+        // Extract the old and new file basenames (without extension)
+        const oldBasename = oldPath.split('/').pop()?.replace(/\.md$/, '') || '';
+        const newBasename = view.file.basename;
+
+        // Only update if the basename actually changed
+        if (oldBasename && newBasename && oldBasename !== newBasename) {
+          const { createTagFromName, updateBoardTags } = require('./helpers/tagUpdater');
+          const oldTag = createTagFromName(oldBasename);
+          const newTag = createTagFromName(newBasename);
+
+          // Update all items in the board
+          stateManager.setState((boardData) => {
+            return updateBoardTags(boardData, oldTag, newTag, stateManager);
+          });
+        }
+      }
+
+      stateManager.softRefresh();
     }
   }
 

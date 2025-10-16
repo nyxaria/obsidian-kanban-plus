@@ -287,7 +287,10 @@ export function extractInlineMetadata(line: string, settings: KanbanSettings) {
   const dateRegEx = new RegExp(dateRegExText, 'gi');
 
   // Tag Regex (static)
-  const tagRegEx = /(?:^|\\s)(#([a-zA-Z0-9_/-]+))\\b/g;
+  // Updated to capture valid tag characters and any trailing invalid characters
+  // Valid: a-zA-Z0-9_/- (Obsidian tag format)
+  // This will match the valid part and continue to the next space or end
+  const tagRegEx = /(?:^|\s)(#([a-zA-Z0-9_/-]+))([^\s]*)/g;
 
   // --- Extraction order matters: Dates, Times, Priority, Tags, Members, then general inline fields ---
 
@@ -351,14 +354,57 @@ export function extractInlineMetadata(line: string, settings: KanbanSettings) {
   }
 
   // 3. Extract Tags
-  const tagMatches = Array.from(newString.matchAll(tagRegEx));
+  // First pass: normalize tags with invalid characters in the source string
+  let normalizedString = newString;
+  const normalizeMatches = Array.from(newString.matchAll(tagRegEx));
+  normalizeMatches.forEach((match) => {
+    const validTag = match[1];
+    const invalidSuffix = match[3] || '';
+
+    if (invalidSuffix) {
+      // Replace the full match (e.g., " #hello&") with just the valid tag (e.g., " #hello")
+      const fullMatch = match[0];
+      const leadingSpace = fullMatch.match(/^\s+/)?.[0] || '';
+      normalizedString = normalizedString.replace(fullMatch, leadingSpace + validTag);
+      debugLog(
+        `[extractInlineMetadata] Normalizing tag: "${validTag}${invalidSuffix}" -> "${validTag}"`
+      );
+    }
+  });
+
+  // Second pass: extract unique tags and remove duplicates from the string
+  const tagMatches = Array.from(normalizedString.matchAll(tagRegEx));
   if (tagMatches.length > 0) {
     metadata.tags = metadata.tags || [];
+    const seenTags = new Set<string>();
+    const tagsToRemove: string[] = []; // Track which tag occurrences to remove
+
     tagMatches.forEach((match) => {
-      metadata.tags?.push(match[1]); // match[1] is the full tag e.g. #tagname
+      const validTag = match[1];
+      const tagLower = validTag.toLowerCase();
+
+      if (!seenTags.has(tagLower)) {
+        // First occurrence - keep it in metadata
+        metadata.tags?.push(validTag);
+        seenTags.add(tagLower);
+      } else {
+        // Duplicate - mark for removal from the string
+        tagsToRemove.push(match[0]);
+        debugLog(`[extractInlineMetadata] Removing duplicate tag: "${validTag}"`);
+      }
     });
-    newString = newString.replace(tagRegEx, ' ').trim();
+
+    // Remove duplicate tags from the string
+    let deduplicatedString = normalizedString;
+    tagsToRemove.forEach((tagMatch) => {
+      deduplicatedString = deduplicatedString.replace(tagMatch, ' ');
+    });
+
+    // Remove all tags from the string for display purposes
+    newString = deduplicatedString.replace(tagRegEx, ' ').trim();
     debugLog(`[extractInlineMetadata] Extracted tags: ${JSON.stringify(metadata.tags)}`);
+  } else {
+    newString = normalizedString;
   }
 
   // 4. Extract Assigned Members

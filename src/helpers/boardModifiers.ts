@@ -16,6 +16,7 @@ import {
 
 import { generateInstanceId } from '../components/helpers';
 import { Board, DataTypes, Item, Lane } from '../components/types';
+import { createTagFromName, updateLaneTags } from './tagUpdater';
 
 export interface BoardModifiers {
   appendItems: (path: Path, items: Item[]) => void;
@@ -125,15 +126,59 @@ export function getBoardModifiers(view: KanbanView, stateManager: StateManager):
     },
 
     updateLane: (path: Path, lane: Lane) => {
-      stateManager.setState((boardData) =>
-        updateParentEntity(boardData, path, {
+      stateManager.setState((boardData) => {
+        // Check if auto-add-lane-tag is enabled
+        const shouldUpdateLaneTags = stateManager.getSetting('auto-add-lane-tag');
+
+        console.log(
+          '[boardModifiers] updateLane called. auto-add-lane-tag setting:',
+          shouldUpdateLaneTags
+        );
+
+        if (shouldUpdateLaneTags && path.length > 0) {
+          const laneIndex = path[path.length - 1];
+          const oldLane = boardData.children[laneIndex];
+
+          // Check if the lane title has changed
+          if (oldLane && oldLane.data.title !== lane.data.title) {
+            const oldTag = createTagFromName(oldLane.data.title);
+            const newTag = createTagFromName(lane.data.title);
+
+            console.log(
+              '[boardModifiers] Lane title changed from:',
+              oldLane.data.title,
+              'to:',
+              lane.data.title
+            );
+            console.log('[boardModifiers] Updating tags from:', oldTag, 'to:', newTag);
+
+            // Update all items in this lane that have the old lane tag
+            const updatedBoard = updateLaneTags(boardData, laneIndex, oldTag, newTag, stateManager);
+
+            // Create the updated lane with the new title AND the updated children
+            const updatedLane = {
+              ...lane,
+              children: updatedBoard.children[laneIndex].children,
+            };
+
+            return updateParentEntity(updatedBoard, path, {
+              children: {
+                [path[path.length - 1]]: {
+                  $set: updatedLane,
+                },
+              },
+            });
+          }
+        }
+
+        return updateParentEntity(boardData, path, {
           children: {
             [path[path.length - 1]]: {
               $set: lane,
             },
           },
-        })
-      );
+        });
+      });
     },
 
     archiveLane: (path: Path) => {

@@ -1,4 +1,3 @@
-import { debugLog } from '../../helpers/debugLogger';
 import classcat from 'classcat';
 import {
   JSX,
@@ -15,6 +14,7 @@ import { DndManagerContext } from 'src/dnd/components/context';
 import { useDragHandle } from 'src/dnd/managers/DragManager';
 import { frontmatterKey } from 'src/parsers/common';
 
+import { debugLog } from '../../helpers/debugLogger';
 import { KanbanContext, SearchContext } from '../context';
 import { c, useGetDateColorFn } from '../helpers';
 import {
@@ -184,12 +184,14 @@ const ItemInner = memo(function ItemInner({
       debugLog('[ItemInner] onDoubleClick triggered', {
         isStatic,
         editable: stateManager.getSetting('editable'),
+        isAlreadyEditing: isEditingActive(editState),
       });
       if (isStatic || !stateManager.getSetting('editable')) return;
+      if (isEditingActive(editState)) return;
       setEditState({ x: e.clientX, y: e.clientY });
       e.stopPropagation();
     },
-    [setEditState, isStatic, stateManager]
+    [setEditState, isStatic, stateManager, editState]
   );
 
   const ignoreAttr = useMemo(() => {

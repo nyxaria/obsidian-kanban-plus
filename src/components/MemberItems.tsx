@@ -187,9 +187,11 @@ const MemberItemInner = memo(function MemberItemInner({
         cardId: memberCard?.id,
         sourceBoardPath: memberCard?.sourceBoardPath,
         blockId: memberCard?.blockId,
+        isAlreadyEditing: isEditingActive(editState),
       });
 
       if (!memberCard) return;
+      if (isEditingActive(editState)) return;
 
       e.stopPropagation();
 
@@ -242,7 +244,7 @@ const MemberItemInner = memo(function MemberItemInner({
         }
       }
     },
-    [memberCard, view]
+    [memberCard, view, editState]
   );
 
   const ignoreAttr = useMemo(() => {
