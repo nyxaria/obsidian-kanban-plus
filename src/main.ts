@@ -2004,11 +2004,25 @@ export default class KanbanPlugin extends Plugin {
         title: string;
         boardName: string;
         boardPath: string;
-        dueDate: string;
+        dueDate?: string; // Make optional to support tasks without due dates
         tags?: string[];
         priority?: 'high' | 'medium' | 'low';
         laneName: string;
         blockId?: string; // Add blockId for direct card linking
+      }>
+    > = {};
+
+    // Separate structure for tasks without due dates
+    const tasksWithoutDueDateByEmail: Record<
+      string,
+      Array<{
+        title: string;
+        boardName: string;
+        boardPath: string;
+        tags?: string[];
+        priority?: 'high' | 'medium' | 'low';
+        laneName: string;
+        blockId?: string;
       }>
     > = {};
 
@@ -2119,6 +2133,33 @@ export default class KanbanPlugin extends Plugin {
                       }
                     }
                   }
+                } else {
+                  // Task has no due date - collect it if it has assigned members and is not checked
+                  if (!cardItemData.checked) {
+                    const assignedMembers = cardItemData.assignedMembers || [];
+                    if (assignedMembers.length > 0) {
+                      debugLog(
+                        `[KanbanPlugin] Task without due date: "${cardItemData.title}" in board "${boardFile.basename}"`
+                      );
+                      for (const memberName of assignedMembers) {
+                        const memberConfig = this.settings.teamMemberColors?.[memberName];
+                        if (memberConfig?.email) {
+                          if (!tasksWithoutDueDateByEmail[memberConfig.email]) {
+                            tasksWithoutDueDateByEmail[memberConfig.email] = [];
+                          }
+                          tasksWithoutDueDateByEmail[memberConfig.email].push({
+                            title: cardItemData.titleRaw || cardItemData.title,
+                            boardName: boardFile.basename,
+                            boardPath: boardFile.path,
+                            tags: cardItemData.metadata?.tags || [],
+                            priority: cardItemData.metadata?.priority,
+                            laneName: lane.data.title,
+                            blockId: cardItemData.blockId,
+                          });
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -2129,8 +2170,12 @@ export default class KanbanPlugin extends Plugin {
       }
     }
 
-    if (Object.keys(tasksByEmail).length > 0) {
+    if (
+      Object.keys(tasksByEmail).length > 0 ||
+      Object.keys(tasksWithoutDueDateByEmail).length > 0
+    ) {
       debugLog('[KanbanPlugin] Tasks due soon found:', tasksByEmail);
+      debugLog('[KanbanPlugin] Tasks without due date found:', tasksWithoutDueDateByEmail);
 
       if (
         this.settings.enableAutomaticEmailSending &&
@@ -2149,14 +2194,37 @@ export default class KanbanPlugin extends Plugin {
           timeframeText = timeframeDays === 1 ? 'day' : `${timeframeDays} days`;
         }
 
-        for (const emailAddress in tasksByEmail) {
-          const userTasks = tasksByEmail[emailAddress];
-          if (userTasks.length > 0) {
+        // Get unique email addresses from both structures
+        const allEmails = new Set([
+          ...Object.keys(tasksByEmail),
+          ...Object.keys(tasksWithoutDueDateByEmail),
+        ]);
+
+        for (const emailAddress of allEmails) {
+          const userTasks = tasksByEmail[emailAddress] || [];
+          if (
+            userTasks.length > 0 ||
+            (tasksWithoutDueDateByEmail[emailAddress] &&
+              tasksWithoutDueDateByEmail[emailAddress].length > 0)
+          ) {
             // Sort tasks for this user
             userTasks.sort((a, b) => moment(a.dueDate).diff(moment(b.dueDate)));
 
-            let emailBodyText = `You have the following tasks due in the next ${timeframeText}:\n\n`;
-            let emailBodyHtml = `<p>You have the following tasks due in the next ${timeframeText}:</p><ul>`;
+            const hasDueDateTasks = userTasks.length > 0;
+            const hasNoDueDateTasks =
+              tasksWithoutDueDateByEmail[emailAddress] &&
+              tasksWithoutDueDateByEmail[emailAddress].length > 0;
+
+            let emailBodyText = '';
+            let emailBodyHtml = '';
+
+            if (hasDueDateTasks) {
+              emailBodyText = `You have the following tasks due in the next ${timeframeText}:\n\n`;
+              emailBodyHtml = `<p>You have the following tasks due in the next ${timeframeText}:</p><ul>`;
+            } else if (hasNoDueDateTasks) {
+              emailBodyText = `You have the following tasks without due dates:\n\n`;
+              emailBodyHtml = `<p>You have the following tasks without due dates:</p>`;
+            }
 
             userTasks.forEach((task) => {
               const dueDateMoment = moment(task.dueDate);
@@ -2211,6 +2279,51 @@ export default class KanbanPlugin extends Plugin {
               emailBodyHtml += `<li>${cardLinkIconHtml}${titleWithObsidianLinksHtml} @ <strong>${boardLinkHtml}:${task.laneName}</strong> ${priorityDisplay}<em>[${dueInText}]</em></li>`;
             });
 
+            // Add tasks without due dates at the bottom
+            const noDueDateTasks = tasksWithoutDueDateByEmail[emailAddress] || [];
+            if (noDueDateTasks.length > 0) {
+              emailBodyText += `\n\n--- Tasks Without Due Date (${noDueDateTasks.length}) ---\n\n`;
+              emailBodyHtml += `</ul><h3>Tasks Without Due Date (${noDueDateTasks.length})</h3><ul>`;
+
+              noDueDateTasks.forEach((task) => {
+                // Clean the title
+                const cleanTitle = this.cleanTitleForEmail(task.title);
+
+                // Create direct card link icons
+                const cardLinkIconText = this.createDirectCardLinkIcon(
+                  task.boardName,
+                  task.boardPath,
+                  task.blockId,
+                  false
+                );
+                const cardLinkIconHtml = this.createDirectCardLinkIcon(
+                  task.boardName,
+                  task.boardPath,
+                  task.blockId,
+                  true
+                );
+
+                // Create board links
+                const boardLinkText = this.createBoardLink(task.boardName, task.boardPath, false);
+                const boardLinkHtml = this.createBoardLink(task.boardName, task.boardPath, true);
+
+                let priorityDisplay = '';
+                if (task.priority) {
+                  priorityDisplay = `[${task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}] `;
+                }
+
+                // Process the clean title for wikilinks
+                const titleWithObsidianLinksText = this.convertWikilinksToObsidianUrls(cleanTitle);
+                const titleWithObsidianLinksHtml = this.convertWikilinksToHtmlLinks(cleanTitle);
+
+                // Text version
+                emailBodyText += `- ${cardLinkIconText}${titleWithObsidianLinksText} @ ${boardLinkText}:${task.laneName} ${priorityDisplay}[No due date]\n\n`;
+
+                // HTML version
+                emailBodyHtml += `<li>${cardLinkIconHtml}${titleWithObsidianLinksHtml} @ <strong>${boardLinkHtml}:${task.laneName}</strong> ${priorityDisplay}<em>[No due date]</em></li>`;
+              });
+            }
+
             emailBodyText += 'Regards,\nYour Kanban Plugin';
             emailBodyHtml += '</ul><p>Regards,<br>Your Kanban Plugin</p>';
 
@@ -2226,8 +2339,10 @@ export default class KanbanPlugin extends Plugin {
               .then((success) => {
                 if (success) {
                   debugLog(`[KanbanPlugin] Email reminder sent successfully to ${emailAddress}`);
+                  const noDueDateCount = (tasksWithoutDueDateByEmail[emailAddress] || []).length;
+                  const totalCount = userTasks.length + noDueDateCount;
                   new Notification('Kanban Plugin', {
-                    body: `${userTasks.length} Kanban task reminders sent to ${emailAddress}.`,
+                    body: `${totalCount} Kanban task reminders sent to ${emailAddress}.`,
                     silent: true,
                   });
                 } else {
@@ -2250,15 +2365,24 @@ export default class KanbanPlugin extends Plugin {
           }
         }
       } else {
+        const totalTasksWithDueDate = Object.values(tasksByEmail).reduce(
+          (sum, tasks) => sum + tasks.length,
+          0
+        );
+        const totalTasksWithoutDueDate = Object.values(tasksWithoutDueDateByEmail).reduce(
+          (sum, tasks) => sum + tasks.length,
+          0
+        );
         new Notification('Kanban Plugin', {
-          body: `You have ${Object.values(tasksByEmail).reduce((sum, tasks) => sum + tasks.length, 0)} Kanban tasks due soon. Open settings to configure automatic sending or view details in modal.`,
+          body: `You have ${totalTasksWithDueDate} Kanban tasks due soon${totalTasksWithoutDueDate > 0 ? ` and ${totalTasksWithoutDueDate} tasks without due date` : ''}. Open settings to configure automatic sending or view details in modal.`,
           silent: true,
         });
         // Display in a modal (basic example if not auto-sending)
         const reminderModal = new ReminderModal(
           this.app,
           tasksByEmail,
-          this.settings.dueDateReminderTimeframeDays ?? 1
+          this.settings.dueDateReminderTimeframeDays ?? 1,
+          tasksWithoutDueDateByEmail
         );
         reminderModal.open();
       }

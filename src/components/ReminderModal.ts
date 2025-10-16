@@ -5,7 +5,7 @@ export interface TaskForEmail {
   title: string;
   boardName: string;
   boardPath: string;
-  dueDate: string;
+  dueDate?: string; // Make optional to support tasks without due dates
   tags?: string[];
   priority?: 'high' | 'medium' | 'low';
   laneName: string;
@@ -21,15 +21,18 @@ export interface TaskForEmail {
 export class ReminderModal extends Modal {
   tasksByEmail: Record<string, Array<TaskForEmail>>;
   reminderTimeframeDays: number;
+  tasksWithoutDueDateByEmail: Record<string, Array<TaskForEmail>>;
 
   constructor(
     app: App,
     tasksByEmail: Record<string, Array<TaskForEmail>>,
-    reminderTimeframeDays: number
+    reminderTimeframeDays: number,
+    tasksWithoutDueDateByEmail: Record<string, Array<TaskForEmail>> = {}
   ) {
     super(app);
     this.tasksByEmail = tasksByEmail;
     this.reminderTimeframeDays = reminderTimeframeDays;
+    this.tasksWithoutDueDateByEmail = tasksWithoutDueDateByEmail;
   }
 
   convertWikilinksToObsidianUrls(text: string): string {
@@ -86,7 +89,10 @@ export class ReminderModal extends Modal {
     contentEl.empty();
     contentEl.createEl('h2', { text: 'Due Soon Kanban Tasks' });
 
-    if (Object.keys(this.tasksByEmail).length === 0) {
+    if (
+      Object.keys(this.tasksByEmail).length === 0 &&
+      Object.keys(this.tasksWithoutDueDateByEmail).length === 0
+    ) {
       contentEl.createEl('p', { text: 'No tasks due soon for members with configured emails.' });
       return;
     }
@@ -94,61 +100,118 @@ export class ReminderModal extends Modal {
     const timeframeText =
       this.reminderTimeframeDays === 1 ? 'day' : `${this.reminderTimeframeDays} days`;
 
-    for (const email in this.tasksByEmail) {
-      let tasks = this.tasksByEmail[email];
-      if (tasks.length > 0) {
+    // Get unique email addresses from both structures
+    const allEmails = new Set([
+      ...Object.keys(this.tasksByEmail),
+      ...Object.keys(this.tasksWithoutDueDateByEmail),
+    ]);
+
+    for (const email of allEmails) {
+      let tasks = this.tasksByEmail[email] || [];
+      const noDueDateTasks = this.tasksWithoutDueDateByEmail[email] || [];
+
+      if (tasks.length > 0 || noDueDateTasks.length > 0) {
         // 1. Sort tasks by due date (sooner first)
         tasks.sort((a, b) => moment(a.dueDate).diff(moment(b.dueDate)));
 
         // Reverted to plain text email body
-        let emailBody = `You have the following tasks due in the next ${timeframeText}:\n\n`;
+        let emailBody = '';
 
-        tasks.forEach((task) => {
-          const dueDateMoment = moment(task.dueDate);
-          const today = moment().startOf('day');
-          const daysUntilDue = dueDateMoment.diff(today, 'days');
-          let dueInText = '';
-          if (daysUntilDue < 0) {
-            dueInText = `overdue by ${Math.abs(daysUntilDue)} day(s)`;
-          } else if (daysUntilDue === 0) {
-            dueInText = 'today';
-          } else if (daysUntilDue === 1) {
-            dueInText = '1 day';
+        if (tasks.length > 0) {
+          emailBody = `You have the following tasks due in the next ${timeframeText}:\n\n`;
+
+          tasks.forEach((task) => {
+            const dueDateMoment = moment(task.dueDate);
+            const today = moment().startOf('day');
+            const daysUntilDue = dueDateMoment.diff(today, 'days');
+            let dueInText = '';
+            if (daysUntilDue < 0) {
+              dueInText = `overdue by ${Math.abs(daysUntilDue)} day(s)`;
+            } else if (daysUntilDue === 0) {
+              dueInText = 'today';
+            } else if (daysUntilDue === 1) {
+              dueInText = '1 day';
+            } else {
+              dueInText = `${daysUntilDue} days`;
+            }
+
+            let cleanTitle = task.title
+              .replace(/@\{[^}]+\}/g, '') // Remove @{date}
+              .replace(/!\[[^]]+\]/g, '') // Remove ![priority] (if it was part of the title)
+              .replace(/!\w+/g, '') // Remove !high, !medium, !low (if it was part of the title)
+              .replace(/@@\w+/g, '') // Remove @@member
+              .replace(/#[\w-]+(\/[\w-]+)*\s?/g, '') // Remove #tags and #nested/tags
+              .replace(/\s{2,}/g, ' ') // Replace multiple spaces with single
+              .trim();
+
+            // Convert wikilinks to Obsidian URLs
+            cleanTitle = this.convertWikilinksToObsidianUrls(cleanTitle);
+
+            // Create board link
+            const boardLink = this.createBoardLink(task.boardName, task.boardPath);
+
+            // Capitalize priority (first letter only), no color
+            let priorityDisplay = '';
+            if (task.priority) {
+              priorityDisplay = `[${task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}] `;
+            }
+
+            emailBody += `- ${cleanTitle} @ ${boardLink}:${task.laneName} ${priorityDisplay}[${dueInText}]\n\n`; // Added extra newline for separation
+          });
+        }
+
+        // Add tasks without due dates at the bottom
+        if (noDueDateTasks.length > 0) {
+          if (tasks.length > 0) {
+            emailBody += `\n\n--- Tasks Without Due Date (${noDueDateTasks.length}) ---\n\n`;
           } else {
-            dueInText = `${daysUntilDue} days`;
+            emailBody = `You have the following tasks without due dates:\n\n`;
           }
 
-          let cleanTitle = task.title
-            .replace(/@\{[^}]+\}/g, '') // Remove @{date}
-            .replace(/!\[[^]]+\]/g, '') // Remove ![priority] (if it was part of the title)
-            .replace(/!\w+/g, '') // Remove !high, !medium, !low (if it was part of the title)
-            .replace(/@@\w+/g, '') // Remove @@member
-            .replace(/#[\w-]+(\/[\w-]+)*\s?/g, '') // Remove #tags and #nested/tags
-            .replace(/\s{2,}/g, ' ') // Replace multiple spaces with single
-            .trim();
+          noDueDateTasks.forEach((task) => {
+            let cleanTitle = task.title
+              .replace(/@\{[^}]+\}/g, '') // Remove @{date}
+              .replace(/!\[[^]]+\]/g, '') // Remove ![priority] (if it was part of the title)
+              .replace(/!\w+/g, '') // Remove !high, !medium, !low (if it was part of the title)
+              .replace(/@@\w+/g, '') // Remove @@member
+              .replace(/#[\w-]+(\/[\w-]+)*\s?/g, '') // Remove #tags and #nested/tags
+              .replace(/\s{2,}/g, ' ') // Replace multiple spaces with single
+              .trim();
 
-          // Convert wikilinks to Obsidian URLs
-          cleanTitle = this.convertWikilinksToObsidianUrls(cleanTitle);
+            // Convert wikilinks to Obsidian URLs
+            cleanTitle = this.convertWikilinksToObsidianUrls(cleanTitle);
 
-          // Create board link
-          const boardLink = this.createBoardLink(task.boardName, task.boardPath);
+            // Create board link
+            const boardLink = this.createBoardLink(task.boardName, task.boardPath);
 
-          // Capitalize priority (first letter only), no color
-          let priorityDisplay = '';
-          if (task.priority) {
-            priorityDisplay = `[${task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}] `;
-          }
+            // Capitalize priority (first letter only), no color
+            let priorityDisplay = '';
+            if (task.priority) {
+              priorityDisplay = `[${task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}] `;
+            }
 
-          emailBody += `- ${cleanTitle} @ ${boardLink}:${task.laneName} ${priorityDisplay}[${dueInText}]\n\n`; // Added extra newline for separation
-        });
+            emailBody += `- ${cleanTitle} @ ${boardLink}:${task.laneName} ${priorityDisplay}[No due date]\n\n`; // Added extra newline for separation
+          });
+        }
+
         emailBody += 'Regards,\nYour Kanban Plugin';
 
         const encodedSubject = encodeURIComponent('Kanban Task Reminders - Due Soon');
         const encodedBody = encodeURIComponent(emailBody);
         const mailtoLink = `mailto:${email}?subject=${encodedSubject}&body=${encodedBody}`;
 
+        const totalTaskCount = tasks.length + noDueDateTasks.length;
+        let settingName = `Email to ${email} (${totalTaskCount} task(s)`;
+        if (tasks.length > 0 && noDueDateTasks.length > 0) {
+          settingName += ` - ${tasks.length} due in ${timeframeText}, ${noDueDateTasks.length} without due date)`;
+        } else if (tasks.length > 0) {
+          settingName += ` due in ${timeframeText})`;
+        } else {
+          settingName += ` without due date)`;
+        }
+
         new Setting(contentEl)
-          .setName(`Email to ${email} (${tasks.length} task(s) due in ${timeframeText})`)
+          .setName(settingName)
           .setDesc('Click the button to compose this reminder in your email client.') // Reverted description
           .addButton((button) => {
             button

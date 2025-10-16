@@ -33,7 +33,11 @@ import { useItemMenu } from './ItemMenu';
 import { ItemMenuButton } from './ItemMenuButton';
 import { ItemPriority } from './ItemPriority';
 import { ItemMetadata } from './MetadataTable';
-import { getItemClassModifiers } from './helpers';
+import {
+  constructDatePicker,
+  constructMenuDatePickerOnChange,
+  getItemClassModifiers,
+} from './helpers';
 
 export interface DraggableItemProps {
   item: Item;
@@ -203,6 +207,28 @@ const ItemInner = memo(function ItemInner({
     return {};
   }, [editState]);
 
+  const handleEditDate: JSX.MouseEventHandler<HTMLDivElement> = useCallback(
+    (e) => {
+      const coordinates = { x: e.clientX, y: e.clientY };
+      const hasDate = !!item.data.metadata.date;
+
+      constructDatePicker(
+        e.view || window,
+        stateManager,
+        coordinates,
+        constructMenuDatePickerOnChange({
+          stateManager,
+          boardModifiers,
+          item,
+          hasDate,
+          path,
+        }),
+        item.data.metadata.date?.toDate()
+      );
+    },
+    [item, stateManager, boardModifiers, path]
+  );
+
   return (
     <div
       ref={itemInnerRef}
@@ -292,8 +318,8 @@ const ItemInner = memo(function ItemInner({
             <DateAndTime
               item={item}
               stateManager={stateManager}
-              filePath={filePath}
               getDateColor={getDateColor}
+              onEditDate={handleEditDate}
               style={{
                 flexGrow: 0,
                 flexShrink: 0,
